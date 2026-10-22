@@ -1,0 +1,8 @@
+{"id": "zoomloc1", "status": "confirmed", "eventType": "default", "summary": "Monthly touchpoint",
+ "start": {"dateTime": "2026-10-06T11:35:00-05:00", "timeZone": "America/Chicago"},
+ "end": {"dateTime": "2026-10-06T12:00:00-05:00", "timeZone": "America/Chicago"},
+ "hangoutLink": "https://meet.google.com/aaa-bbbb-ccc",
+ "conferenceData": {"conferenceSolution": {"key": {"type": "hangoutsMeet"}},
+   "entryPoints": [{"entryPointType": "video", "uri": "https://meet.google.com/aaa-bbbb-ccc"}]},
+ "location": "https://example.zoom.us/j/93600000000?pwd=xyz.1&jst=2",
+ "description": "Monthly touchpoint\n\nJoin Zoom Meeting:\nhttps://example.zoom.us/j/93600000000?pwd=xyz.1&jst=2"}

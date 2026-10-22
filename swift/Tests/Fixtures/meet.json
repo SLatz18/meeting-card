@@ -1,0 +1,11 @@
+{"id": "meet1", "status": "confirmed", "eventType": "default", "summary": "test",
+ "start": {"dateTime": "2026-10-06T09:25:00-05:00", "timeZone": "America/Los_Angeles"},
+ "end": {"dateTime": "2026-10-06T09:55:00-05:00", "timeZone": "America/Los_Angeles"},
+ "hangoutLink": "https://meet.google.com/abc-defg-hij",
+ "conferenceData": {"entryPoints": [
+   {"entryPointType": "video", "uri": "https://meet.google.com/abc-defg-hij", "label": "meet.google.com/abc-defg-hij"},
+   {"entryPointType": "phone", "uri": "tel:+1-555-0100"}],
+   "conferenceSolution": {"key": {"type": "hangoutsMeet"}, "name": "Google Meet"}},
+ "attendees": [
+   {"email": "organizer@example.com", "organizer": true, "responseStatus": "accepted"},
+   {"email": "me@example.com", "self": true, "responseStatus": "tentative"}]}

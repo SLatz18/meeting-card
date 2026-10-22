@@ -1,0 +1,5 @@
+{"id": "dec1", "status": "confirmed", "eventType": "default", "summary": "Declined sync",
+ "start": {"dateTime": "2026-10-06T12:00:00-05:00", "timeZone": "America/Los_Angeles"},
+ "end": {"dateTime": "2026-10-06T12:30:00-05:00", "timeZone": "America/Los_Angeles"},
+ "hangoutLink": "https://meet.google.com/xyz-abcd-efg",
+ "attendees": [{"email": "me@example.com", "self": true, "responseStatus": "declined"}]}

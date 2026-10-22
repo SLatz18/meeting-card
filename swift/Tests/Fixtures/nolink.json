@@ -1,0 +1,5 @@
+{"id": "nolink1", "status": "confirmed", "eventType": "default", "summary": "Budget sync",
+ "start": {"dateTime": "2026-12-31T16:00:00-06:00"}, "end": {"dateTime": "2026-12-31T16:30:00-06:00"},
+ "organizer": {"email": "someone@example.com"},
+ "htmlLink": "https://www.google.com/calendar/event?eid=bm9saW5rMQ",
+ "attendees": [{"email": "me@example.com", "self": true, "responseStatus": "accepted"}]}

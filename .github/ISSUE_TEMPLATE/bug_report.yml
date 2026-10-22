@@ -1,0 +1,45 @@
+name: Bug report
+description: Something about the card is wrong or broken
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do **not** paste real calendar data (meeting titles, attendee names or emails, real meeting links). Describe the shape of the invite instead, or attach a scrubbed fixture JSON.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Ideally with a fixture, e.g. `./scripts/show-fixture.sh <fixture> light`.
+    validations:
+      required: true
+  - type: textarea
+    id: invite
+    attributes:
+      label: Invite shape (scrubbed)
+      description: Where the video link(s) are (location, description, Meet link, Zoom add-on), how many, organizer is you or someone else.
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: Relevant lines from `~/Library/Logs/MeetingCardSwift.log`. It holds no titles or attendees, but `link=` and `url=` fields contain real meeting links (Zoom links can carry a passcode). Replace them with `<redacted>` before posting.
+      render: text
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 26.1"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MeetingCard commit
+      placeholder: "git rev-parse --short HEAD"

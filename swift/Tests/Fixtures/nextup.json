@@ -1,0 +1,5 @@
+{"id": "next1", "status": "confirmed", "eventType": "default", "summary": "Team Standup",
+ "start": {"dateTime": "2026-10-06T10:05:00-05:00"},
+ "end": {"dateTime": "2026-10-06T10:35:00-05:00"},
+ "hangoutLink": "https://meet.google.com/xyz-abcd-efg",
+ "attendees": [{"email": "me@example.com", "self": true, "responseStatus": "accepted"}]}
