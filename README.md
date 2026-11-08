@@ -63,6 +63,22 @@ Ad-hoc is fine for trying it out. A stable self-signed identity is nicer for dai
 - Stop launching at login: System Settings > General > Login Items, switch MeetingCardSwift off. The app never re-enables itself.
 - Log: `~/Library/Logs/MeetingCardSwift.log`. It records event ids, start times, counts and skip reasons, never titles, descriptions or attendees. It **does** record the meeting link a card offers and the link opened on Join, which can include a Zoom passcode, so redact links before sharing log lines.
 
+## Status light (optional)
+
+If a SidePulse light is plugged in and its `sidepulse` CLI is installed, the light pulses
+magenta while at least one card is on screen, then goes back to what it showed before. Nothing to set up: the app
+looks for the CLI in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, and for a volume under `/Volumes`
+whose root has `LEDS.LED`. With no CLI or no device it does nothing.
+
+While a card is up it switches the SidePulse display mode to `custom` (so the background service leaves the light
+alone) and switches back to the previous mode when the last card closes. If you already run the light in `custom`
+mode, or have a per-device setting for it, the app leaves it alone. If the app is killed mid-card, the next launch
+restores the previous mode.
+
+- Turn it off: `defaults write com.slatz.meetingcard.swift StatusLight -bool NO`
+- Custom program (max 512 bytes): `defaults write com.slatz.meetingcard.swift StatusLightProgram "<program>"`
+  (default `off` / `#FF00FF 1.6s pulse` / `repeat`, one instruction per line)
+
 ## Try it without a calendar
 
 Fixture mode renders one card from a JSON file and never calls gws or polls:

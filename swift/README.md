@@ -25,6 +25,8 @@ Seams: `--fixture <json>`, `--no-poll`, `--no-recheck`, `--snapshot <png>` (CALa
 `MEETING_CARD_BORDER_SWAP=<fixture path>` (fixture: `refresh` the live card with that event after
 `MEETING_CARD_BORDER_SWAP_DELAY` s, default 3; logs `border demo: <provider|none>` + `border layers=<n>` per apply),
 `MEETING_CARD_SELFTEST=join|ignore` (+ `MEETING_CARD_SELFTEST_DELAY`), `MEETING_CARD_DRY_JOIN=1`.
+Status light: `MEETING_CARD_STATUS_LIGHT=1` lets a `--fixture` run drive the light (off in fixture runs otherwise),
+`MEETING_CARD_SIDEPULSE=<absolute path>` overrides where the sidepulse CLI is looked for.
 
 Snapshots (`docs/`): `card-{meet,zoom,multilink,countdown,nolink,nextup}-{light,dark}.png`, made with
 `scripts/show-fixture.sh <fixture> <light|dark> 2 --snapshot docs/...` (countdown/nolink with `SHIFT=90`, others `SHIFT=none`).
@@ -49,6 +51,15 @@ Launch at login (v2.5): on every launch the installed app (`~/Applications/Meeti
 approval, or switched off by the user) logs `login item: requiresApproval (skipped: needs approval in Login Items)`
 and is never re-registered. To turn it off until the #7 settings window exists: System Settings > General >
 Login Items, switch MeetingCardSwift off (the app never unregisters or re-enables itself).
+
+Status light (`Core/StatusLight.swift`): Coordinator calls `onCardCount(cards.count)` at the end of `showCard` and
+`closeCard`; StatusLight edge-detects 0->1 (On) and 1->0 (Off) on the main thread and runs every decision, file read,
+marker write and CLI call on one serial queue. On: read the prior `led_display`, write `status-light.json` (state dir)
+FIRST, `sidepulse battery configure --display custom`, `sidepulse write --device <root> -- <program>`, one re-check
+2s later. Off: `configure --display <prior>`, delete the marker. Launch with a leftover marker runs Off; quit runs Off
+bounded to 3s. Only those two argv shapes can be built (`StatusLight.checked`). Each call has a 5s timeout. Log lines:
+`status light on (prior=<d>)`, `status light off`, `status light skipped: <reason>`, `status light: disabled (<reason>)`
+(once per launch), `status light: sidepulse <cmd> rc=<n|timeout|launch>`.
 
 ## Known gaps
 
