@@ -76,7 +76,8 @@ final class StatusLightTests: XCTestCase {
     /// C1: 1 -> 0 -> 1 queued before any job runs; the second On must read the prior after Off ran.
     func testFastCloseRefireReadsPriorAfterOff() {
         let r = StatusLightRig(); r.followRunner = true
-        r.light.cardCount(1); r.light.cardCount(0); r.light.cardCount(1)
+        r.counts(1)                                   // On ran: settings now say custom
+        r.light.cardCount(0); r.light.cardCount(1)    // close + refire queued before Off runs
         r.q.drain()
         XCTAssertEqual(r.sp.calls, on + [off("agent")] + on, r.logs.lines.joined(separator: "\n"))
         r.counts(0)
