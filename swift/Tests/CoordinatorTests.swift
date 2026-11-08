@@ -135,3 +135,16 @@ final class CoordinatorTests: XCTestCase {
         XCTAssertEqual(r.gets.count, 2, "no gws calls after the credential-deletion message")
     }
 }
+
+extension CoordinatorTests {
+    /// Status light hook: every show and close reports the new card count.
+    func testCoordinatorReportsCounts() {
+        let a = fx("meet"), r = Rig(now: start(a) - 2 * M)
+        var counts: [Int] = []
+        r.ctl.onCardCount = { counts.append($0) }
+        var b = a; b.id = "other"
+        let c1 = r.ctl.showCard(a), c2 = r.ctl.showCard(b)
+        r.ctl.closeCard(c1); r.ctl.ignore(c2)
+        XCTAssertEqual(counts, [1, 2, 1, 0])
+    }
+}
