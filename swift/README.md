@@ -52,17 +52,27 @@ approval, or switched off by the user) logs `login item: requiresApproval (skipp
 and is never re-registered. To turn it off until the #7 settings window exists: System Settings > General >
 Login Items, switch MeetingCardSwift off (the app never unregisters or re-enables itself).
 
-Status light (`Core/StatusLight.swift`): Coordinator calls `onCardCount(cards.count)` at the end of `showCard` and
-`closeCard`; StatusLight edge-detects 0->1 (On) and 1->0 (Off) on the main thread and runs every decision, file read,
-marker write and CLI call on one serial queue. On: read the prior `led_display`, write `status-light.json` (state dir)
-FIRST, `sidepulse battery configure --display custom`, `sidepulse write --device <root> -- <program>`, one re-check
-2s later. Off: `configure --display <prior>`, delete the marker. Launch with a leftover marker runs Off; quit runs Off
-bounded to 3s. Only those two argv shapes can be built (`StatusLight.checked`). Each call has a 5s timeout. Log lines:
-`status light on (prior=<d>)`, `status light off`, `status light skipped: <reason>`, `status light: disabled (<reason>)`
-(once per launch), `status light: sidepulse <cmd> rc=<n|timeout|launch>`.
+Status light (`Core/StatusLight.swift`): Coordinator calls `onCards(count, leadProvider)` at the end of `showCard`
+and `closeCard` and after a live `.update` refresh; the lead card is the soonest (`cards.min(by: stackOrder)`).
+StatusLight edge-detects on the main thread (0->n On, n->0 Off, lead program changed while on: Retarget = one
+`write`, no configure) and runs every decision, file read, marker write and CLI call on one serial queue. Program:
+`StatusLight.program(provider:)`, a heartbeat in the `Brand` colors (meet/webex 8 positional colors, zoom/teams one
+color, anything else `#FFFFFF`); a valid `StatusLightProgram` override replaces it for every provider. The settings
+file: absent = `agent`; present but not a JSON object (the CLI rewrites it non-atomically) = skip the card.
+On: retry any pending restore first (skip the card if it still fails), read the prior `led_display`, write
+`status-light.json` (state dir) FIRST, `sidepulse battery configure --display custom`, `sidepulse write --device
+<root> -- <program>`, one re-check 2s later against the program last written. The marker is the single source of
+truth for a pending restore: Off, quit (always, bounded to 3s), launch and the next On call `restorePending`, which
+configures the marker's prior only while the settings still say `custom`, retires a stale marker when they do not,
+keeps it when the settings are unreadable, and deletes it only after a successful configure. Only those two argv
+shapes can be built (`StatusLight.checked`). Each call has a 5s timeout. Log lines: `status light on (prior=<d>)`,
+`status light off (prior=<d>)`, `status light: stale marker retired`, `status light skipped: <reason>` (incl.
+`restore pending`, `settings unreadable`), `status light: disabled (<reason>)` (once per launch),
+`status light: sidepulse <cmd> rc=<n|timeout|launch>`.
 
 ## Known gaps
 
+- Status light: quitting while a sidepulse call hangs past the 3s quit budget exits before the restore runs; the marker restores it at the next launch.
 - Tall stacks: cards stack upward with no clamp, so 5+ cards (sooner with Next up lines: each adds 18pt) can run past `visibleFrame.maxY` and off the top of the screen. Not built: #8's "+N more" cap (show the first N cards and a "+N more" stub) is the planned fix; no clamping until then.
 
 ## Known edge cases (parity notes from the Python prototype)

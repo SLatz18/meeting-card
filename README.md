@@ -65,19 +65,22 @@ Ad-hoc is fine for trying it out. A stable self-signed identity is nicer for dai
 
 ## Status light (optional)
 
-If a SidePulse light is plugged in and its `sidepulse` CLI is installed, the light pulses
-magenta while at least one card is on screen, then goes back to what it showed before. Nothing to set up: the app
+If a SidePulse light is plugged in and its `sidepulse` CLI is installed, the light beats a double-pulse heartbeat in
+the card's provider colors while at least one card is on screen, then goes back to what it showed before: Meet in the
+four Google colors, Zoom blue, Teams indigo, Webex cyan and green, white when the card has no single video link. With
+several cards up the light follows the soonest meeting, and changes color when that card closes or its link changes.
+Nothing to set up: the app
 looks for the CLI in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, and for a volume under `/Volumes`
 whose root has `LEDS.LED`. With no CLI or no device it does nothing.
 
 While a card is up it switches the SidePulse display mode to `custom` (so the background service leaves the light
 alone) and switches back to the previous mode when the last card closes. If you already run the light in `custom`
-mode, or have a per-device setting for it, the app leaves it alone. If the app is killed mid-card, the next launch
-restores the previous mode.
+mode, or have a per-device setting for it, the app leaves it alone. If switching back fails, the app retries on quit,
+before the next card and at the next launch (only while the mode is still the `custom` it set).
 
 - Turn it off: `defaults write com.slatz.meetingcard.swift StatusLight -bool NO`
-- Custom program (max 512 bytes): `defaults write com.slatz.meetingcard.swift StatusLightProgram "<program>"`
-  (default `off` / `#FF00FF 1.6s pulse` / `repeat`, one instruction per line)
+- Custom program (max 512 bytes), used for every provider instead of the colors above:
+  `defaults write com.slatz.meetingcard.swift StatusLightProgram "<program>"` (one instruction per line)
 
 ## Try it without a calendar
 
