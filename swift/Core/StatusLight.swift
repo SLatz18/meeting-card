@@ -134,7 +134,9 @@ public final class StatusLight {
                 .flatMap { $0["prior"] as? String }.flatMap(Display.init(rawValue:))
             let restore = (p == nil || p == .custom) ? Display.agent : p!
             guard let exe = cli() else { log("status light: marker found but no sidepulse CLI"); return }
-            run(exe, .configure(restore), "configure", timeout)
+            guard run(exe, .configure(restore), "configure", timeout) else {
+                log("status light: restore failed; marker kept for next launch"); return
+            }
             try? FileManager.default.removeItem(at: markerURL)
             log("status light off (recovered, prior=\(restore.rawValue))")
         }
@@ -188,7 +190,10 @@ public final class StatusLight {
         guard isOn else { return }
         isOn = false; generation += 1
         let t = deadline.map { min(timeout, max(0.1, $0.timeIntervalSinceNow)) } ?? timeout
-        if let exe = cli() { run(exe, .configure(prior), "configure", t) }
+        // Keep the marker unless the restore succeeded, so the next launch retries it.
+        guard let exe = cli(), run(exe, .configure(prior), "configure", t) else {
+            log("status light: restore failed; marker kept for next launch"); return
+        }
         try? FileManager.default.removeItem(at: markerURL)
         log("status light off")
     }

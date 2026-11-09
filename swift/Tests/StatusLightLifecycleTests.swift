@@ -31,6 +31,19 @@ final class StatusLightLifecycleTests: XCTestCase {
             XCTAssertEqual(r.sp.calls, [["battery", "configure", "--display", "agent"]], s)
         }
     }
+    func testFailedRestoreKeepsMarker() {
+        let r = StatusLightRig(); r.counts(1)
+        r.sp.result = .timedOut
+        r.counts(0)
+        XCTAssertNotNil(r.markerText, "Off failed: marker must survive for the next launch")
+        XCTAssertTrue(r.logs.lines.contains("status light: restore failed; marker kept for next launch"))
+    }
+    func testFailedRecoveryKeepsMarker() {
+        let r = StatusLightRig(); writeMarker(r, "{\"prior\":\"battery\"}")
+        r.sp.result = .exited(status: 1, stdout: Data(), stderr: Data())
+        r.light.recoverFromMarker(); r.q.drain()
+        XCTAssertNotNil(r.markerText)
+    }
     func testNoMarkerNoCallsNoLog() {
         let r = StatusLightRig(); r.light.recoverFromMarker(); r.q.drain()
         XCTAssertTrue(r.sp.calls.isEmpty); XCTAssertTrue(r.logs.lines.isEmpty)
