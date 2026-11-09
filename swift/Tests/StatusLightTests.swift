@@ -33,29 +33,31 @@ final class StatusLightRig {
     let logs = LogBox()
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sl-\(UUID().uuidString)")
     var marker: URL { dir.appendingPathComponent("status-light.json") }
+    /// Default: the settings file follows the fake CLI's display. `settings` pins raw bytes; `settingsAbsent` = no file.
     var settings: Data? = nil
-    var followRunner = false
+    var settingsAbsent = false
     var led: String? = nil
     var cli: String? = "/fake/sidepulse"
     var device: String? = "/Volumes/PULSE"
     lazy var light = make()
 
-    func make(enabled: Bool = true, program: String = StatusLight.defaultProgram) -> StatusLight {
+    func make(enabled: Bool = true, override: String? = nil) -> StatusLight {
         StatusLight(enabled: enabled, cli: { [unowned self] in cli }, device: { [unowned self] in device },
                     readSettings: { [unowned self] in
-                        followRunner ? Data("{\"led_display\":\"\(sp.display)\"}".utf8) : settings },
+                        settingsAbsent ? nil : settings ?? Data("{\"led_display\":\"\(sp.display)\"}".utf8) },
                     readLED: { [unowned self] _ in led.map { Data($0.utf8) } },
-                    markerURL: marker, program: program, runner: sp, env: [:],
+                    markerURL: marker, override: override, runner: sp, env: [:],
                     enqueue: { [unowned self] in q.enqueue($0) },
                     after: { [unowned self] _, j in q.delayed.append(j) },
                     log: { [logs] in logs.add($0) })
     }
-    func counts(_ ns: Int...) { ns.forEach { light.cardCount($0) }; q.drain() }
+    func counts(_ ns: Int...) { ns.forEach { light.cards($0, provider: "zoom") }; q.drain() }
     var markerText: String? { try? String(contentsOf: marker, encoding: .utf8) }
 }
 
 final class StatusLightTests: XCTestCase {
-    let on = [["battery", "configure", "--display", "custom"], ["write", "--device", "/Volumes/PULSE", "--", StatusLight.defaultProgram]]
+    static let zoomProg = StatusLight.program(provider: "zoom")
+    let on = [["battery", "configure", "--display", "custom"], ["write", "--device", "/Volumes/PULSE", "--", StatusLightTests.zoomProg]]
     func off(_ d: String) -> [String] { ["battery", "configure", "--display", d] }
 
     // MARK: edges
@@ -75,9 +77,9 @@ final class StatusLightTests: XCTestCase {
 
     /// C1: 1 -> 0 -> 1 queued before any job runs; the second On must read the prior after Off ran.
     func testFastCloseRefireReadsPriorAfterOff() {
-        let r = StatusLightRig(); r.followRunner = true
+        let r = StatusLightRig()
         r.counts(1)                                   // On ran: settings now say custom
-        r.light.cardCount(0); r.light.cardCount(1)    // close + refire queued before Off runs
+        r.light.cards(0, provider: "zoom"); r.light.cards(1, provider: "zoom")    // close + refire queued before Off runs
         r.q.drain()
         XCTAssertEqual(r.sp.calls, on + [off("agent")] + on, r.logs.lines.joined(separator: "\n"))
         r.counts(0)
@@ -92,18 +94,19 @@ final class StatusLightTests: XCTestCase {
     }
     func testPriorDefaultsToAgent() {
         XCTAssertEqual(p(nil), .success(.agent))
-        XCTAssertEqual(p("{nope"), .success(.agent))
+        XCTAssertEqual(p("{nope"), .failure(.unreadable), "F3: present but torn = skip, not agent")
+        XCTAssertEqual(p("[1]"), .failure(.unreadable))
         XCTAssertEqual(p("{}"), .success(.agent))
         XCTAssertEqual(p("{\"led_display\":\"rainbow\"}"), .success(.agent))
     }
     func testPriorBatteryRestoredAsBattery() {
-        let r = StatusLightRig(); r.settings = Data("{\"led_display\":\"battery\"}".utf8)
+        let r = StatusLightRig(); r.sp.display = "battery"
         r.counts(1, 0)
         XCTAssertEqual(r.sp.calls.last, off("battery"))
         XCTAssertTrue(r.logs.lines.contains("status light on (prior=battery)"))
     }
     func testPriorCustomSkipsZeroCalls() {
-        let r = StatusLightRig(); r.settings = Data("{\"led_display\":\"custom\"}".utf8)
+        let r = StatusLightRig(); r.sp.display = "custom"
         r.counts(1, 0)
         XCTAssertTrue(r.sp.calls.isEmpty); XCTAssertNil(r.markerText)
         XCTAssertTrue(r.logs.lines.contains { $0.hasPrefix("status light skipped:") })
@@ -128,7 +131,7 @@ final class StatusLightTests: XCTestCase {
         XCTAssertEqual(Array(r.sp.calls.dropFirst(2)), [off("agent")])
     }
     func testWriteArgvHasDoubleDashForDashProgram() {
-        let r = StatusLightRig(); r.light = r.make(program: "-x")
+        let r = StatusLightRig(); r.light = r.make(override: "-x")
         r.counts(1)
         XCTAssertEqual(r.sp.calls.last, ["write", "--device", "/Volumes/PULSE", "--", "-x"])
     }

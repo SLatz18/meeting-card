@@ -10,10 +10,11 @@ public typealias CommandRunner = GwsRunner
 /// on the injected serial queue (`enqueue`), so a fast 1->0->1 reads the prior AFTER the Off ran.
 public final class StatusLight {
     public enum Display: String { case agent, battery, custom }
-    public enum SkipReason: String, Error { case manual = "display is custom (manual)", perDevice = "per-device override" }
+    public enum SkipReason: String, Error {
+        case manual = "display is custom (manual)", perDevice = "per-device override", unreadable = "settings unreadable"
+    }
     enum Command { case configure(Display); case write(device: String, program: String) }
 
-    public static let defaultProgram = "off\n#FF00FF 1.6s pulse\nrepeat"
     public static let maxProgramBytes = 512
     static let allowedPrefixes: [[String]] = [["battery", "configure", "--display"], ["write", "--device"]]
 
@@ -35,10 +36,40 @@ public final class StatusLight {
         volumes.sorted().first(where: hasLED)
     }
 
-    /// Missing / garbled / missing key / unknown value => agent. custom or a per-device entry => skip.
+    /// The LED colors for a provider, from `Brand` (base colors in light and dark: an LED has no background).
+    /// Multi-color providers use 8 positional colors; one color = all LEDs. Anything else: neutral white.
+    static func colors(provider: String?) -> String {
+        let hs: [UInt32]
+        switch provider {
+        case "meet": hs = [Brand.meetGreen, Brand.meetGreen, Brand.meetYellow, Brand.meetYellow,
+                           Brand.meetBlue, Brand.meetBlue, Brand.meetRed, Brand.meetRed]
+        case "webex": hs = [Brand.webexCyan, Brand.webexCyan, Brand.webexGreen, Brand.webexGreen,
+                            Brand.webexCyan, Brand.webexCyan, Brand.webexGreen, Brand.webexGreen]
+        case "zoom": hs = [Brand.zoom]
+        case "teams": hs = [Brand.teams]
+        default: hs = [0xFFFFFF]   // "calendar" (multi-link / no-link), nil link, unknown provider
+        }
+        return hs.map { String(format: "#%06X", $0) }.joined(separator: " ")
+    }
+
+    /// Heartbeat in the provider's brand colors.
+    public static func program(provider: String?) -> String {
+        let c = colors(provider: provider)
+        return "off\n\(c) 90ms cosine\noff 140ms cosine\n\(c) 90ms cosine\noff 220ms cosine\noff 900ms none\nrepeat"
+    }
+
+    /// Current display from the settings file. nil data = file absent = agent. Present but not a JSON
+    /// object (the CLI rewrites it non-atomically) => unreadable. Missing / unknown led_display => agent.
+    static func display(settingsData: Data?) -> Display? {
+        guard let d = settingsData else { return .agent }
+        guard let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
+        return (o["led_display"] as? String).flatMap(Display.init(rawValue:)) ?? .agent
+    }
+
+    /// Absent / missing key / unknown value => agent. Unreadable, custom or a per-device entry => skip.
     public static func prior(settingsData: Data?, device: String) -> Result<Display, SkipReason> {
-        guard let d = settingsData,
-              let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return .success(.agent) }
+        guard let d = settingsData else { return .success(.agent) }
+        guard let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return .failure(.unreadable) }
         if let devs = o["devices"] as? [[String: Any]] {
             let norm = { (s: String) -> String in s.count > 1 && s.hasSuffix("/") ? String(s.dropLast()) : s }
             let dev = norm(device)
@@ -50,11 +81,12 @@ public final class StatusLight {
         return disp == .custom ? .failure(.manual) : .success(disp)
     }
 
-    public static func program(_ override: String?, log: (String) -> Void) -> String {
-        guard let o = override else { return defaultProgram }
+    /// The `StatusLightProgram` override: nil = none or rejected (the provider program is used).
+    public static func validOverride(_ override: String?, log: (String) -> Void) -> String? {
+        guard let o = override else { return nil }
         if o.isEmpty || o.utf8.count > maxProgramBytes {
-            log("status light: custom program rejected (\(o.utf8.count) bytes); using default")
-            return defaultProgram
+            log("status light: custom program rejected (\(o.utf8.count) bytes); using provider colors")
+            return nil
         }
         return o
     }
@@ -87,7 +119,7 @@ public final class StatusLight {
     let readSettings: () -> Data?
     let readLED: (String) -> Data?
     let markerURL: URL
-    let programText: String
+    let override: String?
     let runner: CommandRunner
     let env: [String: String]
     let timeout: TimeInterval
@@ -97,52 +129,53 @@ public final class StatusLight {
 
     // main-thread state
     var prev = 0
+    var sentProgram: String?
     // queue state
     var isOn = false
     var prior: Display = .agent
     var root: String?
     var generation = 0
+    var programText = ""
     var loggedDisabled = false
 
     public init(enabled: Bool, disabledReason: String = "opted out",
                 cli: @escaping () -> String?, device: @escaping () -> String?,
                 readSettings: @escaping () -> Data?, readLED: @escaping (String) -> Data?,
-                markerURL: URL, program: String, runner: CommandRunner, env: [String: String],
+                markerURL: URL, override: String? = nil, runner: CommandRunner, env: [String: String],
                 timeout: TimeInterval = 5,
                 enqueue: @escaping (@escaping () -> Void) -> Void,
                 after: @escaping (TimeInterval, @escaping () -> Void) -> Void,
                 log: @escaping (String) -> Void) {
         self.enabled = enabled; self.disabledReason = disabledReason
         self.cli = cli; self.device = device; self.readSettings = readSettings; self.readLED = readLED
-        self.markerURL = markerURL; self.programText = program; self.runner = runner; self.env = env
+        self.markerURL = markerURL; self.override = override; self.runner = runner; self.env = env
         self.timeout = timeout; self.enqueue = enqueue; self.after = after; self.log = log
     }
 
-    /// Main thread: edge detection only.
-    public func cardCount(_ n: Int) {
+    func programFor(_ provider: String?) -> String { override ?? Self.program(provider: provider) }
+
+    /// Main thread: edge detection only. `provider` is the lead (soonest) card's provider.
+    public func cards(_ n: Int, provider: String?) {
         let p = prev
         prev = n
-        if p == 0 && n > 0 { enqueue { [self] in on() } }
-        else if p > 0 && n == 0 { enqueue { [self] in off(deadline: nil) } }
+        if p == 0 && n > 0 {
+            let prog = programFor(provider); sentProgram = prog
+            enqueue { [self] in on(prog) }
+        } else if p > 0 && n == 0 {
+            sentProgram = nil
+            enqueue { [self] in off(deadline: nil) }
+        } else if n > 0, programFor(provider) != sentProgram {
+            let prog = programFor(provider); sentProgram = prog
+            enqueue { [self] in retarget(prog) }
+        }
     }
 
     /// Launch: a leftover marker means we died mid-card; restore its prior.
     public func recoverFromMarker() {
-        enqueue { [self] in
-            guard let d = try? Data(contentsOf: markerURL) else { return }
-            let p = ((try? JSONSerialization.jsonObject(with: d)) as? [String: Any])
-                .flatMap { $0["prior"] as? String }.flatMap(Display.init(rawValue:))
-            let restore = (p == nil || p == .custom) ? Display.agent : p!
-            guard let exe = cli() else { log("status light: marker found but no sidepulse CLI"); return }
-            guard run(exe, .configure(restore), "configure", timeout) else {
-                log("status light: restore failed; marker kept for next launch"); return
-            }
-            try? FileManager.default.removeItem(at: markerURL)
-            log("status light off (recovered, prior=\(restore.rawValue))")
-        }
+        enqueue { [self] in _ = restorePending(timeout) }
     }
 
-    /// Quit: run Off (if on) and wait at most `timeout`.
+    /// Quit: retry any pending restore (on or not) and wait at most `timeout`.
     public func shutdown(timeout budget: TimeInterval = 3) {
         let sem = DispatchSemaphore(value: 0)
         let deadline = Date().addingTimeInterval(budget)
@@ -152,8 +185,32 @@ public final class StatusLight {
 
     // MARK: queue-side
 
-    func on() {
+    /// The marker file is the single source of truth for "a restore is pending".
+    /// true = nothing pending afterwards. Restores only while the settings still say custom (our switch).
+    func restorePending(_ t: TimeInterval) -> Bool {
+        guard let d = try? Data(contentsOf: markerURL) else { return true }
+        guard let cur = Self.display(settingsData: readSettings()) else {
+            log("status light: restore pending (settings unreadable); marker kept"); return false
+        }
+        if cur != .custom {
+            try? FileManager.default.removeItem(at: markerURL)
+            log("status light: stale marker retired"); return true
+        }
+        let p = ((try? JSONSerialization.jsonObject(with: d)) as? [String: Any])
+            .flatMap { $0["prior"] as? String }.flatMap(Display.init(rawValue:))
+        let restore = (p == nil || p == .custom) ? Display.agent : p!
+        guard let exe = cli() else { log("status light: restore pending but no sidepulse CLI"); return false }
+        guard run(exe, .configure(restore), "configure", t) else {
+            log("status light: restore failed; marker kept for next launch"); return false
+        }
+        try? FileManager.default.removeItem(at: markerURL)
+        log("status light off (prior=\(restore.rawValue))")
+        return true
+    }
+
+    func on(_ program: String) {
         guard !isOn else { return }
+        guard restorePending(timeout) else { log("status light skipped: restore pending"); return }
         guard enabled else { return logDisabled(disabledReason) }
         guard let exe = cli() else { return logDisabled("no sidepulse CLI") }
         guard let dev = device() else { return logDisabled("no device") }
@@ -169,7 +226,7 @@ public final class StatusLight {
         } catch {
             log("status light skipped: marker write failed"); return
         }
-        isOn = true; prior = p; root = dev; generation += 1
+        isOn = true; prior = p; root = dev; generation += 1; programText = program
         log("status light on (prior=\(p.rawValue))")
         // A failed configure leaves state on so Off still restores the prior.
         guard run(exe, .configure(.custom), "configure", timeout) else { return }
@@ -186,16 +243,19 @@ public final class StatusLight {
         }
     }
 
+    /// Lead card's provider changed while on: ONE write, no configure.
+    func retarget(_ program: String) {
+        guard isOn, let dev = root, let exe = cli() else { return }
+        programText = program
+        run(exe, .write(device: dev, program: program), "write", timeout)
+    }
+
+    /// Off (and quit): the marker carries the prior, so a failed restore stays pending for
+    /// shutdown, the next card and the next launch.
     func off(deadline: Date?) {
-        guard isOn else { return }
-        isOn = false; generation += 1
+        if isOn { isOn = false; generation += 1 }
         let t = deadline.map { min(timeout, max(0.1, $0.timeIntervalSinceNow)) } ?? timeout
-        // Keep the marker unless the restore succeeded, so the next launch retries it.
-        guard let exe = cli(), run(exe, .configure(prior), "configure", t) else {
-            log("status light: restore failed; marker kept for next launch"); return
-        }
-        try? FileManager.default.removeItem(at: markerURL)
-        log("status light off")
+        _ = restorePending(t)
     }
 
     func logDisabled(_ reason: String) {

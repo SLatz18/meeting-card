@@ -141,7 +141,7 @@ extension CoordinatorTests {
     func testCoordinatorReportsCounts() {
         let a = fx("meet"), r = Rig(now: start(a) - 2 * M)
         var counts: [Int] = []
-        r.ctl.onCardCount = { counts.append($0) }
+        r.ctl.onCards = { n, _ in counts.append(n) }
         var b = a; b.id = "other"
         let c1 = r.ctl.showCard(a), c2 = r.ctl.showCard(b)
         r.ctl.closeCard(c1); r.ctl.ignore(c2)

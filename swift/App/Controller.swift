@@ -73,7 +73,7 @@ final class Controller: NSObject, NSApplicationDelegate {
             spawnGet: { [unowned self] id, done in self.spawnGet(id, done) },
             writeState: { [unowned self] c in self.state.write(windowNumber: c.panel.windowNumber, ev: c.ev) },
             probe: { OpenProbeReader.read() })
-        coord.onCardCount = { [unowned self] n in self.light.cardCount(n) }
+        coord.onCards = { [unowned self] n, p in self.light.cards(n, provider: p) }
     }
 
     /// Optional SidePulse light. Fixture runs drive it only with MEETING_CARD_STATUS_LIGHT=1.
@@ -94,7 +94,7 @@ final class Controller: NSObject, NSApplicationDelegate {
             readSettings: { fm.contents(atPath: StatusLight.settingsPath(env: env, home: home)) },
             readLED: { fm.contents(atPath: $0 + "/LEDS.LED") },
             markerURL: paths.stateDir.appendingPathComponent("status-light.json"),
-            program: StatusLight.program(UserDefaults.standard.string(forKey: "StatusLightProgram"), log: log),
+            override: StatusLight.validOverride(UserDefaults.standard.string(forKey: "StatusLightProgram"), log: log),
             runner: ProcessGwsRunner(), env: Gws.buildEnv(),
             enqueue: { queue.async(execute: $0) },
             after: { queue.asyncAfter(deadline: .now() + $0, execute: $1) },

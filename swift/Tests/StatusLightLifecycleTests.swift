@@ -19,14 +19,14 @@ final class StatusLightLifecycleTests: XCTestCase {
         try! Data(s.utf8).write(to: r.marker)
     }
     func testLaunchMarkerRunsOffWithItsPrior() {
-        let r = StatusLightRig(); writeMarker(r, "{\"prior\":\"battery\"}")
+        let r = StatusLightRig(); r.sp.display = "custom"; writeMarker(r, "{\"prior\":\"battery\"}")
         r.light.recoverFromMarker(); r.q.drain()
         XCTAssertEqual(r.sp.calls, [["battery", "configure", "--display", "battery"]])
         XCTAssertNil(r.markerText)
     }
     func testGarbledOrUnknownMarkerRestoresAgent() {
         for s in ["{garbage", "{\"prior\":\"rainbow\"}", "{}"] {
-            let r = StatusLightRig(); writeMarker(r, s)
+            let r = StatusLightRig(); r.sp.display = "custom"; writeMarker(r, s)
             r.light.recoverFromMarker(); r.q.drain()
             XCTAssertEqual(r.sp.calls, [["battery", "configure", "--display", "agent"]], s)
         }
@@ -39,7 +39,7 @@ final class StatusLightLifecycleTests: XCTestCase {
         XCTAssertTrue(r.logs.lines.contains("status light: restore failed; marker kept for next launch"))
     }
     func testFailedRecoveryKeepsMarker() {
-        let r = StatusLightRig(); writeMarker(r, "{\"prior\":\"battery\"}")
+        let r = StatusLightRig(); r.sp.display = "custom"; writeMarker(r, "{\"prior\":\"battery\"}")
         r.sp.result = .exited(status: 1, stdout: Data(), stderr: Data())
         r.light.recoverFromMarker(); r.q.drain()
         XCTAssertNotNil(r.markerText)
@@ -53,7 +53,7 @@ final class StatusLightLifecycleTests: XCTestCase {
 
     func testRecheckRewritesOnlyOnMismatch() {
         let r = StatusLightRig(); r.counts(1)
-        r.led = StatusLight.defaultProgram + "\n"   // C2: trailing newline only = match
+        r.led = StatusLightTests.zoomProg + "\n"   // C2: trailing newline only = match
         r.q.fireDelayed(); r.q.drain()
         XCTAssertEqual(r.sp.calls.count, 2)
         let r2 = StatusLightRig(); r2.counts(1)
@@ -75,10 +75,10 @@ final class StatusLightLifecycleTests: XCTestCase {
     func testProgramLimit() {
         let logs = LogBox()
         let at = String(repeating: "a", count: 512)
-        XCTAssertEqual(StatusLight.program(at, log: logs.add), at)
-        XCTAssertEqual(StatusLight.program(at + "a", log: logs.add), StatusLight.defaultProgram)
-        XCTAssertEqual(StatusLight.program("", log: logs.add), StatusLight.defaultProgram)
-        XCTAssertEqual(StatusLight.program(nil, log: logs.add), StatusLight.defaultProgram)
+        XCTAssertEqual(StatusLight.validOverride(at, log: logs.add), at)
+        XCTAssertNil(StatusLight.validOverride(at + "a", log: logs.add))
+        XCTAssertNil(StatusLight.validOverride("", log: logs.add))
+        XCTAssertNil(StatusLight.validOverride(nil, log: logs.add))
         XCTAssertEqual(logs.lines.count, 2)
     }
 
@@ -90,7 +90,9 @@ final class StatusLightLifecycleTests: XCTestCase {
         XCTAssertEqual(r.sp.calls.count, 1, "configure failed: no write, no retry")
         XCTAssertTrue(r.logs.lines.contains("status light: sidepulse configure rc=3"))
         r.counts(0)
-        XCTAssertEqual(r.sp.calls.last, ["battery", "configure", "--display", "agent"], "Off still restores")
+        XCTAssertEqual(r.sp.calls.count, 1, "F5: configure custom never landed, so Off retires the marker without a call")
+        XCTAssertNil(r.markerText)
+        XCTAssertTrue(r.logs.lines.contains("status light: stale marker retired"))
     }
     func testTimeoutLogged() {
         let r = StatusLightRig(); r.sp.result = .timedOut
@@ -114,11 +116,12 @@ final class StatusLightLifecycleTests: XCTestCase {
         let q = DispatchQueue(label: "t.sl")
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sl-\(UUID().uuidString)")
         let logs = LogBox()
-        let l = StatusLight(enabled: true, cli: { "/fake" }, device: { "/Volumes/P" }, readSettings: { nil },
+        let l = StatusLight(enabled: true, cli: { "/fake" }, device: { "/Volumes/P" },
+                            readSettings: { Data("{\"led_display\":\"\(sp.display)\"}".utf8) },
                             readLED: { _ in nil }, markerURL: dir.appendingPathComponent("m.json"),
-                            program: "p", runner: sp, env: [:], enqueue: { q.async(execute: $0) },
+                            override: "p", runner: sp, env: [:], enqueue: { q.async(execute: $0) },
                             after: { _, _ in }, log: logs.add)
-        l.cardCount(1); q.sync {}
+        l.cards(1, provider: nil); q.sync {}
         sp.block = DispatchSemaphore(value: 0)   // Off hangs
         let t0 = Date()
         l.shutdown(timeout: 0.5)
@@ -131,7 +134,7 @@ final class StatusLightLifecycleTests: XCTestCase {
         let r = StatusLightRig()
         let q = DispatchQueue(label: "t.sl2")
         let l = StatusLight(enabled: false, cli: { nil }, device: { nil }, readSettings: { nil }, readLED: { _ in nil },
-                            markerURL: r.marker, program: "p", runner: r.sp, env: [:], enqueue: { q.async(execute: $0) },
+                            markerURL: r.marker, override: "p", runner: r.sp, env: [:], enqueue: { q.async(execute: $0) },
                             after: { _, _ in }, log: r.logs.add)
         l.shutdown(timeout: 1)
         XCTAssertTrue(r.logs.lines.isEmpty); XCTAssertTrue(r.sp.calls.isEmpty)
