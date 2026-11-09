@@ -16,6 +16,9 @@ public final class StatusLight {
     enum Command { case configure(Display); case write(device: String, program: String) }
 
     public static let maxProgramBytes = 512
+    /// While on: touch `<root>/keepalive` and re-check LEDS.LED this often. The SD reader can power the
+    /// device off after ~3 min without I/O (it then reboots into INIT.LED and our program is gone).
+    public static let keepaliveInterval: TimeInterval = 60
     static let allowedPrefixes: [[String]] = [["battery", "configure", "--display"], ["write", "--device"]]
 
     // MARK: pure helpers
@@ -123,6 +126,7 @@ public final class StatusLight {
     let device: () -> String?
     let readSettings: () -> Data?
     let readLED: (String) -> Data?
+    let touch: (String) -> Void
     let markerURL: URL
     let override: String?
     let runner: CommandRunner
@@ -146,13 +150,14 @@ public final class StatusLight {
     public init(enabled: Bool, disabledReason: String = "opted out",
                 cli: @escaping () -> String?, device: @escaping () -> String?,
                 readSettings: @escaping () -> Data?, readLED: @escaping (String) -> Data?,
+                touch: @escaping (String) -> Void = { _ in },
                 markerURL: URL, override: String? = nil, runner: CommandRunner, env: [String: String],
                 timeout: TimeInterval = 5,
                 enqueue: @escaping (@escaping () -> Void) -> Void,
                 after: @escaping (TimeInterval, @escaping () -> Void) -> Void,
                 log: @escaping (String) -> Void) {
         self.enabled = enabled; self.disabledReason = disabledReason
-        self.cli = cli; self.device = device; self.readSettings = readSettings; self.readLED = readLED
+        self.cli = cli; self.device = device; self.readSettings = readSettings; self.readLED = readLED; self.touch = touch
         self.markerURL = markerURL; self.override = override; self.runner = runner; self.env = env
         self.timeout = timeout; self.enqueue = enqueue; self.after = after; self.log = log
     }
@@ -240,12 +245,16 @@ public final class StatusLight {
         after(2) { [self] in enqueue { [self] in recheck(gen) } }
     }
 
+    /// 2s after On, then every `keepaliveInterval` while this On lasts: keep the device awake and
+    /// rewrite the program only if LEDS.LED no longer holds it (a racing service tick, or a device reboot).
     func recheck(_ gen: Int) {
         guard isOn, gen == generation, let dev = root, let exe = cli() else { return }
+        touch(dev)
         let cur = readLED(dev).map { String(decoding: $0, as: UTF8.self) } ?? ""
         if Self.trimmed(cur) != Self.trimmed(programText) {
             run(exe, .write(device: dev, program: programText), "write", timeout)
         }
+        after(Self.keepaliveInterval) { [self] in enqueue { [self] in recheck(gen) } }
     }
 
     /// Lead card's provider changed while on: ONE write, no configure.

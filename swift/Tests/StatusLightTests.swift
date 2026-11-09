@@ -40,6 +40,7 @@ final class StatusLightRig {
     var led: String? = nil
     var cli: String? = "/fake/sidepulse"
     var device: String? = "/Volumes/PULSE"
+    var touched: [String] = []
     lazy var light = make()
 
     func make(enabled: Bool = true, override: String? = nil) -> StatusLight {
@@ -47,6 +48,7 @@ final class StatusLightRig {
                     readSettings: { [unowned self] in
                         settingsAbsent ? nil : settings ?? Data("{\"led_display\":\"\(sp.display)\"}".utf8) },
                     readLED: { [unowned self] _ in led.map { Data($0.utf8) } },
+                    touch: { [unowned self] in touched.append($0) },
                     markerURL: marker, override: override, runner: sp, env: [:],
                     enqueue: { [unowned self] in q.enqueue($0) },
                     after: { [unowned self] _, j in q.delayed.append(j) },

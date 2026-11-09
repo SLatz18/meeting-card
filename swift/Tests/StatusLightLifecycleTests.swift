@@ -61,8 +61,28 @@ final class StatusLightLifecycleTests: XCTestCase {
         r2.q.fireDelayed(); r2.q.drain()
         XCTAssertEqual(r2.sp.calls.count, 3)
         XCTAssertEqual(r2.sp.calls[2][0], "write")
+        r2.led = StatusLightTests.zoomProg      // now matches: the next keepalive tick must not rewrite
         r2.q.fireDelayed(); r2.q.drain()
-        XCTAssertEqual(r2.sp.calls.count, 3, "one re-check only")
+        XCTAssertEqual(r2.sp.calls.count, 3, "rewrite only on mismatch")
+    }
+    func testKeepaliveTicksWhileOnAndRewritesAfterReboot() {
+        let r = StatusLightRig(); r.counts(1); r.led = StatusLightTests.zoomProg
+        for _ in 0..<3 { r.q.fireDelayed(); r.q.drain() }     // 2s check + two 60s ticks
+        XCTAssertEqual(r.touched, ["/Volumes/PULSE", "/Volumes/PULSE", "/Volumes/PULSE"])
+        XCTAssertEqual(r.sp.calls.count, 2, "no rewrite while the program is intact")
+        r.led = "off\n0:#ff00ff 0.15s ease-in"                // device rebooted into INIT.LED
+        r.q.fireDelayed(); r.q.drain()
+        XCTAssertEqual(r.sp.calls.last?.first, "write")
+        XCTAssertEqual(r.sp.calls.count, 3)
+        XCTAssertEqual(r.q.delayed.count, 1, "still ticking while on")
+    }
+    func testKeepaliveStopsAfterOff() {
+        let r = StatusLightRig(); r.counts(1); r.led = StatusLightTests.zoomProg
+        r.q.fireDelayed(); r.q.drain()
+        r.counts(0); let n = r.touched.count
+        r.q.fireDelayed(); r.q.drain()
+        XCTAssertEqual(r.touched.count, n, "no touch after Off")
+        XCTAssertTrue(r.q.delayed.isEmpty)
     }
     func testRecheckSkippedIfOffAlready() {
         let r = StatusLightRig(); r.counts(1, 0); r.led = "different"

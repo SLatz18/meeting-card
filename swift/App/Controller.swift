@@ -92,7 +92,21 @@ final class Controller: NSObject, NSApplicationDelegate {
                 return StatusLight.findDevice(volumes: vols) { fm.fileExists(atPath: $0 + "/LEDS.LED") }
             },
             readSettings: { fm.contents(atPath: StatusLight.settingsPath(env: env, home: home)) },
-            readLED: { fm.contents(atPath: $0 + "/LEDS.LED") },
+            // Uncached read: after a device reboot the host page cache would still show our program.
+            readLED: { root in
+                let fd = open(root + "/LEDS.LED", O_RDONLY)
+                guard fd >= 0 else { return nil }
+                defer { close(fd) }
+                _ = fcntl(fd, F_NOCACHE, 1)
+                var buf = [UInt8](repeating: 0, count: 1024)
+                let n = read(fd, &buf, buf.count)
+                return n >= 0 ? Data(buf.prefix(n)) : nil
+            },
+            touch: { root in   // vendor-documented keepalive: any write I/O keeps the SD reader powered
+                let p = root + "/keepalive"
+                if !fm.fileExists(atPath: p) { _ = fm.createFile(atPath: p, contents: nil) }
+                else { try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: p) }
+            },
             markerURL: paths.stateDir.appendingPathComponent("status-light.json"),
             override: StatusLight.validOverride(UserDefaults.standard.string(forKey: "StatusLightProgram"), log: log),
             runner: ProcessGwsRunner(), env: Gws.buildEnv(),
