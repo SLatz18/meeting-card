@@ -4,8 +4,8 @@ import XCTest
 /// Round 2: provider colors, lead-card retarget, marker-driven restore (F1/F3/F5).
 final class StatusLightR2Tests: XCTestCase {
     func hex(_ v: UInt32) -> String { String(format: "#%06X", v) }
-    func heartbeat(_ c: String) -> String {
-        "off\n\(c) 90ms cosine\noff 140ms cosine\n\(c) 90ms cosine\noff 220ms cosine\noff 900ms none\nrepeat"
+    func breathing(_ c: String) -> String {
+        "off\n\(c) 3.2s pulse\noff 800ms none\nrepeat"
     }
     func configure(_ d: String) -> [String] { ["battery", "configure", "--display", d] }
     func write(_ p: String) -> [String] { ["write", "--device", "/Volumes/PULSE", "--", p] }
@@ -21,18 +21,18 @@ final class StatusLightR2Tests: XCTestCase {
                     Brand.meetBlue, Brand.meetBlue, Brand.meetRed, Brand.meetRed].map(hex).joined(separator: " ")
         let webex = [Brand.webexCyan, Brand.webexCyan, Brand.webexGreen, Brand.webexGreen,
                      Brand.webexCyan, Brand.webexCyan, Brand.webexGreen, Brand.webexGreen].map(hex).joined(separator: " ")
-        XCTAssertEqual(StatusLight.program(provider: "meet"), heartbeat(meet))
-        XCTAssertEqual(StatusLight.program(provider: "webex"), heartbeat(webex))
-        XCTAssertEqual(StatusLight.program(provider: "zoom"), heartbeat(hex(Brand.zoom)))
-        XCTAssertEqual(StatusLight.program(provider: "teams"), heartbeat(hex(Brand.teams)))
+        XCTAssertEqual(StatusLight.program(provider: "meet"), breathing(meet))
+        XCTAssertEqual(StatusLight.program(provider: "webex"), breathing(webex))
+        XCTAssertEqual(StatusLight.program(provider: "zoom"), breathing(hex(Brand.zoom)))
+        XCTAssertEqual(StatusLight.program(provider: "teams"), breathing(hex(Brand.teams)))
         for p in [nil, "calendar", "skype"] {
-            XCTAssertEqual(StatusLight.program(provider: p), heartbeat("#FFFFFF"), "\(String(describing: p))")
+            XCTAssertEqual(StatusLight.program(provider: p), breathing("#FFFFFF"), "\(String(describing: p))")
         }
         // exact literal line (uppercase #RRGGBB, 8 positional colors)
         XCTAssertTrue(StatusLight.program(provider: "meet").contains(
-            "\n#34A853 #34A853 #FBBC04 #FBBC04 #4285F4 #4285F4 #EA4335 #EA4335 90ms cosine\n"))
+            "\n#34A853 #34A853 #FBBC04 #FBBC04 #4285F4 #4285F4 #EA4335 #EA4335 3.2s pulse\n"))
         XCTAssertTrue(StatusLight.program(provider: "webex").contains(
-            "\n#07C1E4 #07C1E4 #6CC04A #6CC04A #07C1E4 #07C1E4 #6CC04A #6CC04A 90ms cosine\n"))
+            "\n#07C1E4 #07C1E4 #6CC04A #6CC04A #07C1E4 #07C1E4 #6CC04A #6CC04A 3.2s pulse\n"))
     }
 
     func testOverrideReplacesEveryProvider() {

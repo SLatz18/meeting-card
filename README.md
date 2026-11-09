@@ -65,8 +65,8 @@ Ad-hoc is fine for trying it out. A stable self-signed identity is nicer for dai
 
 ## Status light (optional)
 
-If a SidePulse light is plugged in and its `sidepulse` CLI is installed, the light beats a double-pulse heartbeat in
-the card's provider colors while at least one card is on screen, then goes back to what it showed before: Meet in the
+If a SidePulse light is plugged in and its `sidepulse` CLI is installed, the light breathes slowly (a 4-second
+rise and fall) in the card's provider colors while at least one card is on screen, then goes back to what it showed before: Meet in the
 four Google colors, Zoom blue, Teams indigo, Webex cyan and green, white when the card has no single video link. With
 several cards up the light follows the soonest meeting, and changes color when that card closes or its link changes.
 Nothing to set up: the app

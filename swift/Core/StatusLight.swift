@@ -52,10 +52,11 @@ public final class StatusLight {
         return hs.map { String(format: "#%06X", $0) }.joined(separator: " ")
     }
 
-    /// Heartbeat in the provider's brand colors.
+    /// Calm breathing in the provider's brand colors: a 3.2s rise and fall, 0.8s dark, a 4s cycle
+    /// (slower than a 1.6s attention pulse, and no flashing).
     public static func program(provider: String?) -> String {
         let c = colors(provider: provider)
-        return "off\n\(c) 90ms cosine\noff 140ms cosine\n\(c) 90ms cosine\noff 220ms cosine\noff 900ms none\nrepeat"
+        return "off\n\(c) 3.2s pulse\noff 800ms none\nrepeat"
     }
 
     /// Current display from the settings file. nil data = file absent = agent. Present but not a JSON

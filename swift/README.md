@@ -56,7 +56,7 @@ Status light (`Core/StatusLight.swift`): Coordinator calls `onCards(count, leadP
 and `closeCard` and after a live `.update` refresh; the lead card is the soonest (`cards.min(by: stackOrder)`).
 StatusLight edge-detects on the main thread (0->n On, n->0 Off, lead program changed while on: Retarget = one
 `write`, no configure) and runs every decision, file read, marker write and CLI call on one serial queue. Program:
-`StatusLight.program(provider:)`, a heartbeat in the `Brand` colors (meet/webex 8 positional colors, zoom/teams one
+`StatusLight.program(provider:)`, a calm breath (`<colors> 3.2s pulse`, `off 800ms none`, repeat) in the `Brand` colors (meet/webex 8 positional colors, zoom/teams one
 color, anything else `#FFFFFF`); a valid `StatusLightProgram` override replaces it for every provider. The settings
 file: absent = `agent`; present but not a JSON object (the CLI rewrites it non-atomically) = skip the card.
 On: retry any pending restore first (skip the card if it still fails), read the prior `led_display`, write
