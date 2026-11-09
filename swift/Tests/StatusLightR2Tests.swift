@@ -142,6 +142,9 @@ final class StatusLightR2Tests: XCTestCase {
         let r = StatusLightRig(); r.settings = Data("{tor".utf8); writeMarker(r, "{\"prior\":\"battery\"}")
         r.light.recoverFromMarker(); r.q.drain()
         XCTAssertTrue(r.sp.calls.isEmpty); XCTAssertNotNil(r.markerText)
+        r.counts(1)   // still torn when the next card fires: restore stays pending, card skipped
+        XCTAssertTrue(r.sp.calls.isEmpty); XCTAssertNotNil(r.markerText)
+        XCTAssertTrue(r.logs.lines.contains("status light skipped: restore pending"))
     }
 }
 
