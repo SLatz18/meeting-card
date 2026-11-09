@@ -23,7 +23,7 @@ final class StatusLightR2Tests: XCTestCase {
                      Brand.webexCyan, Brand.webexCyan, Brand.webexGreen, Brand.webexGreen].map(hex).joined(separator: " ")
         XCTAssertEqual(StatusLight.program(provider: "meet"), breathing(meet))
         XCTAssertEqual(StatusLight.program(provider: "webex"), breathing(webex))
-        XCTAssertEqual(StatusLight.program(provider: "zoom"), breathing(hex(Brand.zoom)))
+        XCTAssertEqual(StatusLight.program(provider: "zoom"), breathing("#0B5CFF"))
         XCTAssertEqual(StatusLight.program(provider: "teams"), breathing(hex(Brand.teams)))
         for p in [nil, "calendar", "skype"] {
             XCTAssertEqual(StatusLight.program(provider: p), breathing("#FFFFFF"), "\(String(describing: p))")

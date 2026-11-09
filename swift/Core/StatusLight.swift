@@ -36,6 +36,10 @@ public final class StatusLight {
         volumes.sorted().first(where: hasLED)
     }
 
+    /// LED-only color: the brand #2D8CFF reads cyan on the LEDs (strong green channel), so the light uses
+    /// Zoom's deeper brand blue. The card outline keeps `Brand.zoom`.
+    public static let ledZoom: UInt32 = 0x0B5CFF
+
     /// The LED colors for a provider, from `Brand` (base colors in light and dark: an LED has no background).
     /// Multi-color providers use 8 positional colors; one color = all LEDs. Anything else: neutral white.
     static func colors(provider: String?) -> String {
@@ -45,7 +49,7 @@ public final class StatusLight {
                            Brand.meetBlue, Brand.meetBlue, Brand.meetRed, Brand.meetRed]
         case "webex": hs = [Brand.webexCyan, Brand.webexCyan, Brand.webexGreen, Brand.webexGreen,
                             Brand.webexCyan, Brand.webexCyan, Brand.webexGreen, Brand.webexGreen]
-        case "zoom": hs = [Brand.zoom]
+        case "zoom": hs = [ledZoom]
         case "teams": hs = [Brand.teams]
         default: hs = [0xFFFFFF]   // "calendar" (multi-link / no-link), nil link, unknown provider
         }
