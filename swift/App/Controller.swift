@@ -50,6 +50,8 @@ final class Controller: NSObject, NSApplicationDelegate {
     let dryJoin = ProcessInfo.processInfo.environment["MEETING_CARD_DRY_JOIN"] == "1"
     let gwsQueue = DispatchQueue(label: "com.slatz.meetingcard.swift.gws", attributes: .concurrent)
     var coord: Coordinator<Card>!
+    var light: StatusLight!
+    let lightQueue = DispatchQueue(label: "com.slatz.meetingcard.swift.statuslight")
     var pollInFlight = false
     var timers: [Timer] = []
     var signalSources: [DispatchSourceSignal] = []
@@ -62,6 +64,8 @@ final class Controller: NSObject, NSApplicationDelegate {
         gws = Gws(log: { l.log($0) })
         state = StateWriter(paths: paths)
         super.init()
+        light = Controller.makeStatusLight(fixture: args.fixture != nil, paths: paths, queue: lightQueue,
+                                           log: { l.log($0) })
         let recheck = !(args.fixture != nil || args.noPoll || args.noRecheck)
         coord = Coordinator<Card>(
             recheck: recheck, log: { l.log($0) },
@@ -69,6 +73,46 @@ final class Controller: NSObject, NSApplicationDelegate {
             spawnGet: { [unowned self] id, done in self.spawnGet(id, done) },
             writeState: { [unowned self] c in self.state.write(windowNumber: c.panel.windowNumber, ev: c.ev) },
             probe: { OpenProbeReader.read() })
+        coord.onCards = { [unowned self] n, p in self.light.cards(n, provider: p) }
+    }
+
+    /// Optional SidePulse light. Fixture runs drive it only with MEETING_CARD_STATUS_LIGHT=1.
+    static func makeStatusLight(fixture: Bool, paths: AppPaths, queue: DispatchQueue,
+                                log: @escaping (String) -> Void) -> StatusLight {
+        let env = ProcessInfo.processInfo.environment
+        let home = Gws.homeDir()
+        let optIn = UserDefaults.standard.object(forKey: "StatusLight") as? Bool ?? true
+        let seam = !fixture || env["MEETING_CARD_STATUS_LIGHT"] == "1"
+        let fm = FileManager.default
+        return StatusLight(
+            enabled: optIn && seam, disabledReason: optIn ? "fixture run" : "opted out",
+            cli: { StatusLight.candidatePaths(env: env, home: home).first(where: Gws.isExecutableFile) },
+            device: {
+                let vols = ((try? fm.contentsOfDirectory(atPath: "/Volumes")) ?? []).map { "/Volumes/" + $0 }
+                return StatusLight.findDevice(volumes: vols) { fm.fileExists(atPath: $0 + "/LEDS.LED") }
+            },
+            readSettings: { fm.contents(atPath: StatusLight.settingsPath(env: env, home: home)) },
+            // Uncached read: after a device reboot the host page cache would still show our program.
+            readLED: { root in
+                let fd = open(root + "/LEDS.LED", O_RDONLY)
+                guard fd >= 0 else { return nil }
+                defer { close(fd) }
+                _ = fcntl(fd, F_NOCACHE, 1)
+                var buf = [UInt8](repeating: 0, count: 1024)
+                let n = read(fd, &buf, buf.count)
+                return n >= 0 ? Data(buf.prefix(n)) : nil
+            },
+            touch: { root in   // vendor-documented keepalive: any write I/O keeps the SD reader powered
+                let p = root + "/keepalive"
+                if !fm.fileExists(atPath: p) { _ = fm.createFile(atPath: p, contents: nil) }
+                else { try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: p) }
+            },
+            markerURL: paths.stateDir.appendingPathComponent("status-light.json"),
+            override: StatusLight.validOverride(UserDefaults.standard.string(forKey: "StatusLightProgram"), log: log),
+            runner: ProcessGwsRunner(), env: Gws.buildEnv(),
+            enqueue: { queue.async(execute: $0) },
+            after: { queue.asyncAfter(deadline: .now() + $0, execute: $1) },
+            log: log)
     }
 
     func log(_ s: String) { logger.log(s) }
@@ -77,6 +121,7 @@ final class Controller: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         installSignalHandlers()
+        light.recoverFromMarker()
         log("start pid=\(getpid()) fixture=\(args.fixture ?? "None") no_poll=\(args.noPoll) recheck=\(coord.recheck)")
         registerLoginItem()
         switch args.appearance {
@@ -144,7 +189,10 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ n: Notification) { log("exiting") }
+    func applicationWillTerminate(_ n: Notification) {
+        light.shutdown(timeout: 3)
+        log("exiting")
+    }
 
     func installSignalHandlers() {
         for sig in [SIGTERM, SIGINT] {

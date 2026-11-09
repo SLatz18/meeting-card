@@ -84,6 +84,8 @@ public final class Coordinator<Card: CardHandle> {
     let makeCard: (Event, CardSlot, Date) -> Card
     let spawnGet: (String?, @escaping (GetOutcome) -> Void) -> Void
     let writeState: (Card) -> Void
+    /// Status light seam: card count + lead (soonest) card provider after every show/close/link update (default: no-op).
+    public var onCards: (Int, String?) -> Void
     let clock: () -> Date
     let mono: () -> TimeInterval
     let probe: () -> OpenProbe
@@ -103,7 +105,9 @@ public final class Coordinator<Card: CardHandle> {
                 clock: @escaping () -> Date = { Date() },
                 mono: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
                 probe: @escaping () -> OpenProbe = { OpenProbe() },
-                detection: Bool = OpenWatch.detectionEnabled) {
+                detection: Bool = OpenWatch.detectionEnabled,
+                onCards: @escaping (Int, String?) -> Void = { _, _ in }) {
+        self.onCards = onCards
         self.detection = detection
         self.recheck = recheck
         self.log = log
@@ -210,6 +214,7 @@ public final class Coordinator<Card: CardHandle> {
             sched.rekey(ev)
             let target = CardModel(c.ev).link
             c.refresh(ev, now: now)
+            reportCards()   // a link edit can change the lead provider
             // #11: a moved start / end changes this card's window; #11 review P2-1: the replaced
             // cache entry can change OTHER cards' lines too. #8: a moved start can change slots.
             refreshNextUps()
@@ -249,7 +254,14 @@ public final class Coordinator<Card: CardHandle> {
         let link = CardModel(ev).link
         log("fire \(ev.id ?? "nil") start=\(ev.start?.dateTime ?? "nil") link=\(link.map { "\($0.provider) \($0.url)" } ?? "none")")
         writeState(c)
+        reportCards()
         return c
+    }
+
+    /// Status light: count + the LEAD (soonest) card's provider.
+    func reportCards() {
+        let lead = cards.min { Self.stackOrder($0.ev, $1.ev) }
+        onCards(cards.count, lead.flatMap { CardModel($0.ev).link?.provider })
     }
 
     /// #8: fixed stack key (start, title, id; nil = ""). See Timing.stackOrder.
@@ -301,6 +313,7 @@ public final class Coordinator<Card: CardHandle> {
         nextUps[ObjectIdentifier(c)] = nil
         refreshNextUps()   // #11 review P2-1: a close often follows a cache replacement
         log("card closed \(c.ev.id ?? "nil")")
+        reportCards()
     }
 
     /// Join / Open in Calendar: returns the URL the app must open (nil = no button, or already

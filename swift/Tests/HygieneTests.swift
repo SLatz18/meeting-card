@@ -54,3 +54,21 @@ final class HygieneTests: XCTestCase {
         XCTAssertNotNil(line.range(of: "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} (AM|PM) caf\u{e9}\n$", options: .regularExpression), line)
     }
 }
+
+extension HygieneTests {
+    /// The light may only ever build `battery configure` and `write` argv.
+    func testNoForbiddenSidepulseSubcommands() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        var lines = try String(contentsOf: root.appendingPathComponent("Core/StatusLight.swift"), encoding: .utf8)
+            .components(separatedBy: "\n")
+        for f in try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("App").path) where f.hasSuffix(".swift") {
+            lines += try String(contentsOf: root.appendingPathComponent("App/\(f)"), encoding: .utf8)
+                .components(separatedBy: "\n").filter { $0.lowercased().contains("sidepulse") || $0.contains("StatusLight") }
+        }
+        let banned = ["setup", "link", "unlink", "update", "push", "firmware", "service", "sdejectguard",
+                      "status-bar", "agent-monitor", "settings"]
+        for l in lines where !l.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+            for b in banned { XCTAssertFalse(l.contains("\"\(b)\""), "forbidden subcommand literal \(b): \(l)") }
+        }
+    }
+}
