@@ -123,6 +123,7 @@ final class StatusLightLifecycleTests: XCTestCase {
                             after: { _, _ in }, log: logs.add)
         l.cards(1, provider: nil); q.sync {}
         sp.block = DispatchSemaphore(value: 0)   // Off hangs
+        sp.blockSeconds = 3                      // well past the 0.5s budget (no race with the budget)
         let t0 = Date()
         l.shutdown(timeout: 0.5)
         XCTAssertLessThan(Date().timeIntervalSince(t0), 1.5)

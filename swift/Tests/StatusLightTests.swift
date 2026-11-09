@@ -9,10 +9,11 @@ final class FakeSidepulse: CommandRunner, @unchecked Sendable {
     var result: RunResult = .exited(status: 0, stdout: Data(), stderr: Data())
     var onCall: (([String]) -> Void)?
     var block: DispatchSemaphore?
+    var blockSeconds: TimeInterval?   // hang longer than the caller's timeout (default: the timeout)
     func run(executable: String, args: [String], env: [String: String], timeout: TimeInterval) -> RunResult {
         lock.lock(); calls.append(args); lock.unlock()
         onCall?(args)
-        if let b = block { _ = b.wait(timeout: .now() + timeout) }
+        if let b = block { _ = b.wait(timeout: .now() + (blockSeconds ?? timeout)) }
         if args.count == 4, args[0] == "battery", case .exited(0, _, _) = result { display = args[3] }
         return result
     }
