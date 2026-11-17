@@ -6,7 +6,8 @@ import Foundation
 
 /// Approved copy for the coach card and pill. The nesting follows the spec's string IDs
 /// (`coach.button.stop` is `Button.stop`, `coach.a11y.skipped` is `A11y.skipped`, and so on).
-/// The Mute in Zoom control's copy is `CoachMuteCopy`'s.
+/// The Mute in Zoom control's copy is `CoachMuteCopy`'s. The coach's own Mute matches the coach
+/// menu's wording (`CoachCopy.menuMute` / `menuUnmute`).
 public enum CoachCardCopy {
     public enum Button {
         /// Replaces "Skip this call": ends the coach for the rest of this call.
@@ -19,6 +20,9 @@ public enum CoachCardCopy {
         public static let stop = "Stop coach for this call"
         public static let expand = "Expand coach"
         public static let minimize = "Minimize coach"
+        /// The pill's Mute: the coach's own, also its VoiceOver label.
+        public static let muteMic = "Mute My Mic for Coach"
+        public static let unmuteMic = "Unmute My Mic for Coach"
     }
 
     public enum A11y {
@@ -153,8 +157,9 @@ public enum CoachNudgeColors {
 
 // MARK: controls
 
-/// What the coach card or pill shows: the coach's status, the Mute control (`CoachMuteCopy`'s
-/// presentation, and Zoom's mute reading), the nudge on show, and whether it's the card or the pill.
+/// What the coach card or pill shows: the coach's status, whether the coach's own Mute is on, the
+/// Mute in Zoom control (`CoachMuteCopy`'s presentation, and Zoom's mute reading), the nudge on
+/// show, and whether it's the card or the pill.
 public struct CoachCardState: Equatable, Sendable {
     public enum Status: Equatable, Sendable, CaseIterable {
         /// Coach on, no session yet (`CoachCopy.coachOn`).
@@ -171,8 +176,10 @@ public struct CoachCardState: Equatable, Sendable {
 
     public var status: Status
     public var mute: MuteControlPresentation
-    /// Zoom reports the mic muted (Mute offers Unmute).
+    /// Zoom reports the mic muted (Mute in Zoom offers Unmute in Zoom).
     public var micMuted: Bool
+    /// The coach's own Mute is on (it stays on through Pause and Zoom's mute).
+    public var coachMicMuted: Bool
     public var nudge: CoachNudge?
     public var mode: Mode
     public var increasedContrast: Bool
@@ -180,11 +187,12 @@ public struct CoachCardState: Equatable, Sendable {
     /// (Save transcripts on, #13c); nil shows nothing.
     public var savingBadge: String?
 
-    public init(status: Status, mute: MuteControlPresentation, micMuted: Bool = false, nudge: CoachNudge? = nil, mode: Mode = .card,
-                increasedContrast: Bool = false, savingBadge: String? = nil) {
+    public init(status: Status, mute: MuteControlPresentation, micMuted: Bool = false, coachMicMuted: Bool = false,
+                nudge: CoachNudge? = nil, mode: Mode = .card, increasedContrast: Bool = false, savingBadge: String? = nil) {
         self.status = status
         self.mute = mute
         self.micMuted = micMuted
+        self.coachMicMuted = coachMicMuted
         self.nudge = nudge
         self.mode = mode
         self.increasedContrast = increasedContrast
@@ -196,10 +204,10 @@ public struct CoachCardState: Equatable, Sendable {
     /// Not capturing: drawn with the held text role, like the paused chip.
     public var held: Bool { status == .paused || status == .muted }
     public var tone: CoachNudge.Tone? { nudge?.tone }
-    /// Mute is left out with no Zoom call (nothing to mute).
+    /// Mute in Zoom shows only while it can act (Use Zoom/Meet controls on, Accessibility granted, a Zoom call).
     public var showsMute: Bool { mute.visibility != .hidden }
-    /// The pill's buttons: Mute (when shown), Pause/Resume, Stop.
-    public var pillButtons: Int { showsMute ? 3 : 2 }
+    /// The pill's buttons: the coach's Mute, Mute in Zoom (only while it can act), Pause/Resume, Stop.
+    public var pillButtons: Int { showsMute ? 4 : 3 }
 }
 
 /// One control as drawn: SF Symbol, tooltip, VoiceOver label (and help when it can't act).
@@ -220,12 +228,20 @@ public struct CoachControl: Equatable, Sendable {
 }
 
 public extension CoachCardState {
-    /// Enabled: Mute your mic / Unmute your mic; disabled: the reason as tooltip and VoiceOver help.
+    /// Mute in Zoom / Unmute in Zoom, following Zoom's mute reading (hidden unless it can act).
     var muteControl: CoachControl {
         let s = Theme.CoachCard.Symbols.self
         return CoachControl(symbol: micMuted ? s.unmute : s.mute, tooltip: mute.tooltip ?? "",
-                            accessibilityLabel: mute.accessibilityLabel ?? "", accessibilityHelp: mute.accessibilityHelp,
-                            enabled: mute.visibility == .enabled)
+                            accessibilityLabel: mute.accessibilityLabel ?? "", enabled: mute.visibility == .enabled)
+    }
+
+    /// The pill's Mute: the coach's own (it stops the coach hearing the user's mic, never Zoom's
+    /// mute), with the coach menu's symbols; nothing to mute before a session starts.
+    var coachMuteControl: CoachControl {
+        let s = Theme.Coach.menuSymbols
+        let off = coachMicMuted || status == .micOff
+        let text = off ? CoachCardCopy.Tooltip.unmuteMic : CoachCardCopy.Tooltip.muteMic
+        return CoachControl(symbol: off ? s.unmute : s.mute, tooltip: text, accessibilityLabel: text, enabled: status != .idle)
     }
 
     /// Pause while listening, muted or mic off, Resume while paused; nothing to pause before a session starts.

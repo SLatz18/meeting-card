@@ -509,7 +509,7 @@ public enum Theme {
         public static let wordsInset = Coach.glyphGap
         public static let maxWidth = CardLayout.W
         public static var glyphX: Double { CardStyle.Coach.nudgeBar + padding }
-        /// Mute (hidden with no Zoom call), Pause/Resume and Stop.
+        /// The coach's Mute, Mute in Zoom (only while it can act), Pause/Resume and Stop.
         public static func buttonsWidth(_ n: Int = 3) -> Double { Double(n) * button + Double(max(0, n - 1)) * buttonGap }
         /// The row's vertical center, under the grabber.
         public static var rowMidY: Double { (height - grabberTop - grabber.height) / 2 }

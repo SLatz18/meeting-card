@@ -241,40 +241,41 @@ enum UISnapshots {
 
     static let liveMute = CoachMuteCopy.presentation(reason: nil, isMuted: false)
     static let mutedMute = CoachMuteCopy.presentation(reason: nil, isMuted: true)
+    /// Use Zoom/Meet controls off (the default): no Mute in Zoom.
+    static let noZoomMute = CoachMuteCopy.presentation(reason: .toggleOff, isMuted: false)
     static let amberNudge = CoachNudge(kind: .missedQuestion, tone: .amber)
     static let roseNudge = CoachNudge(kind: .interrupt, tone: .rose)
 
     static func shotState(_ st: CoachCardState.Status, _ m: MuteControlPresentation, _ n: CoachNudge?, _ mode: CoachCardState.Mode,
                           ic: Bool = false, saving: Bool = false) -> CoachCardState {
-        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, nudge: n, mode: mode, increasedContrast: ic,
-                       savingBadge: saving ? CoachCopy.savingNow : nil)
+        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, coachMicMuted: st == .micOff, nudge: n, mode: mode,
+                       increasedContrast: ic, savingBadge: saving ? CoachCopy.savingNow : nil)
     }
 
-    static func disabledMute(_ r: MuteDisabledReason) -> MuteControlPresentation { CoachMuteCopy.presentation(reason: r, isMuted: false) }
-
-    /// Each coach card and pill state as `coach-<name>-<appearance>.png`. Pills that can't mute
-    /// also show the tooltip that says why.
-    static let coachCardStates: [(name: String, state: CoachCardState, tooltip: Bool)] = [
-        ("card-idle", shotState(.idle, liveMute, nil, .card), false),
-        ("card-listening", shotState(.listening, liveMute, nil, .card), false),
-        ("card-paused", shotState(.paused, liveMute, nil, .card), false),
-        ("card-muted", shotState(.muted, mutedMute, nil, .card), false),
-        ("card-mic-off", shotState(.micOff, liveMute, nil, .card), false),
-        ("card-nudge-amber", shotState(.listening, liveMute, amberNudge, .card), false),
-        ("card-nudge-rose", shotState(.listening, liveMute, roseNudge, .card), false),
-        ("card-increased-contrast", shotState(.listening, liveMute, amberNudge, .card, ic: true), false),
+    /// Each coach card and pill state as `coach-<name>-<appearance>.png`, with Use Zoom/Meet controls
+    /// off unless the shot is about Mute in Zoom (shown only while it can act: Zoom muted, or a Zoom
+    /// call). A shot with a tooltip draws it under the surface.
+    static let coachCardStates: [(name: String, state: CoachCardState, tooltip: String?)] = [
+        ("card-idle", shotState(.idle, noZoomMute, nil, .card), nil),
+        ("card-listening", shotState(.listening, noZoomMute, nil, .card), nil),
+        ("card-paused", shotState(.paused, noZoomMute, nil, .card), nil),
+        ("card-muted", shotState(.muted, mutedMute, nil, .card), nil),
+        ("card-mic-off", shotState(.micOff, noZoomMute, nil, .card), nil),
+        ("card-zoom-mute", shotState(.listening, liveMute, nil, .card), nil),
+        ("card-nudge-amber", shotState(.listening, noZoomMute, amberNudge, .card), nil),
+        ("card-nudge-rose", shotState(.listening, noZoomMute, roseNudge, .card), nil),
+        ("card-increased-contrast", shotState(.listening, noZoomMute, amberNudge, .card, ic: true), nil),
         // Save transcripts on (#13c): the saving badge on the status line, and still there under a nudge.
-        ("card-saving", shotState(.listening, liveMute, nil, .card, saving: true), false),
-        ("card-saving-nudge", shotState(.listening, liveMute, amberNudge, .card, saving: true), false),
-        ("pill-idle", shotState(.idle, liveMute, nil, .pill), false),
-        ("pill-muted", shotState(.muted, mutedMute, nil, .pill), false),
-        ("pill-mic-off", shotState(.micOff, liveMute, nil, .pill), false),
-        ("pill-paused", shotState(.paused, liveMute, nil, .pill), false),
-        ("pill-nudge-amber", shotState(.listening, liveMute, amberNudge, .pill), false),
-        ("pill-nudge-rose", shotState(.listening, liveMute, roseNudge, .pill), false),
-        ("pill-mute-disabled-meet", shotState(.listening, disabledMute(.meet), nil, .pill), true),
-        ("pill-mute-disabled-off", shotState(.listening, disabledMute(.toggleOff), nil, .pill), true),
-        ("pill-mute-disabled-permission", shotState(.listening, disabledMute(.permissionDenied), nil, .pill), true),
+        ("card-saving", shotState(.listening, noZoomMute, nil, .card, saving: true), nil),
+        ("card-saving-nudge", shotState(.listening, noZoomMute, amberNudge, .card, saving: true), nil),
+        ("pill-idle", shotState(.idle, noZoomMute, nil, .pill), nil),
+        ("pill-listening", shotState(.listening, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.muteMic),
+        ("pill-muted", shotState(.muted, mutedMute, nil, .pill), nil),
+        ("pill-mic-off", shotState(.micOff, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.unmuteMic),
+        ("pill-zoom-mute", shotState(.listening, liveMute, nil, .pill), CoachMuteCopy.muteTooltip),
+        ("pill-paused", shotState(.paused, noZoomMute, nil, .pill), nil),
+        ("pill-nudge-amber", shotState(.listening, noZoomMute, amberNudge, .pill), nil),
+        ("pill-nudge-rose", shotState(.listening, noZoomMute, roseNudge, .pill), nil),
     ]
 
     /// Every PNG `coachCardShots` writes, per appearance (the CI gate checks for them).
@@ -304,7 +305,7 @@ enum UISnapshots {
             p.show(state, from: nil)
             controller.schedule(0.4, repeats: false) {
                 MainActor.assumeIsolated {
-                    write(name, tooltip: tooltip ? state.muteControl.tooltip : nil)
+                    write(name, tooltip: tooltip)
                     next(i + 1)
                 }
             }

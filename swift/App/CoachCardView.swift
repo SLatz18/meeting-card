@@ -6,7 +6,10 @@ import MeetingCardCore
 @MainActor
 struct CoachCardActions {
     var stop: () -> Void = {}
+    /// Mute in Zoom: one press of Zoom's own mute.
     var mute: () -> Void = {}
+    /// The coach's own Mute (mic only), on the pill.
+    var muteMic: () -> Void = {}
     var pause: () -> Void = {}
     /// Minimize on the card, Expand on the pill.
     var resize: () -> Void = {}
@@ -143,6 +146,7 @@ class CoachSurfaceView: NSView {
 
     @objc func stopPressed(_ sender: Any?) { actions.stop() }
     @objc func mutePressed(_ sender: Any?) { actions.mute() }
+    @objc func muteMicPressed(_ sender: Any?) { actions.muteMic() }
     @objc func pausePressed(_ sender: Any?) { actions.pause() }
     @objc func resizePressed(_ sender: Any?) { actions.resize() }
 
@@ -352,17 +356,19 @@ final class CoachFullCardView: CoachSurfaceView {
     }
 }
 
-/// The minimized coach: grabber, coach glyph (and the nudge words while one holds), then Mute,
-/// Pause/Resume and Stop. A click on the pill (or VoiceOver's press on the grabber) expands it.
+/// The minimized coach: grabber, coach glyph (and the nudge words while one holds), then the coach's
+/// own Mute, Mute in Zoom (only while it can act), Pause/Resume and Stop. A click on the pill (or
+/// VoiceOver's press on the grabber) expands it.
 final class CoachPillView: CoachSurfaceView {
     private let bar = CoachSurfaceView.layerView()
     private let grabber = CoachGrabber()
     private let glyph = NSImageView()
     private let words = CoachSurfaceView.label()
+    private(set) var micMute: CardButton!
     private(set) var mute: CardButton!
     private(set) var pause: CardButton!
     private(set) var stop: CardButton!
-    /// Laid out for this many buttons (Mute is left out with no Zoom call).
+    /// Laid out for this many buttons (Mute in Zoom is left out unless it can act).
     let buttons: Int
 
     override var surfaceRadius: Double { Theme.CoachPill.radius }
@@ -400,15 +406,16 @@ final class CoachPillView: CoachSurfaceView {
         words.frame = NSRect(x: wx, y: p.rowMidY, width: p.wordsRoom(pillWidth: w, buttons: buttons), height: 0)
         addSubview(words)
 
+        micMute = button(radius: p.buttonRadius, action: #selector(muteMicPressed(_:)))
         mute = button(radius: p.buttonRadius, action: #selector(mutePressed(_:)))
         pause = button(radius: p.buttonRadius, action: #selector(pausePressed(_:)))
         stop = button(radius: p.buttonRadius, action: #selector(stopPressed(_:)))
-        let shown: [CardButton] = state.showsMute ? [mute, pause, stop] : [pause, stop]
+        let shown: [CardButton] = state.showsMute ? [micMute, mute, pause, stop] : [micMute, pause, stop]
         mute.isHidden = !state.showsMute
         for (b, x) in zip(shown, p.buttonXs(pillWidth: w, buttons: buttons)) {
             b.frame = NSRect(x: x, y: p.rowMidY - p.button / 2, width: p.button, height: p.button)
         }
-        for b in [mute!, pause!, stop!] { addSubview(b) }
+        for b in [micMute!, mute!, pause!, stop!] { addSubview(b) }
         onClick = { [weak self] in self?.actions.resize() }
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -439,6 +446,7 @@ final class CoachPillView: CoachSurfaceView {
         words.frame.origin.y = p.rowMidY - h / 2
         words.frame.size.height = h
         setAccessibilityLabel(s.nudge.map { "\(s.status.text). \($0.words)" } ?? s.status.text)
+        set(micMute, s.coachMuteControl, glyph: p.buttonGlyph)
         set(mute, s.muteControl, glyph: p.buttonGlyph)
         set(pause, s.pauseControl, glyph: p.buttonGlyph)
         set(stop, s.stopControl, glyph: p.buttonGlyph)

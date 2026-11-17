@@ -61,12 +61,13 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(p.wordsInset, Theme.Coach.glyphGap)
         XCTAssertEqual(p.buttonRadius, Theme.Coach.pauseButtonRadius)
         let xs = p.buttonXs(pillWidth: p.width)
-        XCTAssertEqual(xs.count, 3)
+        XCTAssertEqual(xs.count, 3, "the coach's Mute, Pause/Resume, Stop")
         XCTAssertEqual(xs[2] + p.button + p.padding, p.width, accuracy: 1e-9)
         XCTAssertGreaterThan(xs[0], p.glyphX + p.glyphSize, "the glyph clears the buttons")
-        let two = p.buttonXs(pillWidth: p.width, buttons: 2)
-        XCTAssertEqual(two.count, 2, "no Zoom call: Mute is left out")
-        XCTAssertEqual(two[1], xs[2], accuracy: 1e-9, "Stop stays at the trailing edge")
+        let four = p.buttonXs(pillWidth: p.width, buttons: 4)
+        XCTAssertEqual(four.count, 4, "Mute in Zoom beside the coach's Mute while it can act")
+        XCTAssertEqual(four[3], xs[2], accuracy: 1e-9, "Stop stays at the trailing edge")
+        XCTAssertGreaterThan(four[0], p.glyphX + p.glyphSize, "four buttons still clear the glyph")
         XCTAssertLessThan(p.rowMidY + p.button / 2, p.height - p.grabberTop - p.grabber.height, "buttons sit under the grabber")
     }
 
@@ -146,18 +147,13 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(st(.listening).muteControl, CoachControl(symbol: s.mute, tooltip: "Mute in Zoom", accessibilityLabel: "Mute your mic in Zoom"))
         XCTAssertEqual(st(.muted, Self.muted, micMuted: true).muteControl,
                        CoachControl(symbol: s.unmute, tooltip: "Unmute in Zoom", accessibilityLabel: "Unmute your mic in Zoom"))
-        for why in [MuteDisabledReason.meet, .toggleOff, .permissionDenied] {
+        XCTAssertTrue(st(.listening).showsMute, "a Zoom call it can act on: Mute in Zoom shows")
+        XCTAssertEqual(st(.listening).pillButtons, 4)
+        for why in MuteDisabledReason.allCases {
             let state = st(.listening, CoachMuteCopy.presentation(reason: why, isMuted: false))
-            let m = state.muteControl
-            XCTAssertFalse(m.enabled)
-            XCTAssertEqual(m.tooltip, CoachMuteCopy.strings[CoachMuteCopy.disabledKey(why) ?? ""])
-            XCTAssertEqual(m.accessibilityHelp, m.tooltip)
-            XCTAssertTrue(state.showsMute, "disabled, not hidden: the tooltip says why")
-            XCTAssertEqual(state.pillButtons, 3)
+            XCTAssertFalse(state.showsMute, "\(why): hidden, not greyed out")
+            XCTAssertEqual(state.pillButtons, 3, "\(why): the coach's Mute, Pause, Stop")
         }
-        let noCall = st(.idle, CoachMuteCopy.presentation(reason: .noZoomCall, isMuted: false))
-        XCTAssertFalse(noCall.showsMute, "no Zoom call: Mute is left out")
-        XCTAssertEqual(noCall.pillButtons, 2)
         for status in CoachCardState.Status.allCases {
             XCTAssertEqual(st(status).stopControl,
                            CoachControl(symbol: s.stop, tooltip: "Stop coach for this call", accessibilityLabel: "Stop call coach for the rest of this call"))
@@ -184,29 +180,23 @@ final class CoachCardTests: XCTestCase {
         }
     }
 
-    /// Each reason Mute can't act maps to its approved tooltip on the card and pill.
-    func testMuteDisabledReasonStrings() {
-        func tip(_ r: MuteDisabledReason) -> String {
-            CoachCardState(status: .listening, mute: CoachMuteCopy.presentation(reason: r, isMuted: false)).muteControl.tooltip
+    /// The pill's Mute is the coach's own (Mute My Mic for Coach), never Zoom's: Unmute while the
+    /// coach's Mute is on (also through Pause and Zoom's mute), the coach menu's symbols, nothing to
+    /// mute before a session.
+    func testPillMuteIsTheCoachsOwn() {
+        let m = Theme.Coach.menuSymbols
+        func control(_ status: CoachCardState.Status, coachMuted: Bool = false) -> CoachControl {
+            CoachCardState(status: status, mute: Self.live, coachMicMuted: coachMuted, mode: .pill).coachMuteControl
         }
-        XCTAssertEqual(tip(.meet), "Meet can't be muted from here. Mute in the Meet window.")
-        XCTAssertEqual(tip(.toggleOff), "Turn on \"Use Zoom/Meet controls\" in Settings to mute in Zoom from here.")
-        XCTAssertEqual(tip(.permissionDenied), "Allow MeetingCard in Privacy & Security to mute in Zoom from here.")
-        // Meet: VoiceOver gets its own label (no Zoom mic to name); the tooltip stays the reason.
-        for mode in [CoachCardState.Mode.card, .pill] {
-            let meet = CoachCardState(status: .listening, mute: CoachMuteCopy.presentation(reason: .meet, isMuted: false), mode: mode)
-                .muteControl
-            XCTAssertEqual(meet.accessibilityLabel, "Mute in Zoom is unavailable in a Meet call. Mute in the Meet window.")
-            XCTAssertEqual(meet.tooltip, "Meet can't be muted from here. Mute in the Meet window.")
-            XCTAssertEqual(meet.accessibilityHelp, "Meet can't be muted from here. Mute in the Meet window.")
-            XCTAssertFalse(meet.enabled)
-        }
-        for r in [MuteDisabledReason.toggleOff, .permissionDenied] {
-            XCTAssertEqual(CoachCardState(status: .listening, mute: CoachMuteCopy.presentation(reason: r, isMuted: false), mode: .pill)
-                .muteControl.accessibilityLabel, "Mute your mic in Zoom")
-        }
-        XCTAssertEqual(CoachCardState(status: .listening, mute: Self.live).muteControl.tooltip, "Mute in Zoom")
-        XCTAssertEqual(CoachCardState(status: .muted, mute: Self.muted, micMuted: true).muteControl.tooltip, "Unmute in Zoom")
+        XCTAssertEqual(control(.listening), CoachControl(symbol: m.mute, tooltip: "Mute My Mic for Coach", accessibilityLabel: "Mute My Mic for Coach"))
+        XCTAssertEqual(control(.micOff), CoachControl(symbol: m.unmute, tooltip: "Unmute My Mic for Coach", accessibilityLabel: "Unmute My Mic for Coach"))
+        XCTAssertEqual(control(.paused, coachMuted: true).tooltip, "Unmute My Mic for Coach")
+        XCTAssertEqual(control(.muted, coachMuted: true).tooltip, "Unmute My Mic for Coach")
+        XCTAssertEqual(control(.paused).tooltip, "Mute My Mic for Coach")
+        XCTAssertFalse(control(.idle).enabled, "nothing to mute before a session")
+        for status in [CoachCardState.Status.listening, .paused, .muted, .micOff] { XCTAssertTrue(control(status).enabled) }
+        XCTAssertNotEqual(control(.listening).tooltip, CoachCardState(status: .listening, mute: Self.live).muteControl.tooltip,
+                          "the two mutes never share a label")
     }
 
     func testCopy() {
