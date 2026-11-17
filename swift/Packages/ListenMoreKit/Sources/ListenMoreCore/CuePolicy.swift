@@ -20,11 +20,28 @@ public enum CueType: String, CaseIterable, Equatable, Sendable {
         default: return nil
         }
     }
+
+    /// The cues a judge provider can decide. The GPT judge decides only not_listening; a TypeSafe
+    /// System One judge is asked about each of these (the transcript rules keep raising aggressive and
+    /// missed_question too; the policy's cooldowns keep it to one glow).
+    public static let judged: [CueType] = [.aggressive, .notListening, .missedQuestion]
+
+    /// A judge label -> cue type, for the provider that produced it.
+    public init?(judgeLabel: String, provider: JudgeProviderKind) {
+        switch provider {
+        case .gpt:
+            self.init(gptLabel: judgeLabel)
+        case .typesafe:
+            guard let type = CueType(rawValue: judgeLabel), CueType.judged.contains(type) else { return nil }
+            self = type
+        }
+    }
 }
 
 public enum CueSource: String, Equatable, Sendable {
     case local
     case text
+    /// The judge, whichever provider (`judge.provider`) decided it.
     case gpt
 }
 

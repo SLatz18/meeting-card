@@ -156,6 +156,61 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var budgetUsdPerCall: Double?
     }
 
+    /// Which judge decides the judged cues (`CueType.judged`). `gpt` is the Responses judge above and
+    /// the default; `typesafe` asks a TypeSafe System One endpoint. Transcription is OpenAI's either way.
+    public struct Judge: Decodable, Equatable, Sendable {
+        public struct TypeSafe: Decodable, Equatable, Sendable {
+            /// One choice question: `fire` / `no_fire`, each described by its criteria text.
+            public struct Question: Decodable, Equatable, Sendable {
+                public var instructions: String
+                public var fire: String
+                public var noFire: String
+            }
+
+            /// One question per judged cue; null leaves that cue out of the request.
+            public struct Questions: Decodable, Equatable, Sendable {
+                public var aggressive: Question?
+                public var notListening: Question?
+                public var missedQuestion: Question?
+
+                /// The questions asked, keyed by cue type, in `CueType.judged` order.
+                public var asked: [(type: CueType, question: Question)] {
+                    CueType.judged.compactMap { type in question(for: type).map { (type, $0) } }
+                }
+
+                public func question(for type: CueType) -> Question? {
+                    switch type {
+                    case .aggressive: aggressive
+                    case .notListening: notListening
+                    case .missedQuestion: missedQuestion
+                    case .interrupt, .talkOver, .monologue, .talkShare: nil
+                    }
+                }
+            }
+
+            public var url: String
+            public var model: String
+            /// A `fire` answer below this confidence gives no cue.
+            public var minConfidence: Double
+            public var timeoutS: Double
+            /// The state holds at most `max_lines` transcript lines from the last `window_s` seconds.
+            public var windowS: Double
+            public var maxLines: Int
+            /// Failed calls in a row (HTTP error, timeout, transport, bad reply) before judging stops for
+            /// the session; transcription and the transcript rules keep running.
+            public var maxConsecutiveErrors: Int
+            /// Price of one call in USD, counted toward the per-call budget. Null: no price is known,
+            /// and the call is metered at nothing.
+            public var costUsdPerCall: Double?
+            /// Shared preamble for every question (what `transcript` and the speaker labels mean).
+            public var context: String
+            public var questions: Questions
+        }
+
+        public var provider: JudgeProviderKind
+        public var typesafe: TypeSafe
+    }
+
     /// Auto-on from Core Audio running state (`CoachTrigger`).
     public struct Trigger: Decodable, Equatable, Sendable {
         public var pollS: Double
@@ -173,6 +228,7 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
     public var text: Text
     public var cues: Cues
     public var gpt: Gpt
+    public var judge: Judge
     public var trigger: Trigger
     public var captureTargets: [CaptureTarget]
     public var meetTitleRegex: String
@@ -224,6 +280,7 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         }
         guard audio.sampleRate * audio.frameMs % 1000 == 0 else { throw ConfigError.invalid("frame_ms must divide sample_rate") }
         guard gpt.store == false else { throw ConfigError.invalid("gpt.store must be false") }
+        try judge.typesafe.validate()
         guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,
               trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS else { throw ConfigError.invalid("bad trigger timing") }
     }
@@ -266,6 +323,22 @@ extension ListenMoreConfig {
     public static func loadFailureMessage(_ error: Error) -> String {
         let name = (error as? ConfigError)?.publicName ?? String(describing: type(of: error))
         return "ListenMoreKit: could not load the coach config (\(name))"
+    }
+}
+
+extension ListenMoreConfig.Judge.TypeSafe {
+    /// Checked whichever provider is selected, so switching to it never meets a bad section.
+    public func validate() throws {
+        guard let u = URL(string: url), u.scheme == "https", u.host?.isEmpty == false else {
+            throw ConfigError.invalid("judge.typesafe.url must be an https URL")
+        }
+        guard !model.isEmpty else { throw ConfigError.invalid("judge.typesafe.model is empty") }
+        guard (0...1).contains(minConfidence) else { throw ConfigError.invalid("judge.typesafe.min_confidence out of range") }
+        guard timeoutS > 0, windowS > 0, maxLines > 0, maxConsecutiveErrors > 0 else {
+            throw ConfigError.invalid("bad judge.typesafe limits")
+        }
+        guard (costUsdPerCall ?? 0) >= 0 else { throw ConfigError.invalid("judge.typesafe.cost_usd_per_call is negative") }
+        guard !questions.asked.isEmpty else { throw ConfigError.invalid("judge.typesafe asks no questions") }
     }
 }
 

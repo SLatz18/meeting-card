@@ -160,6 +160,9 @@ public struct CostTracker: Equatable {
     public private(set) var cachedTok = 0
     public private(set) var outTok = 0
     public private(set) var judgeCalls = 0
+    /// Flat per-call judge prices (`judge.typesafe.cost_usd_per_call`), summed. 0 on the GPT judge,
+    /// which is metered by tokens, and for a provider with no configured price.
+    public private(set) var judgeCallUsd = 0.0
 
     public init(prices: ListenMoreConfig.Gpt.Prices, budget: Double?) {
         self.prices = prices
@@ -198,6 +201,13 @@ public struct CostTracker: Equatable {
         outTok += u.outputTokens
     }
 
+    /// One call to a provider priced per call (nil: no price configured). Its tokens are never
+    /// priced at the GPT judge's rates.
+    public mutating func addJudgeCall(usd: Double?) {
+        judgeCalls += 1
+        judgeCallUsd += usd ?? 0
+    }
+
     public var transcribeUsd: Double {
         billedAudioS / 60 * prices.transcribePerMinute
     }
@@ -209,7 +219,7 @@ public struct CostTracker: Equatable {
     }
 
     public var totalUsd: Double {
-        transcribeUsd + judgeUsd
+        transcribeUsd + judgeUsd + judgeCallUsd
     }
 
     public var exhausted: Bool {

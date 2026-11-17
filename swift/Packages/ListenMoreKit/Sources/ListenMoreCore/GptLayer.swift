@@ -11,6 +11,11 @@ import Foundation
 ///   not_listening below `not_listening_min_confidence`;
 /// - stops on the first hard error; transient judge errors skip a verdict up to `judge_max_transient_errors`.
 ///
+/// The judge is a `JudgeProvider` (`judge.provider`). The GPT judge's prompt, verdict rules and errors
+/// are the ones above. A state-based provider (TypeSafe) gets the minimal redacted window instead of
+/// the prompt; its failures give no cue and never stop the layer, but `max_consecutive_errors` in a
+/// row stop judging for the session. Every judge call's latency is kept (counters only).
+///
 /// `GptLayer` drives it with real sockets and timers; a test or parity harness can drive it on a
 /// simulated clock. Transcript text stays in RAM.
 public final class GptCore {
@@ -41,7 +46,23 @@ public final class GptCore {
         public var audioSecondsSent: Double
         public var billedAudioSeconds: Double
         public var budgetExhausted: Bool
+        public var judgeProvider: JudgeProviderKind
+        /// False when no judge is wired (a provider without its key) or judging stopped after
+        /// repeated provider failures.
+        public var judgeActive: Bool
+        /// Provider calls that gave no answer (state-based providers; GPT judge errors are above).
+        public var judgeFailures: Int
+        /// Class of the last provider failure (a status code or a class, never content).
+        public var lastJudgeFailure: String?
+        public var belowFloorVerdicts: Int
+        /// Latency of each recent judge call in ms, oldest first (at most `GptCore.latencyKept`).
+        public var judgeLatenciesMs: [Int]
+        /// Spend on a per-call priced provider; nil when no price is configured for it.
+        public var judgeCallUsd: Double?
     }
+
+    /// Judge call latencies kept for the snapshot.
+    public static let latencyKept = 64
 
     private let config: ListenMoreConfig
     public private(set) var transcript: RollingTranscript
@@ -68,6 +89,12 @@ public final class GptCore {
     private var prosody: ProsodyReading?
     private var localRecent: [(TimeInterval, LocalEvent.Kind)] = []
     private var meRunS = 0.0
+    public private(set) var judgeActive = true
+    public private(set) var judgeFailures = 0
+    public private(set) var lastJudgeFailure: JudgeFailure?
+    public private(set) var belowFloorVerdicts = 0
+    public private(set) var judgeLatenciesMs: [Int] = []
+    private var failuresInARow = 0
 
     public init(config: ListenMoreConfig) {
         self.config = config
@@ -80,9 +107,29 @@ public final class GptCore {
     }
 
     public var snapshot: Snapshot {
-        Snapshot(enabled: enabled, errors: errors, transientErrors: transientErrors, droppedVerdicts: droppedVerdicts,
-                 judgeCalls: cost.judgeCalls, totalUsd: cost.totalUsd, audioSecondsSent: cost.audioS,
-                 billedAudioSeconds: cost.billedAudioS, budgetExhausted: cost.exhausted)
+        let priced: Bool
+        switch config.judge.provider {
+        case .gpt: priced = false
+        case .typesafe: priced = config.judge.typesafe.costUsdPerCall != nil
+        }
+        return Snapshot(enabled: enabled, errors: errors, transientErrors: transientErrors, droppedVerdicts: droppedVerdicts,
+                        judgeCalls: cost.judgeCalls, totalUsd: cost.totalUsd, audioSecondsSent: cost.audioS,
+                        billedAudioSeconds: cost.billedAudioS, budgetExhausted: cost.exhausted,
+                        judgeProvider: config.judge.provider, judgeActive: judgeActive, judgeFailures: judgeFailures,
+                        lastJudgeFailure: lastJudgeFailure?.description, belowFloorVerdicts: belowFloorVerdicts,
+                        judgeLatenciesMs: judgeLatenciesMs, judgeCallUsd: priced ? cost.judgeCallUsd : nil)
+    }
+
+    /// No judge calls for the rest of the session (no provider wired, or repeated provider failures).
+    /// Transcription and the transcript rules keep running.
+    public func stopJudging() {
+        judgeActive = false
+        pending = nil
+    }
+
+    public func recordJudgeLatency(ms: Int) {
+        judgeLatenciesMs.append(ms)
+        if judgeLatenciesMs.count > Self.latencyKept { judgeLatenciesMs.removeFirst(judgeLatenciesMs.count - Self.latencyKept) }
     }
 
     public func fail(_ msg: String, reason: GptStopReason = .error) {
@@ -189,7 +236,7 @@ public final class GptCore {
 
     /// Returns the request when it should start now; otherwise it is queued (one deep) or dropped.
     public func request(_ req: JudgeRequest) -> JudgeRequest? {
-        guard enabled else { return nil }
+        guard enabled, judgeActive else { return nil }
         if inFlight {
             pending = req
             return nil
@@ -212,6 +259,65 @@ public final class GptCore {
         let prompt = buildPrompt(req, now: now)
         lastJudgeAt = now
         return prompt
+    }
+
+    /// The input for `kind`, or nil when the budget is spent (the layer stops). The GPT judge gets
+    /// `beginJudge(_:now:)`'s prompt; a state-based provider gets only the minimal redacted window.
+    public func beginJudge(_ req: JudgeRequest, now: TimeInterval, for kind: JudgeProviderKind) -> JudgeInput? {
+        switch kind {
+        case .gpt:
+            return beginJudge(req, now: now).map { JudgeInput(prompt: $0, window: []) }
+        case .typesafe:
+            if cost.exhausted {
+                budgetStop()
+                return nil
+            }
+            lastJudgeAt = now
+            return JudgeInput(prompt: "", window: judgeWindow(now: now))
+        }
+    }
+
+    /// What a state-based judge sees: at most `max_lines` lines heard in the last `window_s` seconds,
+    /// each with its speaker label, seconds ago and redacted text. No prosody, overlaps or trigger.
+    func judgeWindow(now t: TimeInterval) -> [JudgeLine] {
+        let ts = config.judge.typesafe
+        transcript.prune(now: t)
+        return transcript.lines.filter { t - $0.t <= ts.windowS }.suffix(ts.maxLines).map {
+            JudgeLine(speaker: $0.speaker, secondsAgo: max(0, t - $0.t), text: JudgeRedactor.redact($0.text, names: config.text.userNames))
+        }
+    }
+
+    /// A judge call finished, from any provider. GPT replies and errors go through
+    /// `finishJudge(_:result:now:)` unchanged.
+    public func finishJudge(_ req: JudgeRequest, reply: Result<JudgeReply, Error>, now: TimeInterval) -> [Offer] {
+        switch reply {
+        case .failure(let error):
+            return finishJudge(req, result: .failure(error), now: now).map { [$0] } ?? []
+        case .success(.gpt(let res, let usage)):
+            return finishJudge(req, result: .success((res, usage)), now: now).map { [$0] } ?? []
+        case .success(.decided(let d)):
+            return finishDecision(req, d, now: now)
+        }
+    }
+
+    private func finishDecision(_ req: JudgeRequest, _ d: JudgeDecision, now: TimeInterval) -> [Offer] {
+        cost.addJudgeCall(usd: d.costUsd)
+        belowFloorVerdicts += d.belowFloor
+        if let failure = d.failure {
+            judgeFailures += 1
+            lastJudgeFailure = failure
+            failuresInARow += 1
+            if failuresInARow >= config.judge.typesafe.maxConsecutiveErrors { stopJudging() }
+            return []
+        }
+        failuresInARow = 0
+        return d.verdicts.compactMap { v in
+            if v.label == CueType.notListening.rawValue && inLongRun {
+                droppedVerdicts += 1
+                return nil
+            }
+            return Offer(label: v.label, t: now, refT: req.refT, confidence: v.confidence)
+        }
     }
 
     /// A judge call finished. Returns the verdict to offer, if any.
@@ -283,7 +389,7 @@ public final class GptLayer: @unchecked Sendable {
         case local(LocalEvent)
         case transcript(TranscriptEvent)
         case runJudge(GptCore.JudgeRequest)
-        case judgeDone(GptCore.JudgeRequest, Result<(JudgeResult, JudgeUsage), Error>)
+        case judgeDone(GptCore.JudgeRequest, Result<JudgeReply, Error>, latencyMs: Int)
         case snapshot(CheckedContinuation<Snapshot, Never>)
         case close(CheckedContinuation<Void, Never>)
     }
@@ -294,7 +400,7 @@ public final class GptLayer: @unchecked Sendable {
     private let onSegment: SegmentSink?
     private let onStopped: (@Sendable (GptStopReason) -> Void)?
     private let scheduler: GptScheduler
-    private let judge: CueJudge
+    private let judge: JudgeProvider?
     private var transcribers: [Speaker: TranscriptionSession] = [:]
     private let inbox: AsyncStream<Command>.Continuation
     private var loop: Task<Void, Never>?
@@ -303,17 +409,19 @@ public final class GptLayer: @unchecked Sendable {
     private var transcribersClosed = false
 
     /// `transcriberFactory` builds one session per speaker and must route its events to the given callback.
-    /// `onStopped` is called once, from the event loop, when the layer turns itself off.
+    /// `onStopped` is called once, from the event loop, when the layer turns itself off. `provider` nil:
+    /// nothing is judged (transcripts still reach `onSegment`).
     public init(config: ListenMoreConfig, now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
                 onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
-                judge: CueJudge, scheduler: GptScheduler,
+                provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
+        if provider == nil { core.stopJudging() }
         self.now = now
         self.offer = offer
         self.onSegment = onSegment
         self.onStopped = onStopped
-        self.judge = judge
+        self.judge = provider
         self.scheduler = scheduler
         var continuation: AsyncStream<Command>.Continuation!
         let stream = AsyncStream<Command> { continuation = $0 }
@@ -329,12 +437,23 @@ public final class GptLayer: @unchecked Sendable {
         }
     }
 
-    /// Production wiring: realtime transcription over WebSocket + the Responses judge.
-    public convenience init(config: ListenMoreConfig, key: APIKey, transports: GptTransports,
+    /// The GPT judge (any `CueJudge`) as the provider.
+    public convenience init(config: ListenMoreConfig, now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
+                            onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
+                            judge: CueJudge, scheduler: GptScheduler,
+                            transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
+        self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped,
+                  provider: GptJudgeProvider(judge), scheduler: scheduler, transcriberFactory: transcriberFactory)
+    }
+
+    /// Production wiring: realtime transcription over WebSocket (OpenAI, `key`) + the judge
+    /// `config.judge.provider` selects (`JudgeProviders.make`; `judgeKey` is the TypeSafe key).
+    public convenience init(config: ListenMoreConfig, key: APIKey, judgeKey: APIKey? = nil, transports: GptTransports,
                             now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
                             onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil) {
         self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped,
-                  judge: LiveJudge(config: config, key: key, http: transports.http),
+                  provider: JudgeProviders.make(config: config, openAIKey: key, judgeKey: judgeKey, http: transports.http,
+                                                scheduler: transports.scheduler),
                   scheduler: transports.scheduler) { speaker, onEvent in
             LiveTranscriber(config: config, key: key, speaker: speaker, connector: transports.webSocket, onEvent: onEvent)
         }
@@ -389,8 +508,9 @@ public final class GptLayer: @unchecked Sendable {
             core.fail(msg)
         case .runJudge(let req):
             runJudge(req)
-        case let .judgeDone(req, result):
-            if let o = core.finishJudge(req, result: result, now: now()) { offer(o.label, o.t, o.refT, o.confidence) }
+        case let .judgeDone(req, result, latencyMs):
+            core.recordJudgeLatency(ms: latencyMs)
+            for o in core.finishJudge(req, reply: result, now: now()) { offer(o.label, o.t, o.refT, o.confidence) }
             if let next = core.judgeEnded() { schedule(next) }
         case .snapshot(let c):
             c.resume(returning: core.snapshot)
@@ -450,17 +570,20 @@ public final class GptLayer: @unchecked Sendable {
     }
 
     private func runJudge(_ req: GptCore.JudgeRequest) {
-        guard let prompt = core.beginJudge(req, now: now()) else {
+        guard let judge, let input = core.beginJudge(req, now: now(), for: judge.kind) else {
             if let next = core.judgeEnded() { schedule(next) }
             return
         }
-        spawn { [judge, inbox] in
+        spawn { [scheduler, inbox] in
+            let start = scheduler.monotonic()
+            let result: Result<JudgeReply, Error>
             do {
-                let r = try await judge.judge(prompt: prompt)
-                inbox.yield(.judgeDone(req, .success(r)))
+                result = .success(try await judge.judge(input))
             } catch {
-                inbox.yield(.judgeDone(req, .failure(error)))
+                result = .failure(error)
             }
+            let ms = Int(((scheduler.monotonic() - start) * 1000).rounded())
+            inbox.yield(.judgeDone(req, result, latencyMs: ms))
         }
     }
 }
