@@ -7,8 +7,9 @@ import Foundation
 /// a transport error or no answer within `timeout_s` gives no cue. It never throws.
 ///
 /// The key goes only into the Authorization header handed to the transport. Failures carry a status
-/// code or a class; reply bodies are parsed for answers and usage only and never kept.
-public final class TypeSafeJudge: JudgeProvider, Sendable {
+/// code or a class; reply bodies are parsed for answers and usage only and never kept. Reflection
+/// (`dump`, debuggers) shows the config only, never the key or the transport.
+public final class TypeSafeJudge: JudgeProvider, Sendable, CustomReflectable {
     public let config: ListenMoreConfig.Judge.TypeSafe
     private let key: APIKey
     private let http: HTTPTransport
@@ -23,6 +24,8 @@ public final class TypeSafeJudge: JudgeProvider, Sendable {
     }
 
     public var kind: JudgeProviderKind { .typesafe }
+
+    public var customMirror: Mirror { Mirror(self, children: ["config": config]) }
 
     public static func requestBody(_ c: ListenMoreConfig.Judge.TypeSafe, window: [JudgeLine]) -> [String: Any] {
         ["model": c.model, "state": state(window), "questions": questions(c)]
@@ -127,7 +130,7 @@ public enum JudgeRedactor {
         (#"(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}"#, "[email]"),
         (#"(?i)\b(?:https?://|www\.)\S+"#, "[link]"),
         (#"(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}/\S*"#, "[link]"),
-        (#"\+?\d(?:[ ().-]?\d){4,}"#, "[number]"),
+        (#"\+?\d(?:[ ().-]{0,2}\d){4,}"#, "[number]"),
     ].compactMap { pattern, token in (try? NSRegularExpression(pattern: pattern)).map { ($0, token) } }
 
     public static func redact(_ text: String, names: [String]) -> String {

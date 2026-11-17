@@ -118,6 +118,32 @@ final class URLSessionTransportTests: XCTestCase {
         }
     }
 
+    func testTypeSafeJudgeThroughURLSession() async throws {
+        let reply: [String: Any] = ["answers": ["missed_question": ["type": "choice", "choice": "fire", "confidence": 0.9,
+                                                                    "probabilities": ["fire": 0.95, "no_fire": 0.05]]]]
+        StubURLProtocol.reply = try JSONSerialization.data(withJSONObject: reply)
+        StubURLProtocol.status = 200
+        let config = try ListenMoreConfig.builtIn()
+        let judge = TypeSafeJudge(config: config.judge.typesafe, key: APIKey("ts-test-urlsession")!,
+                                  http: URLSessionHTTPTransport(configuration: stubbedConfiguration()), clock: SystemGptScheduler())
+        let out = try await judge.judge(JudgeInput(prompt: "", window: [JudgeLine(speaker: .others, secondsAgo: 2, text: "one two three?")]))
+        guard case .decided(let d) = out else { return XCTFail("expected a decision") }
+        XCTAssertEqual(d.verdicts, [JudgeVerdict(label: "missed_question", confidence: 0.9)])
+        let req = try XCTUnwrap(StubURLProtocol.lastRequest)
+        XCTAssertEqual(req.url?.absoluteString, "https://api.typesafe.ai/v1/systemone")
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer ts-test-urlsession")
+        XCTAssertEqual(req.timeoutInterval, config.judge.typesafe.timeoutS)
+        let body = try XCTUnwrap(StubURLProtocol.lastBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(Set(body.keys), ["model", "state", "questions"])
+
+        StubURLProtocol.status = 402
+        StubURLProtocol.reply = Data("insufficient balance for ts-test-urlsession".utf8)
+        guard case .decided(let failed) = try await judge.judge(JudgeInput(prompt: "", window: [])) else { return XCTFail() }
+        XCTAssertEqual(failed.failure, .http(402))
+        XCTAssertFalse(String(describing: failed).contains("ts-test-urlsession"))
+    }
+
     func testWebSocketRequestCarriesAuthHeader() {
         let r = URLSessionWebSocketConnector.request(url: URL(string: "wss://api.openai.com/v1/realtime?intent=transcription")!,
                                                      headers: ["Authorization": "Bearer sk-test-ws"])

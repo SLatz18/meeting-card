@@ -65,14 +65,28 @@ final class PrivacyGuardTests: XCTestCase {
     }
 
     func testKeyOnlyFromKeychain() throws {
-        for (name, text) in try allSources() where text.contains("OPENAI_API_KEY") {
-            XCTAssertEqual(name, "KeychainStore.swift", "\(name) mentions OPENAI_API_KEY")
+        for account in ["OPENAI_API_KEY", "TYPESAFE_API_KEY"] {
+            for (name, text) in try allSources() where text.contains(account) {
+                XCTAssertEqual(name, "KeychainStore.swift", "\(name) mentions \(account)")
+            }
         }
         for (name, text) in try allSources() {
             XCTAssertFalse(text.contains("environment[\"OPENAI"), name)
             XCTAssertFalse(text.contains("UserDefaults") && text.lowercased().contains("apikey") && text.contains(".set("),
                            "\(name) may store the key in defaults")
         }
+    }
+
+    /// A key's value (OpenAI or TypeSafe) goes only into an Authorization header or the Keychain item.
+    func testKeyValuesOnlyReachAuthHeadersOrTheKeychain() throws {
+        var uses = 0
+        for (name, text) in try librarySources() {
+            for line in text.components(separatedBy: "\n") where line.contains("key.value") {
+                uses += 1
+                XCTAssertTrue(line.contains("\"Bearer \\(key.value)\"") || line.contains("Data(key.value.utf8)"), "\(name): \(line)")
+            }
+        }
+        XCTAssertGreaterThanOrEqual(uses, 5, "realtime, Responses, key check, TypeSafe and the Keychain save")
     }
 
     func testPublicLogArgumentsAreNotContent() throws {
@@ -99,7 +113,8 @@ final class PrivacyGuardTests: XCTestCase {
 
     /// A host's only defaults are coach settings, never call data.
     func testHostDefaultsAreSettingsOnly() throws {
-        let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls"]
+        let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
+                                    "coach.judgeProvider"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
         for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -272,7 +287,7 @@ final class PrivacyGuardTests: XCTestCase {
 
     /// Library sources and tests are generic: this is a public repository.
     func testNoSecretsOrPersonalReferences() throws {
-        let banned = [#"sk-[A-Za-z0-9]{20,}"#, #"(?i)\bscott\b"#, #"(?i)\bCTO\b"#, #"(?i)VP Comms"#, #"(?i)plaud"#]
+        let banned = [#"sk-[A-Za-z0-9]{20,}"#, #"(?i)\bscott\b"#, #"(?i)\bCTO\b"#, #"(?i)VP Comms"#, #"(?i)plaud"#, #"(?i)zillow"#]
         let tests = try ["ListenMoreCoreTests", "ListenMoreMacTests", "ListenMoreLiveTests"]
             .flatMap { try swiftFiles(in: Self.testsURL.appendingPathComponent($0)) }
         for (name, text) in try librarySources() + tests where name != "PrivacyGuardTests.swift" {
@@ -280,6 +295,7 @@ final class PrivacyGuardTests: XCTestCase {
         }
         for (name, text) in try appSources() {
             XCTAssertNil(text.range(of: banned[0], options: .regularExpression), "\(name) matches a key pattern")
+            XCTAssertNil(text.range(of: #"(?i)zillow"#, options: .regularExpression), "\(name) names a company")
         }
     }
 }
