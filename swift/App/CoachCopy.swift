@@ -84,7 +84,7 @@ enum CoachCopy {
     static let transcriptCopyIsDraft = true
     static let transcriptSection = "Captions and transcript"
     static let captionsToggle = "Live captions"
-    static let captionsHelp = "Shows what's being said in a small strip near your call. Captions stay in memory and are gone when the call ends."
+    static let captionsHelp = "Shows what's being said on the meeting card during your call. Captions stay in memory and are gone when the call ends."
     static let saveToggle = "Save transcripts"
     static let saveHelp = "Saves one text file per call, with times and speaker labels. Audio is never saved."
     static let transcriptNeedsKey = "Needs an OpenAI API key: captions and transcripts use the same transcription as the GPT cues."
