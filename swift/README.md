@@ -14,6 +14,11 @@ comments and below (`#4`, `#8`, `#12`, ...) refer to the pre-public tracker, not
 
 Build: `scripts/build.sh` (xcodegen + test + Release build + sign + install to `~/Applications/MeetingCardSwift.app`,
 never launches anything). `scripts/build.sh test` = tests only; `scripts/build.sh build` = no install.
+`--test-id` (any mode) builds the test identity: bundle id `com.slatz.meetingcard.swift.test`, named "MeetingCard (Test)",
+Release in `build/dd-test`, install to `~/Applications/MeetingCardSwift-Test.app`. It overrides the `MEETINGCARD_APP_ID` /
+`MEETINGCARD_APP_NAME` build settings; the Keychain service and other bundle-scoped names come from
+`Bundle.main.bundleIdentifier` (`Core/AppIdentity.swift`), so it never touches the real app's Keychain item, defaults
+or privacy grants. Mac hand checks use it ([MAC_DEMO_CHECKS.md](../docs/MAC_DEMO_CHECKS.md)).
 
 Signing: `$SIGN_IDENTITY`, else a `Local Self-Signed` Keychain identity if present, else ad-hoc. No hardened runtime,
 no sandbox (it must exec `gws`; no TCC grants needed unless the call coach is turned on).
