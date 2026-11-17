@@ -181,6 +181,19 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(tip(.meet), "Mute from the Meet window")
         XCTAssertEqual(tip(.toggleOff), "Turn on \"Use Zoom/Meet controls\" in Settings to mute here.")
         XCTAssertEqual(tip(.permissionDenied), "Allow MeetingCard in Privacy & Security to mute here.")
+        // Meet: VoiceOver gets its own label (no Zoom mic to name); the tooltip stays the reason.
+        for mode in [CoachCardState.Mode.card, .pill] {
+            let meet = CoachCardState(status: .listening, mute: CoachMuteCopy.presentation(reason: .meet, isMuted: false), mode: mode)
+                .muteControl
+            XCTAssertEqual(meet.accessibilityLabel, "Mute unavailable. Mute from the Meet window.")
+            XCTAssertEqual(meet.tooltip, "Mute from the Meet window")
+            XCTAssertEqual(meet.accessibilityHelp, "Mute from the Meet window")
+            XCTAssertFalse(meet.enabled)
+        }
+        for r in [MuteDisabledReason.toggleOff, .permissionDenied] {
+            XCTAssertEqual(CoachCardState(status: .listening, mute: CoachMuteCopy.presentation(reason: r, isMuted: false), mode: .pill)
+                .muteControl.accessibilityLabel, "Mute your Zoom mic")
+        }
         XCTAssertEqual(CoachCardState(status: .listening, mute: Self.live).muteControl.tooltip, "Mute your mic")
         XCTAssertEqual(CoachCardState(status: .muted, mute: Self.muted, micMuted: true).muteControl.tooltip, "Unmute your mic")
     }

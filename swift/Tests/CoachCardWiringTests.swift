@@ -64,6 +64,9 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(controller.contains("CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted"))
         let view = try read("App/CoachCardView.swift")
         XCTAssertTrue(view.contains("b.toolTip = c.tooltip") && view.contains("b.setAccessibilityHelp(c.accessibilityHelp)"))
+        XCTAssertTrue(view.contains("b.setAccessibilityLabel(c.accessibilityLabel)"), "VoiceOver reads CoachMuteCopy's label (its own on Meet)")
+        XCTAssertEqual(view.components(separatedBy: "set(mute, s.muteControl,").count - 1, 2, "card and pill share the one mapping")
+        XCTAssertTrue(try read("App/UISnapshots.swift").contains("CoachMuteCopy.presentation(reason: r, isMuted: false)"))
         XCTAssertTrue(view.contains("b.isEnabled = c.enabled"))
     }
 
