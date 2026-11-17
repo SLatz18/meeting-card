@@ -48,6 +48,20 @@ The indicator is the coach card (the reminder card morphs into it near the camer
 Coach on → Coach on, listening → Coach paused, and the status line of the coach menu bar menu, which is always there (Start
 Coach while off).
 
+### Audio debug readout (test build only)
+In the test build only, hold Option while the coach menu bar menu is open: **Settings…** turns into
+**Audio Debug Readout…**. It opens a small window that refreshes every second and records nothing (no file, no log).
+The real app has none of it. It shows:
+- the coach indicator, and whether it is capturing;
+- whether the mic engine is running;
+- voice processing as applied by the running engine, and the plan for this macOS;
+- other-audio ducking as applied: advanced on or off, and the level with its raw value (min = 10);
+- the default input device: name, transport (Built-in, Bluetooth, USB…), sample rate, and whether it is running somewhere;
+- the default output device: name, transport, data source (Internal Speakers or Headphones, when reported), sample
+  rate, and device volume (0 to 1);
+- **Mic in use by**: the bundle IDs of the processes running audio input.
+
+### Checks table
 | # | App | Check | How | Pass when |
 |---|---|---|---|---|
 | Z1 | Zoom desktop | Start / stop | Join a test Zoom meeting with audio | Chip shows Listening within about 3 s; hides about 30 s after leaving |
@@ -105,6 +119,7 @@ Coach while off).
 | T3 | All | Saving on | Saving on (default folder `MeetingCard-Test/Transcripts`, then a chosen folder), run a call | Saving indicator shows during the call; exactly one `Call <date> <time>.md` per call in the folder, mode `-rw-------`, with times and speaker labels; no audio files anywhere |
 | T4 | All | Delete | Settings → Delete Transcript (during a call, then after one) | File removed; during a call, saving stops for that call |
 | T5 | All | Cost cap | Set a tiny `budget_usd_per_call` in a dev build, run a call | Captions show they stopped, the indicator goes away, local cues still fire |
+| V1 | Zoom or Meet | Coach leaves other audio alone | In a test call, play steady music (the same track at a fixed volume). Repeat for each output: built-in speakers, wired headphones, AirPods. Measure with a phone sound meter, A-weighted, 10 s average: for speakers, the phone 30 cm in front of the Mac; for headphones and AirPods, the meter mic held against the ear cup or bud, in the same spot each time. Measure once with the coach **Paused** and once **Listening**. In both states, also note the readout's output sample rate, **Mic in use by**, and the device volume. Then Pause (and, separately, hang up with Use Zoom/Meet controls on) and confirm the level returns | Wired headphones and AirPods differ by 1 dB or less between Paused and Listening; built-in speakers by 2 dB or less. The readout shows voice processing on, advanced ducking off and level min (10) while Listening, and the mic engine stopped while Paused. AirPods stay at their high-quality sample rate (note the value; a drop to 16000 or 24000 Hz means the hands-free profile), and note who owns the mic. After Pause or hang-up (hang-up needs Use Zoom/Meet controls) the mic engine shows stopped within about 1 s and the level is back. If speakers miss 2 dB, record the numbers in the PR anyway (see [V3_BLEED_CHECK.md](V3_BLEED_CHECK.md)) |
 
 ### Keychain caveat (read before K1/K2)
 The app asks for the key to be kept "on this device only, while unlocked" (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`).
