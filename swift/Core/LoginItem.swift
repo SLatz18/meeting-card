@@ -2,10 +2,9 @@ import Foundation
 
 /// v2.5 #1: launch at login (SMAppService.mainApp, registered by the App). The decision of WHETHER
 /// this process may register lives here, pure and tested: only the installed copy at
-/// ~/Applications/MeetingCardSwift.app, never a build/dd product, a scratch copy, or a fixture run
-/// (registering any of those would make that copy Scott's login item).
+/// ~/Applications/MeetingCardSwift.app, never a build/dd product, a scratch copy, a fixture run, or
+/// a test-identity build (registering any of those would make that copy Scott's login item).
 public enum LoginItem {
-    public static let appName = "MeetingCardSwift.app"
 
     public enum Outcome: Equatable {
         case registered, already, error(String), skipped(String)
@@ -21,8 +20,9 @@ public enum LoginItem {
 
     /// `bundlePath` should already be symlink-resolved by the caller; `.`/`..`/trailing `/` are
     /// normalized here. Exact full-path match only: no suffix / contains matching.
-    public static func shouldRegister(bundlePath: String, fixture: Bool, home: String) -> Bool {
-        guard !fixture, !bundlePath.isEmpty, !home.isEmpty else { return false }
+    /// Only `identity.loginItemAppName` registers, so only the shipping identity ever does.
+    public static func shouldRegister(bundlePath: String, fixture: Bool, home: String, identity: AppIdentity) -> Bool {
+        guard !fixture, !bundlePath.isEmpty, !home.isEmpty, let appName = identity.loginItemAppName else { return false }
         let norm = { (p: String) in URL(fileURLWithPath: p).standardizedFileURL.path }
         let want = norm((home as NSString).appendingPathComponent("Applications/" + appName))
         return norm(bundlePath) == want

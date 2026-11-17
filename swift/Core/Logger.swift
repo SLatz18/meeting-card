@@ -7,22 +7,22 @@ public struct AppPaths: Sendable, Equatable {
     public let stateDir: URL
     public init(logFile: URL, stateDir: URL) { self.logFile = logFile; self.stateDir = stateDir }
 
-    public static var production: AppPaths {
-        let home = URL(fileURLWithPath: NSHomeDirectory())
-        return AppPaths(
-            logFile: home.appendingPathComponent("Library/Logs/MeetingCardSwift.log"),
-            stateDir: home.appendingPathComponent("Library/Application Support/MeetingCardSwift"))
-    }
+    /// The live log and state, named by the identity's `fileStem`: `~/Library/Logs/MeetingCardSwift.log`
+    /// and `~/Library/Application Support/MeetingCardSwift` for the shipping app.
+    public static func production(for id: AppIdentity) -> AppPaths { named(id.fileStem) }
 
     /// `--fixture` runs (renders, eyeball checks): own log + state, never the live ones.
-    public static var fixture: AppPaths {
-        let home = URL(fileURLWithPath: NSHomeDirectory())
-        return AppPaths(
-            logFile: home.appendingPathComponent("Library/Logs/MeetingCardSwift-fixture.log"),
-            stateDir: home.appendingPathComponent("Library/Application Support/MeetingCardSwift-fixture"))
+    public static func fixture(for id: AppIdentity) -> AppPaths { named(id.fileStem + "-fixture") }
+
+    public static func forRun(fixture: Bool, identity: AppIdentity) -> AppPaths {
+        fixture ? AppPaths.fixture(for: identity) : AppPaths.production(for: identity)
     }
 
-    public static func forRun(fixture: Bool) -> AppPaths { fixture ? .fixture : .production }
+    static func named(_ name: String) -> AppPaths {
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        return AppPaths(logFile: home.appendingPathComponent("Library/Logs/\(name).log"),
+                        stateDir: home.appendingPathComponent("Library/Application Support/\(name)"))
+    }
 
     public static func temporary() -> AppPaths {
         let d = FileManager.default.temporaryDirectory.appendingPathComponent("mcs-\(UUID().uuidString)")
@@ -33,10 +33,11 @@ public struct AppPaths: Sendable, Equatable {
     /// True when running inside an XCTest bundle.
     static var underTest: Bool { NSClassFromString("XCTestCase") != nil }
 
-    /// Hygiene guard: a test process may never write the production log/state paths.
+    /// Hygiene guard: a test process may never write any identity's production log/state paths.
     func allowed() -> Bool {
-        !(AppPaths.underTest && (logFile == AppPaths.production.logFile
-                                 || stateDir == AppPaths.production.stateDir))
+        guard AppPaths.underTest else { return true }
+        return ![AppIdentity.release, .test, .current].map { AppPaths.production(for: $0) }
+            .contains { logFile == $0.logFile || stateDir == $0.stateDir }
     }
 }
 

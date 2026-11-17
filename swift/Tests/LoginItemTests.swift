@@ -7,17 +7,17 @@ final class LoginItemTests: XCTestCase {
     var installed: String { home + "/Applications/MeetingCardSwift.app" }
 
     func testInstalledLiveRegisters() {
-        XCTAssertTrue(LoginItem.shouldRegister(bundlePath: installed, fixture: false, home: home))
-        XCTAssertTrue(LoginItem.shouldRegister(bundlePath: installed + "/", fixture: false, home: home), "trailing slash")
+        XCTAssertTrue(LoginItem.shouldRegister(bundlePath: installed, fixture: false, home: home, identity: .release))
+        XCTAssertTrue(LoginItem.shouldRegister(bundlePath: installed + "/", fixture: false, home: home, identity: .release), "trailing slash")
     }
 
     func testBuildCopyNeverRegisters() {
         let dd = home + "/src/x/swift/build/dd/Build/Products/Release/MeetingCardSwift.app"
-        XCTAssertFalse(LoginItem.shouldRegister(bundlePath: dd, fixture: false, home: home))
+        XCTAssertFalse(LoginItem.shouldRegister(bundlePath: dd, fixture: false, home: home, identity: .release))
     }
 
     func testFixtureNeverRegisters() {
-        XCTAssertFalse(LoginItem.shouldRegister(bundlePath: installed, fixture: true, home: home))
+        XCTAssertFalse(LoginItem.shouldRegister(bundlePath: installed, fixture: true, home: home, identity: .release))
     }
 
     func testOtherApplicationsPathsNeverRegister() {
@@ -28,12 +28,19 @@ final class LoginItemTests: XCTestCase {
                   "/Users/other/Applications/MeetingCardSwift.app",
                   home + "/Applications/../tmp/Applications/MeetingCardSwift.app",
                   ""] {
-            XCTAssertFalse(LoginItem.shouldRegister(bundlePath: p, fixture: false, home: home), p)
+            XCTAssertFalse(LoginItem.shouldRegister(bundlePath: p, fixture: false, home: home, identity: .release), p)
+        }
+    }
+
+    /// A `build.sh --test-id` build never registers, wherever it is installed.
+    func testTestIdentityNeverRegisters() {
+        for p in [installed, home + "/Applications/MeetingCardSwift-Test.app"] {
+            XCTAssertFalse(LoginItem.shouldRegister(bundlePath: p, fixture: false, home: home, identity: .test), p)
         }
     }
 
     func testDotSegmentsNormalize() {
-        XCTAssertTrue(LoginItem.shouldRegister(bundlePath: home + "/Applications/./MeetingCardSwift.app", fixture: false, home: home))
+        XCTAssertTrue(LoginItem.shouldRegister(bundlePath: home + "/Applications/./MeetingCardSwift.app", fixture: false, home: home, identity: .release))
     }
 
     func testLogLines() {

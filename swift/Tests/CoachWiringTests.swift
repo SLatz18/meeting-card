@@ -39,7 +39,7 @@ final class CoachWiringTests: XCTestCase {
 
     func testKeyLivesInMeetingCardsKeychainItem() throws {
         let src = try read("App/CoachController.swift")
-        XCTAssertTrue(src.contains("static let keychainService = AppIdentity.keychainService()"), "<bundle id>.openai")
+        XCTAssertTrue(src.contains("static let keychainService = AppIdentity.current.keychainService"), "<bundle id>.openai")
         XCTAssertTrue(src.contains("keychain: KeychainStore = KeychainStore(service: CoachController.keychainService)"))
         XCTAssertTrue(src.contains("keys: keyGate"), "the service reads the key from that item only, through the gate")
         XCTAssertTrue(try read("App/CoachKeyActions.swift").contains("func readKey() throws -> APIKey? { rejected ? nil : try store.readKey() }"),

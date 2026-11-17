@@ -134,7 +134,7 @@ enum UISnapshots {
     /// window's layer render.
     @MainActor
     static func menuShots(dir: String, tag: String, controller: Controller, packet: (String, CGImage?) -> Void) {
-        let suite = AppIdentity.scoped("snapshots")
+        let suite = AppIdentity.current.scoped("snapshots")
         guard let defaults = UserDefaults(suiteName: suite),
               let coach = try? CoachController(defaults: defaults, keychain: KeychainStore(service: suite, account: "none"),
                                                showsStatusItem: false) else { return }
@@ -254,7 +254,7 @@ enum UISnapshots {
     @MainActor
     static func settingsShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
                               done: @escaping () -> Void) {
-        let suite = AppIdentity.scoped("snapshots")
+        let suite = AppIdentity.current.scoped("snapshots")
         guard let defaults = UserDefaults(suiteName: suite) else { return done() }
         defaults.removePersistentDomain(forName: suite)
         let keychain = KeychainStore(service: suite, account: "none")

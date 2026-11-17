@@ -17,7 +17,7 @@ final class CoachController: NSObject {
     }
 
     /// MeetingCard's Keychain item for the OpenAI key, `<bundle id>.openai` (the Kit's default service is not ours).
-    static let keychainService = AppIdentity.keychainService()
+    static let keychainService = AppIdentity.current.keychainService
 
     let defaults: UserDefaults
     let config: ListenMoreConfig

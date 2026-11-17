@@ -49,7 +49,7 @@ final class Controller: NSObject, NSApplicationDelegate {
     let gws: Gws
     let state: StateWriter
     let dryJoin = ProcessInfo.processInfo.environment["MEETING_CARD_DRY_JOIN"] == "1"
-    let gwsQueue = DispatchQueue(label: AppIdentity.scoped("gws"), attributes: .concurrent)
+    let gwsQueue = DispatchQueue(label: AppIdentity.current.scoped("gws"), attributes: .concurrent)
     var coord: Coordinator<Card>!
     var pollInFlight = false
     var timers: [Timer] = []
@@ -61,7 +61,7 @@ final class Controller: NSObject, NSApplicationDelegate {
 
     init(args: Args) {
         self.args = args
-        paths = AppPaths.forRun(fixture: args.fixture != nil)
+        paths = AppPaths.forRun(fixture: args.fixture != nil, identity: .current)
         logger = Logger(paths: paths)
         let l = logger
         gws = Gws(log: { l.log($0) })
@@ -128,7 +128,7 @@ final class Controller: NSObject, NSApplicationDelegate {
 
     /// v2.5 #1: launch at login. One attempt per launch, never a loop; never unregisters (Scott turns
     /// it off in System Settings > General > Login Items). Gated by LoginItem.shouldRegister so a
-    /// build/dd product, a scratch copy, or a fixture run never becomes the login item.
+    /// build/dd product, a scratch copy, a fixture run, or a test-identity build never becomes the login item.
     private func registerLoginItem() {
         let svc = SMAppService.mainApp
         let name = { (s: SMAppService.Status) -> String in
@@ -142,9 +142,10 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
         let bundle = Bundle.main.bundleURL.resolvingSymlinksInPath().path
         let home = FileManager.default.homeDirectoryForCurrentUser.resolvingSymlinksInPath().path
-        guard LoginItem.shouldRegister(bundlePath: bundle, fixture: args.fixture != nil, home: home) else {
-            log(LoginItem.logLine(status: name(svc.status),
-                                  outcome: .skipped(args.fixture != nil ? "fixture" : "not installed copy")))
+        let identity = AppIdentity.current
+        guard LoginItem.shouldRegister(bundlePath: bundle, fixture: args.fixture != nil, home: home, identity: identity) else {
+            let why = args.fixture != nil ? "fixture" : identity.isRelease ? "not installed copy" : "test identity"
+            log(LoginItem.logLine(status: name(svc.status), outcome: .skipped(why)))
             return
         }
         if svc.status == .enabled { log(LoginItem.logLine(status: "enabled", outcome: .already)); return }

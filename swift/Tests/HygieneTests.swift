@@ -9,7 +9,7 @@ final class HygieneTests: XCTestCase {
     }
 
     func testSuiteNeverTouchesRealLogOrState() throws {
-        let prod = AppPaths.production
+        let prod = AppPaths.production(for: .release)
         XCTAssertTrue(prod.logFile.path.hasSuffix("Library/Logs/MeetingCardSwift.log"))
         XCTAssertTrue(prod.stateDir.path.hasSuffix("Library/Application Support/MeetingCardSwift"))
         let state = prod.stateDir.appendingPathComponent("last-card.json")
@@ -34,17 +34,24 @@ final class HygieneTests: XCTestCase {
 
         XCTAssertEqual(stamp(prod.logFile), before.0)
         XCTAssertEqual(stamp(state), before.1)
+
+        // The test identity's live paths are refused too.
+        let testProd = AppPaths.production(for: .test)
+        let t = Logger(paths: testProd, mirrorToStderr: false)
+        t.log("meet1 hygiene probe")
+        XCTAssertEqual(t.refused, 1)
+        XCTAssertFalse(StateWriter(paths: testProd).write(windowNumber: 1, ev: fx("meet")))
     }
 
     /// Fixture runs (`--fixture`, render/eyeball tooling) never write the live log/state.
     func testFixtureModeUsesOwnPaths() {
-        let prod = AppPaths.production, fx = AppPaths.fixture
+        let prod = AppPaths.production(for: .release), fx = AppPaths.fixture(for: .release)
         XCTAssertTrue(fx.logFile.path.hasSuffix("Library/Logs/MeetingCardSwift-fixture.log"))
         XCTAssertTrue(fx.stateDir.path.hasSuffix("Library/Application Support/MeetingCardSwift-fixture"))
         XCTAssertNotEqual(fx.logFile, prod.logFile)
         XCTAssertNotEqual(fx.stateDir, prod.stateDir)
-        XCTAssertEqual(AppPaths.forRun(fixture: true), fx)
-        XCTAssertEqual(AppPaths.forRun(fixture: false), prod)
+        XCTAssertEqual(AppPaths.forRun(fixture: true, identity: .release), fx)
+        XCTAssertEqual(AppPaths.forRun(fixture: false, identity: .release), prod)
     }
 
     func testLogLineIs12HourWithUTF8() throws {
