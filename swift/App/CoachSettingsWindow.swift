@@ -44,29 +44,51 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     // MARK: building blocks
 
-    static func text(_ s: String, font: Theme.FontSpec, color: NSColor = .labelColor) -> NSTextField {
+    static let groupPadding = NSSize(width: 18, height: 14)
+    static let outerWidth = CGFloat(Theme.Settings.width - 2 * Theme.Settings.inset)
+    static let innerWidth = outerWidth - 2 * groupPadding.width
+
+    static func text(_ s: String, font: Theme.FontSpec, color: NSColor = .labelColor, maxWidth: CGFloat = innerWidth) -> NSTextField {
         let f = NSTextField(wrappingLabelWithString: s)
         f.font = Theme.font(font)
+        f.preferredMaxLayoutWidth = maxWidth
         f.textColor = color
         f.isSelectable = false
         return f
     }
 
-    static func group(_ views: [NSView]) -> NSBox {
-        let box = NSBox()
-        box.boxType = .custom
-        box.borderWidth = 0
-        box.cornerRadius = CGFloat(Theme.Settings.groupRadius)
-        box.fillColor = .controlBackgroundColor
-        box.contentViewMargins = NSSize(width: 18, height: 14)
-        let stack = NSStackView(views: views)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        box.contentView = stack
-        for v in views { v.translatesAutoresizingMaskIntoConstraints = false }
-        return box
+    /// Rounded `controlBackgroundColor` group whose height follows its stack (constraints, unlike an
+    /// NSBox content view).
+    final class Group: NSView {
+        let stack: NSStackView
+        init(_ views: [NSView]) {
+            stack = NSStackView(views: views)
+            super.init(frame: .zero)
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 10
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(stack)
+            let p = CoachSettingsWindow.groupPadding
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: p.width),
+                stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -p.width),
+                stack.topAnchor.constraint(equalTo: topAnchor, constant: p.height),
+                stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -p.height),
+            ])
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.controlBackgroundColor.setFill()
+            let r = CGFloat(Theme.Settings.groupRadius)
+            NSBezierPath(roundedRect: bounds, xRadius: r, yRadius: r).fill()
+        }
     }
+
+    static func group(_ views: [NSView]) -> Group { Group(views) }
 
     static func row(_ left: NSView, _ right: NSView) -> NSStackView {
         let spacer = NSView()
@@ -77,9 +99,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         return r
     }
 
-    private func pin(_ inner: NSView, in box: NSBox) {
-        guard let stack = box.contentView else { return }
-        inner.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    private func pin(_ inner: NSView, in group: Group) {
+        inner.widthAnchor.constraint(equalTo: group.stack.widthAnchor).isActive = true
     }
 
     // MARK: content
@@ -90,7 +111,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         root.alignment = .leading
         root.spacing = 18
         root.edgeInsets = NSEdgeInsets(top: 20, left: CGFloat(Theme.Settings.inset), bottom: 24, right: CGFloat(Theme.Settings.inset))
-        let width = CGFloat(Theme.Settings.width - 2 * Theme.Settings.inset)
+        let width = Self.outerWidth
         let views = showingOnboarding ? onboardingViews() : settingsViews()
         for v in views {
             root.addArrangedSubview(v)
@@ -116,7 +137,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let dots = Self.text("\(screen + 1) of \(CoachCopy.onboarding.count)", font: Theme.Settings.helperFont, color: .tertiaryLabelColor)
         let box = Self.group([glyph, title, body, Self.row(dots, buttonRow)])
         for v in [title, body] { pin(v, in: box) }
-        if let r = (box.contentView as? NSStackView)?.arrangedSubviews.last { pin(r, in: box) }
+        if let r = box.stack.arrangedSubviews.last { pin(r, in: box) }
         return [box]
     }
 
@@ -139,7 +160,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     }
 
     private func settingsViews() -> [NSView] {
-        let section = Self.text(CoachCopy.section, font: Theme.Settings.sectionFont, color: .secondaryLabelColor)
+        let section = Self.text(CoachCopy.section, font: Theme.Settings.sectionFont, color: .secondaryLabelColor,
+                                maxWidth: Self.outerWidth)
 
         toggle.target = self
         toggle.action = #selector(toggled(_:))
@@ -181,7 +203,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         rebuildApps()
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
-                                color: .secondaryLabelColor)
+                                color: .secondaryLabelColor, maxWidth: Self.outerWidth)
         return [section, g1, g2, g3, privacy]
     }
 
