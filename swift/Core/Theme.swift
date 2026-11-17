@@ -149,12 +149,13 @@ public enum Theme {
         public static let windowAnimation = CardStyle.Material.animates
     }
 
-    /// Screen-edge glow for coach cues: calm, peripheral, plays once. Hues are derived, not
-    /// hard-coded: rose = the system red muted toward neutral gray, amber = the card's flag amber
-    /// muted the same way (approximately the design tokens #A65B57/#C47A76 and #B4843A/#D4A45A).
+    /// Screen-edge glow for coach cues: calm, peripheral, plays once. Colors are the card's color
+    /// roles muted toward neutral gray (rose from `critical`, amber from the dark card's `warning`,
+    /// the vivid flag hue, for both appearances), near the design tokens #A65B57/#C47A76 and
+    /// #B4843A/#D4A45A. The corner radius is the card's, the band one control height wide.
     public enum Glow {
-        /// NSColor.systemRed in sRGB (light / dark); the App passes the live semantic value.
-        public static func systemRed(dark: Bool) -> RGBA { dark ? RGBA(hex: 0xFF453A) : RGBA(hex: 0xFF3B30) }
+        /// NSColor.systemRed in sRGB (light / dark): the card style's `critical`.
+        public static func systemRed(dark: Bool) -> RGBA { CardStyle.for(dark: dark).critical }
 
         /// Mix `c` toward a neutral gray: light appearance mutes harder and darker.
         public static func mute(_ c: RGBA, dark: Bool, amount: Double? = nil, gray: Double? = nil) -> RGBA {
@@ -164,18 +165,19 @@ public enum Theme {
         }
 
         /// Interrupt, talk-over, aggressive.
-        public static func rose(dark: Bool, systemRed: RGBA? = nil) -> RGBA {
-            mute(systemRed ?? Glow.systemRed(dark: dark), dark: dark)
+        public static func rose(dark: Bool) -> RGBA {
+            mute(CardStyle.for(dark: dark).critical, dark: dark)
         }
 
         /// Monologue, missed question, not listening, talk share.
         public static func amber(dark: Bool) -> RGBA {
-            mute(Theme.palette(dark: true).flag, dark: dark, amount: 0.48, gray: dark ? 0.65 : 0.4)
+            mute(CardStyle.for(dark: true).warning, dark: dark, amount: 0.48, gray: dark ? 0.65 : 0.4)
         }
 
-        public static let width: Double = 32
+        public static let width = CardStyle.Size.control
+        public static let cornerRadius = CardStyle.Radius.card
+        /// Glow behaviour (calibrated, not card tokens): peak opacity, falloff and timing.
         public static let peakOpacity: Double = 0.45
-        public static let displayCornerRadius: Double = 16
         /// (fraction of width from the outer edge, opacity factor)
         public static let stops: [(at: Double, factor: Double)] = [
             (0, 1), (0.15, 0.78), (0.35, 0.42), (0.6, 0.16), (0.82, 0.05), (1, 0)]
@@ -189,44 +191,53 @@ public enum Theme {
         public static let reduceMotionFade: TimeInterval = 2.0
     }
 
-    /// The coach chip on the live card's button row and the coach glyph.
+    /// The coach chip on the live card's button row, styled as the card's secondary control
+    /// (Ignore): its height, radius, hairline, fill and button font. Its inner Pause/Resume control
+    /// is inset by half a control gap with concentric corners.
     public enum Coach {
         public static let symbol = "ear.badge.waveform"
         public static let pauseSymbol = "pause.fill"
         public static let resumeSymbol = "play.fill"
-        public static let glyphSize: Double = 16
-        /// Right edge sits this far left of the Join button (or of the Join slot if there is none).
-        public static let joinGap: Double = 10
-        public static let height: Double = Metrics.buttonHeight
-        public static let radius: Double = Metrics.buttonRadius
-        public static let labelFont = FontSpec(13.5, .medium)
-        public static let paddingLeading: Double = 10
-        public static let paddingTrailing: Double = 6
-        public static let glyphGap: Double = 5
-        public static let dotDiameter: Double = 4.6
-        public static let dotGap: Double = 7
-        public static let controlGap: Double = 8
-        public static let pauseButtonSize: Double = 22
-        public static let pauseButtonRadius: Double = 7
-        public static let pauseGlyphSize: Double = 9
-        /// Chip fills: the Ignore fill, lighter while paused.
-        public static func fill(dark: Bool, paused: Bool) -> RGBA {
-            paused ? (dark ? .white(0.08) : .black(0.07)) : Theme.palette(dark: dark).ignoreFill(.normal)
-        }
-        public static func pauseButtonFill(dark: Bool) -> RGBA { dark ? .white(0.14) : .black(0.10) }
-        /// Live dot = the card's Next up blue.
-        public static func dot(dark: Bool) -> RGBA { Theme.palette(dark: dark).nextUp }
+        /// SF Symbols for the coach status menu, drawn at the body font size like a native menu.
+        public static let menuSymbols = (enable: "power", start: resumeSymbol, skip: "forward.end.fill",
+                                         pause: pauseSymbol, resume: resumeSymbol, turnOff: "power",
+                                         gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
+                                         settings: "gearshape")
+        public static let menuSymbolSize = CardStyle.Typography.body.size
+        /// The status bar glyph, at the button font size and weight.
+        public static let statusSymbolFont = CardStyle.Typography.button
+        public static let glyphSize = CardStyle.Size.icon
+        public static let glyphFont = CardStyle.Typography.button
+        /// Right edge sits one control gap left of the Join button (or of the Join slot if none).
+        public static let joinGap = CardStyle.Spacing.control
+        public static let height = CardStyle.Size.control
+        public static let radius = CardStyle.Radius.control
+        public static let labelFont = CardStyle.Typography.button
+        public static let paddingLeading = CardStyle.Spacing.control
+        public static let glyphGap = CardStyle.Spacing.control / 2
+        public static let controlGap = CardStyle.Spacing.control
+        /// The inner control's inset from the chip edge (also the trailing padding).
+        public static let controlInset = CardStyle.Spacing.control / 2
+        public static let paddingTrailing = controlInset
+        public static let pauseButtonSize = height - 2 * controlInset
+        public static let pauseButtonRadius = CardStyle.Radius.concentric(outer: radius, inset: controlInset)
+        public static let pauseGlyphSize = CardStyle.Typography.caption.size
+        /// Chip fill: the Ignore fill (paused reads from the secondary text and the Resume glyph).
+        public static func fill(style: CardStyle) -> RGBA { style.controlFill(.normal) }
+        /// The inner control: the Ignore fill again, layered on the chip.
+        public static func pauseButtonFill(style: CardStyle) -> RGBA { style.controlFill(.normal) }
+        /// Live tint = the card's accent (Next up blue).
+        public static func live(style: CardStyle) -> RGBA { style.accent }
 
         /// Chip frame in card coordinates: content-hugging width, right-anchored `joinGap` left of
-        /// Join. The label is dropped (glyph, dot and control stay) if the chip would reach the
-        /// Ignore button, e.g. next to the wide multi-link Join.
-        public static func layout(labelWidth: Double, live: Bool, joinX: Double?) -> (x: Double, width: Double, showsLabel: Bool) {
+        /// Join. The label is dropped (glyph and control stay) if the chip would reach the Ignore
+        /// button, e.g. next to the wide multi-link Join.
+        public static func layout(labelWidth: Double, joinX: Double?) -> (x: Double, width: Double, showsLabel: Bool) {
             let m = Metrics.self
             let right = (joinX ?? (m.cardWidth - m.trailingInset)) - joinGap
             let minX = m.leadingInset + m.ignoreWidth + m.controlGap
             func width(_ label: Bool) -> Double {
-                paddingLeading + glyphSize + (label ? glyphGap + labelWidth : 0) + (live ? dotGap + dotDiameter : 0)
-                    + controlGap + pauseButtonSize + paddingTrailing
+                paddingLeading + glyphSize + (label ? glyphGap + labelWidth : 0) + controlGap + pauseButtonSize + paddingTrailing
             }
             let full = width(true)
             if right - full >= minX { return (right - full, full, true) }
@@ -235,13 +246,21 @@ public enum Theme {
         }
     }
 
-    /// Settings window: a standard titled window; window and group fills are AppKit semantic colors.
+    /// Settings window: a standard titled window (native controls and window background) whose
+    /// groups are card-shaped: card width, card radius, card fill, and the card's text insets.
     public enum Settings {
-        public static let width: Double = 592
-        public static let inset: Double = 22
-        public static let groupRadius: Double = 10
-        public static let rowFont = FontSpec(13.5, .medium)
-        public static let helperFont = FontSpec(11.5)
-        public static let sectionFont = FontSpec(13.5, .semibold)
+        public static let groupWidth = CardLayout.W
+        public static let groupRadius = CardStyle.Radius.card
+        public static let groupPadding = (h: CardStyle.Spacing.leading, v: CardStyle.Spacing.controlBottom)
+        public static let groupSpacing = CardStyle.Spacing.control
+        /// Window edge to groups, and between groups: the card stack gap.
+        public static let inset = CardStyle.Spacing.stack
+        public static let width = groupWidth + 2 * inset
+        public static let headingFont = CardStyle.Typography.title
+        public static let rowFont = CardStyle.Typography.button
+        public static let itemFont = CardStyle.Typography.body
+        public static let helperFont = CardStyle.Typography.caption
+        public static let glyphSize = CardStyle.Size.icon
+        public static func groupFill(style: CardStyle) -> RGBA { style.surface }
     }
 }

@@ -32,7 +32,7 @@ Settings and onboarding PNGs, then quit). `scripts/snapshots.sh` renders them, a
 card at the base and head revisions (`scripts/compare-snapshots.py`).
 
 Call coach (opt-in, off by default): `App/Coach*.swift` (controller, chip, Settings, copy) on top of ListenMoreKit.
-Shared look in `Core/Theme.swift` (card metrics/fonts, glow and chip tokens); the reminder card draws from it.
+Design tokens in `Core/Theme.swift`: `CardStyle` holds the reminder card's typography, color roles, radii, spacing, strokes, material and light/dark values. The card reads it, and every coach surface (chip, glow, Settings, onboarding, status menu) derives from it through `Theme`; the Kit gets its glow colors and shape as a `CoachStyle` built from these tokens. `scripts/snapshots.sh coach` also writes `packet-*.png`: the card beside each coach surface, light and dark.
 Needs Microphone, System Audio Recording and Screen Recording only once the user turns the coach on.
 
 Snapshots (`docs/`): `card-{meet,zoom,multilink,countdown,nolink,nextup}-{light,dark}.png`, made with

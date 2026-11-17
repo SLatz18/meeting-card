@@ -29,9 +29,9 @@ struct CoachChip: Equatable {
 
     var accessibilityLabel: String {
         switch mode {
-        case .on: "Coach on"
-        case .listening: "Coach on, listening"
-        case .paused: "Coach paused"
+        case .on: CoachCopy.coachOn
+        case .listening: CoachCopy.coachListening
+        case .paused: CoachCopy.coachPaused
         }
     }
 
@@ -43,7 +43,7 @@ struct CoachChip: Equatable {
     var live: Bool { mode == .listening }
 }
 
-/// The chip's 22 pt Start/Pause/Resume control (first click works on the non-activating card).
+/// The chip's inner Start/Pause/Resume control (first click works on the non-activating card).
 final class CoachChipControl: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
@@ -73,34 +73,34 @@ final class CoachChipView: NSView {
 
     /// Frame (card coordinates) right-anchored `Theme.Coach.joinGap` left of `joinX`.
     static func frame(_ chip: CoachChip, joinX: Double?) -> (NSRect, Bool) {
-        let l = Theme.Coach.layout(labelWidth: labelWidth(chip), live: chip.live, joinX: joinX)
+        let l = Theme.Coach.layout(labelWidth: labelWidth(chip), joinX: joinX)
         let m = Theme.Metrics.self
         return (NSRect(x: l.x, y: m.buttonBottom, width: l.width, height: Theme.Coach.height), l.showsLabel)
     }
 
     init(chip: CoachChip, joinX: Double?, style: CardStyle, target: AnyObject?, action: Selector?) {
-        let palette = style.palette
         self.chip = chip
         let (frame, showsLabel) = Self.frame(chip, joinX: joinX)
         self.showsLabel = showsLabel
         super.init(frame: frame)
         let c = Theme.Coach.self
         let paused = chip.mode == .paused
+        let weight = Theme.weight(c.glyphFont)
         wantsLayer = true
         layer?.cornerRadius = Theme.cg(c.radius)
         layer?.cornerCurve = .continuous
-        layer?.backgroundColor = Theme.ns(c.fill(dark: palette.dark, paused: paused)).cgColor
-        layer?.borderWidth = Theme.cg(Theme.Metrics.buttonHairline)
-        layer?.borderColor = Theme.ns(palette.hairline).cgColor
+        layer?.backgroundColor = Theme.ns(c.fill(style: style)).cgColor
+        layer?.borderWidth = Theme.cg(CardStyle.Stroke.hairline)
+        layer?.borderColor = Theme.ns(style.hairline).cgColor
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel(chip.accessibilityLabel)
 
-        let fg: NSColor = paused ? .secondaryLabelColor : .labelColor
+        let fg = Theme.text(paused ? .secondary : .primary, style)
         var x = c.paddingLeading
         let midY = frame.height / 2
-        let glyph = NSImageView(image: Self.symbol(c.symbol, size: c.glyphSize, weight: .medium, label: chip.accessibilityLabel) ?? NSImage())
-        glyph.contentTintColor = chip.live ? Theme.ns(c.dot(dark: palette.dark)) : fg
+        let glyph = NSImageView(image: Self.symbol(c.symbol, size: c.glyphSize, weight: weight, label: chip.accessibilityLabel) ?? NSImage())
+        glyph.contentTintColor = chip.live ? Theme.ns(c.live(style: style)) : fg
         glyph.frame = NSRect(x: x, y: Double(midY) - c.glyphSize / 2, width: c.glyphSize, height: c.glyphSize)
         addSubview(glyph)
         x += c.glyphSize
@@ -113,30 +113,19 @@ final class CoachChipView: NSView {
             label.frame = NSRect(x: x, y: Double(midY) - h / 2, width: w, height: h)
             label.setAccessibilityElement(false)
             addSubview(label)
-            x += w
-        }
-
-        if chip.live {
-            x += c.dotGap
-            let dot = NSView(frame: NSRect(x: x, y: Double(midY) - c.dotDiameter / 2, width: c.dotDiameter, height: c.dotDiameter))
-            dot.wantsLayer = true
-            dot.layer?.cornerRadius = Theme.cg(c.dotDiameter / 2)
-            dot.layer?.backgroundColor = Theme.ns(c.dot(dark: palette.dark)).cgColor
-            addSubview(dot)
-            x += c.dotDiameter
         }
 
         let size = c.pauseButtonSize
         control.frame = NSRect(x: Double(frame.width) - c.paddingTrailing - size, y: Double(midY) - size / 2, width: size, height: size)
         control.isBordered = false
         control.title = ""
-        control.image = Self.symbol(chip.controlSymbol, size: c.pauseGlyphSize, weight: .bold, label: chip.controlLabel)
+        control.image = Self.symbol(chip.controlSymbol, size: c.pauseGlyphSize, weight: weight, label: chip.controlLabel)
         control.imagePosition = .imageOnly
         control.contentTintColor = fg
         control.wantsLayer = true
         control.layer?.cornerRadius = Theme.cg(c.pauseButtonRadius)
         control.layer?.cornerCurve = .continuous
-        control.layer?.backgroundColor = Theme.ns(c.pauseButtonFill(dark: palette.dark)).cgColor
+        control.layer?.backgroundColor = Theme.ns(c.pauseButtonFill(style: style)).cgColor
         control.setAccessibilityLabel(chip.controlLabel)
         control.toolTip = chip.controlLabel
         control.target = target

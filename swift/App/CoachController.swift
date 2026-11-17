@@ -134,30 +134,25 @@ final class CoachController: NSObject {
         visibleCards().last?.panel.screen?.frame ?? NSScreen.main?.frame
     }
 
-    /// Rose and amber per appearance, from system red and the card's flag amber (Theme).
-    static func glowStyle() -> GlowStyle {
-        let rose = NSColor(name: "coachGlowRose") { appearance in
-            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            var red = Theme.Glow.systemRed(dark: dark)
-            appearance.performAsCurrentDrawingAppearance {
-                if let c = NSColor.systemRed.usingColorSpace(.sRGB) {
-                    red = RGBA(Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent))
-                }
-            }
-            return Theme.ns(Theme.Glow.rose(dark: dark, systemRed: red))
-        }
-        let amber = NSColor(name: "coachGlowAmber") { appearance in
-            Theme.ns(Theme.Glow.amber(dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua))
+    /// The Kit's coach style from MeetingCard's tokens: rose and amber per appearance, the card's
+    /// corner radius and a one-control-height band (Theme.Glow). The Kit draws only what it's given.
+    static func coachStyle() -> CoachStyle {
+        func kit(_ c: RGBA) -> CoachStyle.RGBA { CoachStyle.RGBA(red: c.r, green: c.g, blue: c.b, alpha: c.a) }
+        func colors(dark: Bool) -> [CueColor: CoachStyle.RGBA] {
+            [.red: kit(Theme.Glow.rose(dark: dark)), .amber: kit(Theme.Glow.amber(dark: dark))]
         }
         let g = Theme.Glow.self
         let profile = GlowProfile(
-            width: g.width, peakOpacity: g.peakOpacity, cornerRadius: g.displayCornerRadius,
+            width: g.width, peakOpacity: g.peakOpacity, cornerRadius: g.cornerRadius,
             stops: g.stops.map { GlowProfile.Stop($0.at, $0.factor) },
             motion: .init(rise: g.rise, hold: g.hold, fade: g.fade, appearFactor: 0, easeRise: true, easeFade: true),
             reduceMotion: .init(rise: 0, hold: 0, fade: g.reduceMotionFade, appearFactor: g.reduceMotionAppear,
                                 easeRise: false, easeFade: false))
-        return GlowStyle(rose: rose, amber: amber, profile: profile)
+        return CoachStyle(colors: colors(dark: false), darkColors: colors(dark: true), profile: profile,
+                          cooldownDisplay: .hidden)
     }
+
+    static func glowStyle() -> GlowStyle { GlowStyle(coachStyle()) }
 
     // MARK: controls
 
@@ -206,18 +201,22 @@ final class CoachController: NSObject {
         statusItem = item
         let label = Self.statusLabel(enabled: enabled, indicator: indicator)
         if let button = item.button {
-            let image = NSImage(systemSymbolName: Theme.Coach.symbol, accessibilityDescription: label)?
-                .withSymbolConfiguration(.init(pointSize: CGFloat(Theme.Coach.glyphSize), weight: .regular))
+            let image = Theme.symbol(Theme.Coach.symbol, Theme.Coach.statusSymbolFont, label: label)
             image?.isTemplate = true
             button.image = image
             button.appearsDisabled = !enabled || indicator == .paused
             button.toolTip = label
             button.setAccessibilityLabel(label)
         }
+        item.menu = menu(for: items)
+    }
+
+    /// A native menu for these entries, each with its SF Symbol at the body size.
+    func menu(for items: [CoachMenuItem]) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         for entry in items { menu.addItem(menuItem(entry)) }
-        item.menu = menu
+        return menu
     }
 
     static func statusLabel(enabled: Bool, indicator: CoachIndicator) -> String {
@@ -231,34 +230,44 @@ final class CoachController: NSObject {
     }
 
     private func menuItem(_ entry: CoachMenuItem) -> NSMenuItem {
-        func action(_ title: String, _ selector: Selector, key: String = "") -> NSMenuItem {
+        let sym = Theme.Coach.menuSymbols
+        func image(_ name: String, _ title: String) -> NSImage? {
+            Theme.symbol(name, Theme.FontSpec(Theme.Coach.menuSymbolSize), label: title)
+        }
+        func action(_ title: String, _ symbol: String, _ selector: Selector, key: String = "") -> NSMenuItem {
             let m = NSMenuItem(title: title, action: selector, keyEquivalent: key)
+            m.image = image(symbol, title)
             m.target = self
             return m
         }
-        func note(_ title: String) -> NSMenuItem {
+        func note(_ title: String, _ symbol: String) -> NSMenuItem {
             let m = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            m.image = image(symbol, title)
             m.isEnabled = false
             return m
         }
         switch entry {
         case .status(let st):
+            let m: NSMenuItem
             switch st {
-            case .off: return note(CoachCopy.menuOff)
-            case .waiting: return note(CoachCopy.menuWaiting)
-            case .on: return note(CoachCopy.coachOn)
-            case .listening: return note(CoachCopy.coachListening)
-            case .paused: return note(CoachCopy.coachPaused)
+            case .off: m = note(CoachCopy.menuOff, Theme.Coach.symbol)
+            case .waiting: m = note(CoachCopy.menuWaiting, Theme.Coach.symbol)
+            case .on: m = note(CoachCopy.coachOn, Theme.Coach.symbol)
+            case .listening: m = note(CoachCopy.coachListening, Theme.Coach.symbol)
+            case .paused: m = note(CoachCopy.coachPaused, Theme.Coach.symbol)
             }
-        case .gptOff: return note(keyGate.rejected ? CoachCopy.menuGptOffRejected : CoachCopy.menuGptOffNoKey)
-        case .enable: return action(CoachCopy.menuEnable, #selector(enableClicked(_:)))
-        case .startNow: return action(CoachCopy.startNow, #selector(startClicked(_:)))
-        case .skipThisCall: return action(CoachCopy.skipThisCall, #selector(skipClicked(_:)))
-        case .pause: return action(CoachCopy.pause, #selector(pauseClicked(_:)))
-        case .resume: return action(CoachCopy.resume, #selector(resumeClicked(_:)))
-        case .turnOff: return action(CoachCopy.menuTurnOff, #selector(turnOffClicked(_:)))
+            return m
+        case .gptOff:
+            return keyGate.rejected ? note(CoachCopy.menuGptOffRejected, sym.gptOffRejected)
+                                    : note(CoachCopy.menuGptOffNoKey, sym.gptOffNoKey)
+        case .enable: return action(CoachCopy.menuEnable, sym.enable, #selector(enableClicked(_:)))
+        case .startNow: return action(CoachCopy.startNow, sym.start, #selector(startClicked(_:)))
+        case .skipThisCall: return action(CoachCopy.skipThisCall, sym.skip, #selector(skipClicked(_:)))
+        case .pause: return action(CoachCopy.pause, sym.pause, #selector(pauseClicked(_:)))
+        case .resume: return action(CoachCopy.resume, sym.resume, #selector(resumeClicked(_:)))
+        case .turnOff: return action(CoachCopy.menuTurnOff, sym.turnOff, #selector(turnOffClicked(_:)))
         case .separator: return .separator()
-        case .settings: return action(CoachCopy.settings, #selector(settingsClicked(_:)), key: ",")
+        case .settings: return action(CoachCopy.settings, sym.settings, #selector(settingsClicked(_:)), key: ",")
         }
     }
 

@@ -13,11 +13,11 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private var showingOnboarding: Bool
     private let toggle = NSSwitch()
     private let startButton = NSButton(title: CoachCopy.startNow, target: nil, action: nil)
-    private let toggleError = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: .systemRed)
-    private let gptNote = CoachSettingsWindow.text(CoachCopy.gptOffNoKey, font: Theme.Settings.helperFont, color: .secondaryLabelColor)
-    private let permissionNote = CoachSettingsWindow.text(CoachCopy.permissionDenied, font: Theme.Settings.helperFont, color: .systemRed)
+    private let toggleError = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
+    private let gptNote = CoachSettingsWindow.text(CoachCopy.gptOffNoKey, font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let permissionNote = CoachSettingsWindow.text(CoachCopy.permissionDenied, font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let keyField = NSSecureTextField()
-    private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: .systemRed)
+    private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let anyAppBox = NSButton(checkboxWithTitle: CoachCopy.anyApp, target: nil, action: nil)
     private var appsStack = NSStackView()
 
@@ -26,7 +26,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         self.coach = coach
         showingOnboarding = onboardingScreen != nil || !coach.onboarded
         screen = onboardingScreen ?? 0
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Theme.Settings.width, height: 420),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Theme.Settings.width, height: Theme.Metrics.cardHeight),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
         super.init()
         window.title = "MeetingCard"
@@ -45,11 +45,14 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     // MARK: building blocks
 
-    static let groupPadding = NSSize(width: 18, height: 14)
-    static let outerWidth = CGFloat(Theme.Settings.width - 2 * Theme.Settings.inset)
+    static let groupPadding = NSSize(width: Theme.Settings.groupPadding.h, height: Theme.Settings.groupPadding.v)
+    static let outerWidth = CGFloat(Theme.Settings.groupWidth)
     static let innerWidth = outerWidth - 2 * groupPadding.width
 
-    static func text(_ s: String, font: Theme.FontSpec, color: NSColor = .labelColor, maxWidth: CGFloat = innerWidth) -> NSTextField {
+    /// A CardStyle text role in the current appearance.
+    static func color(_ t: CardStyle.Text) -> NSColor { Theme.text(t, Theme.style(dark: Theme.isDark)) }
+
+    static func text(_ s: String, font: Theme.FontSpec, color: NSColor = CoachSettingsWindow.color(.primary), maxWidth: CGFloat = innerWidth) -> NSTextField {
         let f = NSTextField(wrappingLabelWithString: s)
         f.font = Theme.font(font)
         f.preferredMaxLayoutWidth = maxWidth
@@ -58,9 +61,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         return f
     }
 
-    /// Rounded grouped-form row (`quaternarySystemFill`; on macOS 26 `controlBackgroundColor` equals the
-    /// window background) whose height follows its stack (constraints, unlike an
-    /// NSBox content view).
+    /// A card-shaped group (card fill and radius, the card's text insets) whose height follows its
+    /// stack (constraints, unlike an NSBox content view).
     final class Group: NSView {
         let stack: NSStackView
         init(_ views: [NSView]) {
@@ -70,7 +72,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             applyFill()
             stack.orientation = .vertical
             stack.alignment = .leading
-            stack.spacing = 10
+            stack.spacing = CGFloat(Theme.Settings.groupSpacing)
             stack.translatesAutoresizingMaskIntoConstraints = false
             addSubview(stack)
             let p = CoachSettingsWindow.groupPadding
@@ -93,9 +95,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         private func applyFill() {
             layer?.cornerRadius = CGFloat(Theme.Settings.groupRadius)
             layer?.cornerCurve = .continuous
-            effectiveAppearance.performAsCurrentDrawingAppearance {
-                layer?.backgroundColor = NSColor.quaternarySystemFill.cgColor
-            }
+            let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            layer?.backgroundColor = Theme.ns(Theme.Settings.groupFill(style: Theme.style(dark: dark))).cgColor
         }
     }
 
@@ -120,8 +121,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let root = NSStackView()
         root.orientation = .vertical
         root.alignment = .leading
-        root.spacing = 18
-        root.edgeInsets = NSEdgeInsets(top: 20, left: CGFloat(Theme.Settings.inset), bottom: 24, right: CGFloat(Theme.Settings.inset))
+        let inset = CGFloat(Theme.Settings.inset)
+        root.spacing = inset
+        root.edgeInsets = NSEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
         let width = Self.outerWidth
         let views = showingOnboarding ? onboardingViews() : settingsViews()
         for v in views {
@@ -140,17 +142,18 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     private func onboardingViews() -> [NSView] {
         let s = CoachCopy.onboarding[screen]
-        let glyph = NSImageView(image: NSImage(systemSymbolName: Theme.Coach.symbol, accessibilityDescription: CoachCopy.toggle)?
-            .withSymbolConfiguration(.init(pointSize: 18, weight: .medium)) ?? NSImage())
-        let title = Self.text(s.title, font: Theme.Fonts.title)
-        let body = Self.text(s.body, font: Theme.Fonts.body, color: .secondaryLabelColor)
+        let glyph = NSImageView(image: Theme.symbol(Theme.Coach.symbol, Theme.FontSpec(Theme.Settings.glyphSize, Theme.Coach.glyphFont.weight),
+                                                    label: CoachCopy.toggle) ?? NSImage())
+        glyph.contentTintColor = Self.color(.accent)
+        let title = Self.text(s.title, font: Theme.Settings.headingFont)
+        let body = Self.text(s.body, font: Theme.Settings.itemFont, color: Self.color(.secondary))
         let primary = NSButton(title: s.primary, target: self, action: #selector(onboardingPrimary(_:)))
         primary.keyEquivalent = "\r"
         var buttons: [NSView] = []
         if let secondary = s.secondary { buttons.append(NSButton(title: secondary, target: self, action: #selector(onboardingNotNow(_:)))) }
         buttons.append(primary)
         let buttonRow = NSStackView(views: buttons)
-        let dots = Self.text("\(screen + 1) of \(CoachCopy.onboarding.count)", font: Theme.Settings.helperFont, color: .tertiaryLabelColor)
+        let dots = Self.text("\(screen + 1) of \(CoachCopy.onboarding.count)", font: Theme.Settings.helperFont, color: Self.color(.tertiary))
         let box = Self.group([glyph, title, body, Self.row(dots, buttonRow)])
         for v in [title, body] { pin(v, in: box) }
         if let r = box.stack.arrangedSubviews.last { pin(r, in: box) }
@@ -176,8 +179,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     }
 
     private func settingsViews() -> [NSView] {
-        let section = Self.text(CoachCopy.section, font: Theme.Settings.sectionFont, color: .secondaryLabelColor,
-                                maxWidth: Self.outerWidth)
+        let section = Self.text(CoachCopy.section, font: Theme.Settings.headingFont, maxWidth: Self.outerWidth)
 
         toggle.target = self
         toggle.action = #selector(toggled(_:))
@@ -187,20 +189,20 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         startButton.bezelStyle = .rounded
         startButton.controlSize = .small
         let toggleRow = Self.row(Self.text(CoachCopy.toggle, font: Theme.Settings.rowFont), toggle)
-        let help = Self.text(CoachCopy.toggleHelp, font: Theme.Settings.helperFont, color: .secondaryLabelColor)
+        let help = Self.text(CoachCopy.toggleHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
         let g1 = Self.group([toggleRow, help, gptNote, toggleError, permissionNote, startButton])
         for v in [toggleRow, help, gptNote, toggleError, permissionNote] { pin(v, in: g1) }
 
         keyField.placeholderString = coach.hasKey ? CoachCopy.keySavedPlaceholder : CoachCopy.keyPlaceholder
-        keyField.font = Theme.font(Theme.Fonts.body)
+        keyField.font = Theme.font(Theme.Settings.itemFont)
         keyField.target = self
         keyField.action = #selector(keyEntered(_:))
         keyField.setAccessibilityLabel(CoachCopy.keyLabel)
-        let lock = NSImageView(image: NSImage(systemSymbolName: "lock", accessibilityDescription: nil) ?? NSImage())
-        lock.contentTintColor = .secondaryLabelColor
+        let lock = NSImageView(image: Theme.symbol("lock", Theme.Settings.itemFont) ?? NSImage())
+        lock.contentTintColor = Self.color(.secondary)
         let keyRow = NSStackView(views: [keyField, lock])
         keyRow.orientation = .horizontal
-        let keyHelp = Self.text(CoachCopy.keyHelp, font: Theme.Settings.helperFont, color: .secondaryLabelColor)
+        let keyHelp = Self.text(CoachCopy.keyHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
         let g2 = Self.group([Self.text(CoachCopy.keyLabel, font: Theme.Settings.rowFont), keyRow, keyHelp, keyStatus])
         for v in [keyRow, keyHelp, keyStatus] { pin(v, in: g2) }
 
@@ -210,7 +212,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         appsStack = NSStackView()
         appsStack.orientation = .vertical
         appsStack.alignment = .leading
-        appsStack.spacing = 8
+        appsStack.spacing = CGFloat(Theme.Settings.groupSpacing)
         anyAppBox.target = self
         anyAppBox.action = #selector(anyAppToggled(_:))
         anyAppBox.font = Theme.font(Theme.Settings.helperFont)
@@ -219,7 +221,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         rebuildApps()
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
-                                color: .secondaryLabelColor, maxWidth: Self.outerWidth)
+                                color: Self.color(.secondary), maxWidth: Self.outerWidth)
         return [section, g1, g2, g3, privacy]
     }
 
@@ -234,13 +236,13 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private func rebuildApps() {
         appsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (i, id) in coach.effectiveAllowlist.enumerated() {
-            let name = Self.text(appName(id), font: Theme.Settings.rowFont)
-            let detail = Self.text(id, font: Theme.Settings.helperFont, color: .secondaryLabelColor)
+            let name = Self.text(appName(id), font: Theme.Settings.itemFont)
+            let detail = Self.text(id, font: Theme.Settings.helperFont, color: Self.color(.secondary))
             let labels = NSStackView(views: [name, detail])
             labels.orientation = .vertical
             labels.alignment = .leading
-            labels.spacing = 1
-            let minus = NSButton(image: NSImage(systemSymbolName: "minus.circle", accessibilityDescription: CoachCopy.remove) ?? NSImage(),
+            labels.spacing = 0
+            let minus = NSButton(image: Theme.symbol("minus.circle", Theme.Settings.itemFont, label: CoachCopy.remove) ?? NSImage(),
                                  target: self, action: #selector(removeApp(_:)))
             minus.isBordered = false
             minus.tag = i

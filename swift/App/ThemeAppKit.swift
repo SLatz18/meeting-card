@@ -11,6 +11,20 @@ extension Theme {
         }
     }
 
+    static func weight(_ s: FontSpec) -> NSFont.Weight {
+        switch s.weight {
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        }
+    }
+
+    /// An SF Symbol at a font spec's size and weight (symbols match the text beside them).
+    static func symbol(_ name: String, _ s: FontSpec, label: String? = nil) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: label)?
+            .withSymbolConfiguration(.init(pointSize: CGFloat(s.size), weight: weight(s)))
+    }
+
     static func ns(_ c: RGBA) -> NSColor {
         NSColor(srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: CGFloat(c.a))
     }
