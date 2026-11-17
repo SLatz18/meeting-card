@@ -282,8 +282,8 @@ public enum Theme {
         /// The coach's own Mute: the glyph on the chip, the card's status line and the menu.
         public static let micOffSymbol = "mic.slash"
         /// SF Symbols for the coach status menu, drawn at the body font size like a native menu.
-        public static let menuSymbols = (enable: "power", start: resumeSymbol, stop: CoachCard.Symbols.stop,
-                                         pause: pauseSymbol, resume: resumeSymbol, turnOff: "power",
+        public static let menuSymbols = (start: resumeSymbol, stop: CoachCard.Symbols.stop,
+                                         pause: pauseSymbol, resume: resumeSymbol,
                                          gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
                                          settings: "gearshape", feedback: "bubble.left",
                                          mute: micOffSymbol, unmute: "mic")

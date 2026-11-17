@@ -50,7 +50,8 @@ session's capture (the pause path) until unmute; without a provider, Core Audio 
 user's mic engine only, so call audio keeps being captured, captioned as Them and coached, and the
 indicator reads `CoachIndicator.micOff`. It lasts until unmuted or the session ends, survives Pause and the
 call app's mute, and never touches the call app. `CoachMenu` lists what a host's coach menu offers in each
-state, including `CoachMenuItem.muteMic` and `.unmuteMic`.
+state: one Start/Stop toggle (`CoachMenuItem.startCoach` / `.stopCoach`), Pause or Resume, `.muteMic` or
+`.unmuteMic`, then the status lines and Settings.
 
 `CallControlsProvider` (Core, with fakeable `ZoomAccessibility` / `AppleScriptRunner` backends;
 `CallControlsProvider.live(config:)` in ListenMoreMac) is that provider for Zoom (Accessibility:

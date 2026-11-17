@@ -35,8 +35,6 @@ enum CoachCopy {
     }
     static let menuOff = "Call coach: off"
     static let menuWaiting = "Coach on, waiting for a call"
-    static let menuEnable = "Turn On Call Coach"
-    static let menuTurnOff = "Turn Off Call Coach"
     static let menuGptOffNoKey = "GPT cues off: no API key"
     static let menuGptOffRejected = "GPT cues off: key not accepted"
     static let pause = "Pause"
@@ -125,8 +123,10 @@ enum CoachCopy {
     static let noticeConfirm = "I Understand, Turn On"
     static let noticeCancel = "Not Now"
 
-    // MARK: DRAFT: the coach's Mute, mic only (not yet copy-reviewed; edit before release)
+    // MARK: DRAFT: the coach menu's Start/Stop toggle and its Mute, mic only (not yet copy-reviewed; edit before release)
 
+    static let menuStart = "Start Coach"
+    static let menuStop = "Stop Coach"
     static let menuMute = "Mute"
     static let menuUnmute = "Unmute"
     static let menuMuteHelp = "The coach stops listening to your mic. It still hears the call. Zoom and Meet aren't muted."

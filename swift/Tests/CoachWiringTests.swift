@@ -152,11 +152,24 @@ final class CoachWiringTests: XCTestCase {
         let src = try read("App/CoachController.swift")
         XCTAssertTrue(src.contains("showsStatusItem: Bool = true"))
         XCTAssertTrue(src.contains("CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable, micMuted: micMuted)"))
-        for action in ["enableClicked", "stopClicked", "pauseClicked", "resumeClicked", "startClicked", "turnOffClicked",
-                       "muteMicClicked", "unmuteMicClicked"] {
+        for action in ["startClicked", "stopClicked", "pauseClicked", "resumeClicked", "muteMicClicked", "unmuteMicClicked"] {
             XCTAssertTrue(src.contains("#selector(\(action)(_:))"), action)
         }
         XCTAssertFalse(try read("App/Controller.swift").contains("showsStatusItem"), "the app keeps the default")
+    }
+
+    /// One Start/Stop toggle in the menu: Start switches the coach on while it's off and starts it now
+    /// while it waits; switching the coach off is only the Settings toggle.
+    func testStartStopToggleAndTurningOffInSettings() throws {
+        let src = try read("App/CoachController.swift")
+        XCTAssertTrue(src.contains("if enabled { service?.start() } else { enableClicked(sender) }"))
+        XCTAssertTrue(src.contains("case .startCoach: return action(CoachCopy.menuStart, sym.start, #selector(startClicked(_:)))"))
+        for gone in ["turnOffClicked", "menuTurnOff", "menuEnable", "case .startNow", "case .stopForCall", "case .turnOff"] {
+            XCTAssertFalse(src.contains(gone), gone)
+        }
+        let copy = try read("App/CoachCopy.swift")
+        XCTAssertFalse(copy.contains("Turn Off Call Coach") || copy.contains("Turn On Call Coach"))
+        XCTAssertTrue(try read("App/CoachSettingsWindow.swift").contains("coach.setEnabled(sender.state == .on)"), "Settings switches it off")
     }
 
     /// Saved transcripts are an opt-in, so no shipped string may still promise "no transcripts" or

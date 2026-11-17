@@ -45,8 +45,10 @@ final class CoachMicMuteTests: XCTestCase {
     /// Every new string lives in CoachCopy, under the draft heading, word for word.
     func testCopyIsDraftedInOnePlace() throws {
         let copy = try read("App/CoachCopy.swift")
-        let heading = try XCTUnwrap(copy.range(of: "// MARK: DRAFT: the coach's Mute, mic only"))
+        let heading = try XCTUnwrap(copy.range(of: "// MARK: DRAFT: the coach menu's Start/Stop toggle and its Mute, mic only"))
         let strings: [(String, String)] = [
+            ("menuStart", "Start Coach"),
+            ("menuStop", "Stop Coach"),
             ("menuMute", "Mute"),
             ("menuUnmute", "Unmute"),
             ("menuMuteHelp", "The coach stops listening to your mic. It still hears the call. Zoom and Meet aren't muted."),

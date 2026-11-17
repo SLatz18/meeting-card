@@ -308,7 +308,11 @@ final class CoachController: NSObject {
     }
 
     @objc func chipClicked(_ sender: Any?) { service?.chipControl() }
-    @objc func startClicked(_ sender: Any?) { service?.start() }
+    /// Start Coach: while the coach is off it switches it on (switching it off is in Settings);
+    /// while it waits for a call it starts listening now.
+    @objc func startClicked(_ sender: Any?) {
+        if enabled { service?.start() } else { enableClicked(sender) }
+    }
     @objc func pauseClicked(_ sender: Any?) { service?.pause() }
     @objc func resumeClicked(_ sender: Any?) { service?.resume() }
     @objc func muteMicClicked(_ sender: Any?) { setMicMuted(true) }
@@ -318,7 +322,6 @@ final class CoachController: NSObject {
         setEnabled(true) { _ in }
         if !onboarded { showSettings() }
     }
-    @objc func turnOffClicked(_ sender: Any?) { setEnabled(false) { _ in } }
     @objc func settingsClicked(_ sender: Any?) { showSettings() }
     @objc func feedbackClicked(_ sender: Any?) { FeedbackAction.send(defaults: defaults) }
 
@@ -542,14 +545,12 @@ final class CoachController: NSObject {
         case .gptOff:
             return keyGate.rejected ? note(CoachCopy.menuGptOffRejected, sym.gptOffRejected)
                                     : note(CoachCopy.menuGptOffNoKey, sym.gptOffNoKey)
-        case .enable: return action(CoachCopy.menuEnable, sym.enable, #selector(enableClicked(_:)))
-        case .startNow: return action(CoachCopy.startNow, sym.start, #selector(startClicked(_:)))
-        case .stopForCall: return action(CoachCardCopy.Button.stop, sym.stop, #selector(stopClicked(_:)))
+        case .startCoach: return action(CoachCopy.menuStart, sym.start, #selector(startClicked(_:)))
+        case .stopCoach: return action(CoachCopy.menuStop, sym.stop, #selector(stopClicked(_:)), tooltip: CoachCardCopy.Tooltip.stop)
         case .pause: return action(CoachCopy.pause, sym.pause, #selector(pauseClicked(_:)))
         case .resume: return action(CoachCopy.resume, sym.resume, #selector(resumeClicked(_:)))
         case .muteMic: return action(CoachCopy.menuMute, sym.mute, #selector(muteMicClicked(_:)), tooltip: CoachCopy.menuMuteHelp)
         case .unmuteMic: return action(CoachCopy.menuUnmute, sym.unmute, #selector(unmuteMicClicked(_:)), tooltip: CoachCopy.menuUnmuteHelp)
-        case .turnOff: return action(CoachCopy.menuTurnOff, sym.turnOff, #selector(turnOffClicked(_:)))
         case .separator: return .separator()
         case .settings: return action(CoachCopy.settings, sym.settings, #selector(settingsClicked(_:)), key: ",")
         }

@@ -43,7 +43,7 @@ final class CoachCardWiringTests: XCTestCase {
             .components(separatedBy: "\n    }").first)
         XCTAssertTrue(body.contains("service?.stopForThisCall()"))
         XCTAssertTrue(body.contains("CoachCardPresenter.announce(CoachCardCopy.A11y.skipped)"))
-        XCTAssertTrue(controller.contains("case .stopForCall: return action(CoachCardCopy.Button.stop, sym.stop, #selector(stopClicked(_:)))"))
+        XCTAssertTrue(controller.contains("case .stopCoach: return action(CoachCopy.menuStop, sym.stop, #selector(stopClicked(_:)), tooltip: CoachCardCopy.Tooltip.stop)"))
         XCTAssertTrue(controller.contains("stop: { [weak self] in self?.stopForThisCall() }"))
         for f in ["App/CoachCopy.swift", "App/CoachController.swift"] + Self.cardFiles {
             let c = try read(f)

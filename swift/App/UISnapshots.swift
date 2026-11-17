@@ -415,9 +415,9 @@ enum UISnapshots {
         return ctx.makeImage()
     }
 
-    /// The coach status menu, off and while listening (no key, so the GPT-off note shows), muted in
-    /// the call app, and with a key the Mute and Unmute entries (listening, and the coach's own mic
-    /// off), opened as a real NSMenu and captured from the screen while it tracks. The capture uses
+    /// The coach status menu, off, waiting for a call (Start Coach), while listening (no key, so the
+    /// GPT-off note shows), muted in the call app, and with a key the Mute and Unmute entries
+    /// (listening, and the coach's own mic off), opened as a real NSMenu and captured from the screen while it tracks. The capture uses
     /// `screencapture` on the menu's window; without screen-recording access it falls back to the
     /// window's layer render.
     @MainActor
@@ -429,6 +429,7 @@ enum UISnapshots {
         defaults.removePersistentDomain(forName: suite)
         let states: [(String, [CoachMenuItem])] = [
             ("menu-off", CoachMenu.items(enabled: false, indicator: .hidden, gptAvailable: false)),
+            ("menu-waiting", CoachMenu.items(enabled: true, indicator: .hidden, gptAvailable: true)),
             ("menu-listening", CoachMenu.items(enabled: true, indicator: .listening, gptAvailable: false)),
             ("menu-muted", CoachMenu.items(enabled: true, indicator: .muted, gptAvailable: false)),
             ("menu-mute", CoachMenu.items(enabled: true, indicator: .listening, gptAvailable: true)),

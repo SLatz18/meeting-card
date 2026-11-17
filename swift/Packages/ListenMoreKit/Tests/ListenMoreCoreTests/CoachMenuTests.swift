@@ -8,37 +8,42 @@ final class CoachMenuTests: XCTestCase {
         CoachMenu.items(enabled: true, indicator: i, gptAvailable: gpt, micMuted: micMuted)
     }
 
-    func testOffAlwaysOffersEnable() {
+    /// Off, the menu's way in is Start Coach, whatever the indicator says.
+    func testOffOffersStart() {
         for indicator in allIndicators {
-            XCTAssertEqual(CoachMenu.items(enabled: false, indicator: indicator, gptAvailable: false),
-                           [.status(.off), .enable, .separator, .settings])
-            XCTAssertEqual(CoachMenu.items(enabled: false, indicator: indicator, gptAvailable: true, micMuted: true),
-                           [.status(.off), .enable, .separator, .settings])
+            for (gpt, micMuted) in [(false, false), (true, true)] {
+                XCTAssertEqual(CoachMenu.items(enabled: false, indicator: indicator, gptAvailable: gpt, micMuted: micMuted),
+                               [.startCoach, .separator, .status(.off), .separator, .settings])
+            }
         }
     }
 
-    func testEachStateOffersItsControl() {
-        XCTAssertEqual(items(.hidden), [.status(.waiting), .startNow, .turnOff, .separator, .settings])
-        XCTAssertEqual(items(.on), [.status(.on), .stopForCall, .turnOff, .separator, .settings])
-        XCTAssertEqual(items(.listening), [.status(.listening), .pause, .muteMic, .stopForCall, .turnOff, .separator, .settings])
-        XCTAssertEqual(items(.micOff), [.status(.micOff), .pause, .unmuteMic, .stopForCall, .turnOff, .separator, .settings])
-        XCTAssertEqual(items(.paused), [.status(.paused), .resume, .muteMic, .stopForCall, .turnOff, .separator, .settings])
-        XCTAssertEqual(items(.muted), [.status(.muted), .pause, .muteMic, .stopForCall, .turnOff, .separator, .settings])
+    /// Controls first (Start/Stop, Pause or Resume, Mute or Unmute), then the status lines, then Settings.
+    func testEachStateOffersItsControlsThenStatusThenSettings() {
+        XCTAssertEqual(items(.hidden), [.startCoach, .separator, .status(.waiting), .separator, .settings])
+        XCTAssertEqual(items(.on), [.stopCoach, .separator, .status(.on), .separator, .settings])
+        XCTAssertEqual(items(.listening), [.stopCoach, .pause, .muteMic, .separator, .status(.listening), .separator, .settings])
+        XCTAssertEqual(items(.micOff), [.stopCoach, .pause, .unmuteMic, .separator, .status(.micOff), .separator, .settings])
+        XCTAssertEqual(items(.paused), [.stopCoach, .resume, .muteMic, .separator, .status(.paused), .separator, .settings])
+        XCTAssertEqual(items(.muted), [.stopCoach, .pause, .muteMic, .separator, .status(.muted), .separator, .settings])
     }
 
-    /// Stop replaces Skip this call and is there whenever the coach is pre-warmed or in a session.
-    func testStopForThisCallReplacesSkip() {
-        for indicator in [CoachIndicator.on, .listening, .micOff, .paused, .muted] {
-            XCTAssertTrue(items(indicator).contains(.stopForCall), "\(indicator)")
+    /// One Start/Stop toggle: exactly one of the two in every state, Stop whenever pre-warmed or in a session.
+    func testOneStartStopToggle() {
+        for enabled in [false, true] {
+            for indicator in allIndicators {
+                let menu = CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: true)
+                XCTAssertEqual(menu.first, enabled && indicator != .hidden ? .stopCoach : .startCoach, "\(enabled) \(indicator)")
+                XCTAssertEqual(menu.filter { $0 == .startCoach || $0 == .stopCoach }.count, 1)
+            }
         }
-        XCTAssertFalse(items(.hidden).contains(.stopForCall))
     }
 
+    /// The GPT-off note is a status line, right under the status.
     func testLocalOnlyShowsGptOffUnderTheStatus() {
         XCTAssertEqual(items(.listening, gpt: false),
-                       [.status(.listening), .gptOff, .pause, .muteMic, .stopForCall, .turnOff, .separator, .settings])
-        XCTAssertEqual(items(.micOff, gpt: false),
-                       [.status(.micOff), .gptOff, .pause, .unmuteMic, .stopForCall, .turnOff, .separator, .settings])
+                       [.stopCoach, .pause, .muteMic, .separator, .status(.listening), .gptOff, .separator, .settings])
+        XCTAssertEqual(items(.hidden, gpt: false), [.startCoach, .separator, .status(.waiting), .gptOff, .separator, .settings])
     }
 
     /// Mute or Unmute shows only during a session: never while off, waiting or pre-warmed.
@@ -64,13 +69,11 @@ final class CoachMenuTests: XCTestCase {
 
     /// Pause and the call app's mute show over the coach's Mute, so with it on they offer Unmute.
     func testPausedOrMutedWithTheMicOffOfferUnmute() {
-        XCTAssertEqual(items(.paused, micMuted: true),
-                       [.status(.paused), .resume, .unmuteMic, .stopForCall, .turnOff, .separator, .settings])
-        XCTAssertEqual(items(.muted, micMuted: true),
-                       [.status(.muted), .pause, .unmuteMic, .stopForCall, .turnOff, .separator, .settings])
+        XCTAssertEqual(items(.paused, micMuted: true), [.stopCoach, .resume, .unmuteMic, .separator, .status(.paused), .separator, .settings])
+        XCTAssertEqual(items(.muted, micMuted: true), [.stopCoach, .pause, .unmuteMic, .separator, .status(.muted), .separator, .settings])
     }
 
-    /// Settings is the last item in every state.
+    /// Settings is the last item in every state (a host's alternate for it, and Send Feedback, follow).
     func testSettingsIsAlwaysLast() {
         for enabled in [false, true] {
             for indicator in allIndicators {
@@ -85,14 +88,17 @@ final class CoachMenuTests: XCTestCase {
         }
     }
 
-    /// Mute or Unmute sits right after Pause or Resume.
-    func testMuteSitsRightAfterPauseOrResume() throws {
+    /// Order in a session: Stop, then Pause or Resume, then Mute or Unmute, all before the status.
+    func testSessionControlsOrder() throws {
         for indicator in [CoachIndicator.listening, .micOff, .paused, .muted] {
             for gpt in [false, true] {
                 for micMuted in [false, true] {
                     let menu = items(indicator, gpt: gpt, micMuted: micMuted)
-                    let control = try XCTUnwrap(menu.firstIndex { $0 == .pause || $0 == .resume })
-                    XCTAssertTrue([.muteMic, .unmuteMic].contains(menu[control + 1]), "\(indicator) \(gpt) \(micMuted)")
+                    XCTAssertEqual(menu[0], .stopCoach)
+                    XCTAssertTrue([.pause, .resume].contains(menu[1]), "\(indicator) \(gpt) \(micMuted)")
+                    XCTAssertTrue([.muteMic, .unmuteMic].contains(menu[2]), "\(indicator) \(gpt) \(micMuted)")
+                    let status = try XCTUnwrap(menu.firstIndex { if case .status = $0 { return true } else { return false } })
+                    XCTAssertGreaterThan(status, 2)
                 }
             }
         }

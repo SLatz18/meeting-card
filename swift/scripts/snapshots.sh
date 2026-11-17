@@ -82,7 +82,7 @@ case "${1:-}" in
         [[ -s "$OUT/coach-$s-$a.png" ]] || { echo "missing coach-$s-$a.png" >&2; missing=1; }
       done
     done
-    for s in chip-muted settings settings-call-controls menu-muted menu-mute menu-unmute caption-feed-card caption-feed-card-empty; do
+    for s in chip-muted settings settings-call-controls menu-muted menu-waiting menu-mute menu-unmute caption-feed-card caption-feed-card-empty; do
       for a in light dark; do
         [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
       done
