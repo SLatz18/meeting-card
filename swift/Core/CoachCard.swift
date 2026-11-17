@@ -6,7 +6,7 @@ import Foundation
 
 /// Approved copy for the coach card and pill. The nesting follows the spec's string IDs
 /// (`coach.button.stop` is `Button.stop`, `coach.a11y.skipped` is `A11y.skipped`, and so on).
-/// Mute's copy is `CoachMuteCopy`'s.
+/// The Mute in Zoom control's copy is `CoachMuteCopy`'s.
 public enum CoachCardCopy {
     public enum Button {
         /// Replaces "Skip this call": ends the coach for the rest of this call.

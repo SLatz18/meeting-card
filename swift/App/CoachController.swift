@@ -42,14 +42,14 @@ final class CoachController: NSObject {
     let keyGate: CoachKeyGate
     /// App-level call state for the service; reads nothing while the setting is off.
     let callControls: CallControlsProvider
-    /// The coach's Mute control (Zoom only: one press on Zoom's own Mute/Unmute item; Meet:
-    /// unavailable, mute from Meet), hosted by the coach card and pill.
+    /// The coach card's Mute in Zoom control (Zoom only: one press on Zoom's own Mute/Unmute item;
+    /// Meet: unavailable, mute in Meet), hosted by the card and pill. Not the coach's own Mute.
     private(set) lazy var callControlsModel = CallControlsModel(provider: callControls, sessionAppKey: { [weak self] in
         MainActor.assumeIsolated { self?.service?.session.session?.appKey }
     })
 
-    /// What a host shows for Mute: enabled with "Mute your mic" / "Unmute your mic", disabled with
-    /// the approved reason text, or hidden with no Zoom call (CoachMuteCopy).
+    /// What the card shows for Mute in Zoom: enabled with Mute in Zoom / Unmute in Zoom, disabled
+    /// with the reason text, or hidden with no Zoom call (CoachMuteCopy).
     var muteControl: MuteControlPresentation {
         let m = callControlsModel
         return CoachMuteCopy.presentation(reason: m.muteUnavailableReason.map(Self.muteDisabledReason), isMuted: m.isMuted)
