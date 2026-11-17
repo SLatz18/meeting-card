@@ -22,11 +22,16 @@ app's output); it never reads window titles. `PrivacyGuardTests` checks this, al
 writes, no printing, the key only through `KeychainStore`, and public log arguments limited to
 counters and enums.
 
+A host can pass an optional `CallStateProvider` (to `CoachService`, `CoachSession` or `CoachMonitor`)
+reporting each call app's state as started, ended or muted. An ended call stops the session after
+`ended_stop_after_s` (3 s) instead of waiting for Core Audio's 30 s stop; without a provider, Core
+Audio alone decides. `CoachMenu` lists what a host's coach menu offers in each state.
+
 ## Rule constants
 
 Every tunable number and word list is in one place: [`DefaultConfig.swift`](Sources/ListenMoreCore/DefaultConfig.swift).
 They are generic defaults (for example cooldown 20 s, fade 3 s, GPT confidence 0.7, start after
-3 s, stop after 30 s). Change them there, with a test, and nowhere else. No recordings, eval
+3 s, stop after 30 s, or 3 s after an ended call). Change them there, with a test, and nowhere else. No recordings, eval
 fixtures or example transcripts: tests generate their audio (`Synthetic.swift`) and use
 content-free text. Nothing is stored: no history, no summaries.
 

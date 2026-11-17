@@ -33,6 +33,12 @@ A cue from the judge model only fires when its confidence is 0.7 or higher. The 
 
 The coach starts on its own when an allowlisted call app (or any app, if you turn that on in Settings) has both the microphone and speakers active for about 3 s. It stops about 30 s after either one goes off, or, for a meeting you joined from a MeetingCard card, when that calendar event ends.
 
+Core Audio is the fallback signal, and it lags: a call app can keep the mic and speakers open after you leave. The trigger therefore accepts an optional app-level call-state signal (`CallStateProvider`: started, ended or muted per app). When that signal reports a call ended, the coach stops about 3 s later (`ended_stop_after_s`) and doesn't restart for that app while its audio stays open. Started and muted never start or hold a session. MeetingCard doesn't ship a provider yet, so today the 30 s Core Audio stop applies.
+
+## Without an API key
+
+The coach turns on without a key. It then runs the local layer only (interruptions, talk-over, monologue and talk share), and nothing is sent anywhere. The transcript rules and the GPT layer need the transcription and judge calls, so they stay off until a key OpenAI accepts is saved. A saved key that OpenAI rejects is flagged in Settings and the coach menu, and the coach keeps running local-only.
+
 ## Privacy
 
 Everything stays in memory. Nothing is written to disk, no transcripts or stats are kept, and logs contain no call content.

@@ -1,13 +1,13 @@
 # Mac demo checks (run by hand on a real Mac, with the user's go-ahead; not CI tests)
 
 Prereqs: the unsigned `MeetingCardSwift-app` CI artifact (see [SIGNING_PLAN.md](SIGNING_PLAN.md) for opening it);
-coach turned on in MeetingCard Settings with an OpenAI key; Microphone and Screen & System Audio Recording granted when
+coach turned on in MeetingCard Settings (or the coach menu bar menu) with an OpenAI key, except for L1/L2; Microphone and Screen & System Audio Recording granted when
 macOS asks. If a call app's bundle ID differs from `capture_targets` in
 `swift/Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift` (`osascript -e 'id of app "<App>"'`), note it.
 
 The coach starts from Core Audio state only: the call app producing output and the microphone running, for about 3 s.
-The indicator is the chip on a visible card (On → Listening → Paused), or a menu bar item while a session runs with no
-card showing.
+The indicator is the chip on a visible card (On → Listening → Paused) and the top line of the coach menu bar menu, which is
+always there (Turn On Call Coach while off).
 
 | # | App | Check | How | Pass when |
 |---|---|---|---|---|
@@ -26,6 +26,10 @@ card showing.
 | S1 | Slack huddle | Start + capture | Start a Slack huddle | Listening within about 3 s; call stream has audio. If silent, the helper fallback should engage (Slack is Electron) |
 | P1 | All | Skip this call | Click the chip while it shows On | Nothing starts for this call; the next call starts normally |
 | P2 | All | Pause | Click the chip while Listening | Chip shows Paused; no glow and no network traffic until Resume |
+| M1 | All | Menu while off | Turn the coach off, open its menu bar menu | Shows Call coach: off and Turn On Call Coach; choosing it turns the coach on |
+| M2 | All | Menu skip / pause | Open the menu while On, then while Listening | Skip This Call while On; Pause (then Resume) while Listening, matching the chip |
+| L1 | Zoom desktop | Local-only | Remove the key in Settings, turn the coach on, join a call and talk over someone | Coach turns on with no key; menu shows GPT cues off: no API key; red glow on talk-over; no traffic to api.openai.com |
+| L2 | All | Rejected key | Save a key, then revoke it at OpenAI and relaunch | Settings and the menu flag the key; local cues still fire |
 | G1 | All | Focus | A cue fires while typing in another app | Keyboard focus never moves; clicks pass through |
 | G2 | All | No sound / cooldown | Trigger the same cue twice in 20 s | One glow, no sound |
 | K1 | All | Keychain and logs | Inspect the Keychain and `log show --predicate 'subsystem == "com.listenmore.kit"'` | Key only in the Keychain; no transcript text or key in logs; no files written |

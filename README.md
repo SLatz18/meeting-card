@@ -14,7 +14,7 @@ A small native macOS app that pops a card in the corner of your screen when a me
 - Re-checks the event right before showing and every 10 seconds while the card is up: a cancelled or declined meeting closes the card, a moved one reschedules, and title or link changes update in place.
 - Shows a "Next up" line for back-to-back meetings, follows light/dark mode, and draws a thin outline in the provider's color.
 - Return joins and Esc ignores, but only after you click or hover the card. A card never steals keyboard focus from the app you are typing in.
-- No Dock icon and no window. No menu bar icon either, except a small one while the optional [call coach](#call-coach) is running and no card is on screen. Registers itself as a login item the first time the installed copy runs.
+- No Dock icon and no window. One small menu bar icon for the optional [call coach](#call-coach), with **Turn On Call Coach** while it's off. Registers itself as a login item the first time the installed copy runs.
 
 Only timed events with a video link get a card, plus invites from someone else that have neither a link nor a location (probably a missing link). All-day events, focus time, out-of-office, working location and declined events are skipped.
 
@@ -84,23 +84,24 @@ Call coach is an optional helper for your calls. If you interrupt someone, talk 
 - **Amber:** you may not be listening, someone asked a question you didn't answer, or you've been doing most of the talking.
 
 **How it starts**
-Call coach is off by default. Once you turn it on in Settings, it starts by itself when a call app is using both your mic and your speakers. You can also start it by hand with **Start now** in Settings. A meeting you join from a card gets the coach ready (the chip shows **On**); clicking **Pause** there skips coaching for that call.
+Call coach is off by default. Once you turn it on (in Settings, or **Turn On Call Coach** in its menu bar menu), it starts by itself when a call app is using both your mic and your speakers. You can also start it by hand with **Start now** in Settings. A meeting you join from a card gets the coach ready (the chip shows **On**); clicking **Pause** there (or **Skip This Call** in the menu) skips coaching for that call. It stops about 30 seconds after the call app releases your mic and speakers.
 
 **How to pause**
-Click **Pause** on the coach chip on the meeting card, or in the coach's menu bar item when no card is on screen. Click **Resume** to turn it back on. While the coach is running, the chip shows **Listening** (or **Paused**), and the menu bar item shows **Coach on**.
+Click **Pause** on the coach chip on the meeting card, or in the coach's menu bar menu. Click **Resume** to turn it back on. While the coach is running, the chip shows **Listening** (or **Paused**), and the menu shows the same state at the top. The menu bar icon is dimmed while the coach is off or paused.
 
 **Privacy**
-- While the coach is on, call audio and transcripts go to OpenAI on your own API key. No audio is sent when it's off or paused.
+- While the coach is on with an API key, call audio and transcripts go to OpenAI on your own key. No audio is sent when it's off or paused.
+- Without a key (or while OpenAI rejects the saved one), the coach runs only its on-device cues (interruptions, talking over, long monologues, talk share) and nothing leaves your Mac. The menu shows **GPT cues off**.
 - Nothing is saved. There are no transcripts, stats or recaps, nothing is stored on disk, and nothing about the call is logged (the coach logs only counters and states). Audio exists only in memory (RAM) while it's being processed.
 - Your API key is stored in the macOS Keychain, never synced. Keychain caveat: the key is saved with "this device only" (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), but the login keychain ignores that setting. It takes effect only once a properly signed build (with a team ID) stores the key in the data-protection keychain. Builds from `build.sh` are ad-hoc or self-signed, so today the key sits in your login keychain like any other saved password.
 
 **Setup**
-Reopen MeetingCard (double-click it in Finder, or `open ~/Applications/MeetingCardSwift.app` while it runs) to open Settings. Add your OpenAI API key, turn on Call coach, then allow mic and system audio recording when macOS asks.
+Reopen MeetingCard (double-click it in Finder, or `open ~/Applications/MeetingCardSwift.app` while it runs) to open Settings. Turn on Call coach, then allow mic and system audio recording when macOS asks. Add your OpenAI API key for the GPT cues; without one the on-device cues still run.
 
 **For IT and admins**
 - Opt-in: the boolean UserDefaults key `coach.enabled` in the `com.slatz.meetingcard.swift` domain (absent or false = off). Other settings: `coach.anyApp`, `coach.allowlist` (bundle IDs), `coach.onboarded`.
 - API key: Keychain generic password, service `com.slatz.meetingcard.swift.openai`, account `OPENAI_API_KEY`, never synchronizable. `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is requested on every save, but the login keychain ignores it. It is enforced (readable only while unlocked, never migrated) only once a properly signed build, with a team ID, uses the data-protection keychain. The app tries that keychain first and falls back to the login keychain on `errSecMissingEntitlement`, which is what ad-hoc and self-signed builds from `build.sh` get.
-- Network: `api.openai.com` only (realtime transcription WebSocket, Responses API with `store: false`, `GET /v1/models` to check the key), only while the coach is on and not paused.
+- Network: `api.openai.com` only (realtime transcription WebSocket, Responses API with `store: false`, `GET /v1/models` to check the key), only while the coach is on, not paused, and has a key.
 - Permissions (TCC): Microphone, System Audio Recording (Core Audio process taps), and Screen Recording (ScreenCaptureKit's audio-only call capture). Reset with `tccutil reset Microphone|AudioCapture|ScreenCapture com.slatz.meetingcard.swift`.
 
 **Screen sharing**
