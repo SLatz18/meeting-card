@@ -8,15 +8,17 @@ The coach listens to two separate audio streams. Your microphone is "you", and t
 
 ## Two layers of detection
 
-**Local layer (on your Mac, under 0.5 s).** Voice activity detection runs on each stream. From that it tracks:
+**Local layer (on your Mac, under 0.5 s).** Voice activity detection (the WebRTC detector) runs on each stream. From that it tracks:
 
-- **Interrupt:** you start speaking while someone else is talking, after a short grace window.
-- **Talk-over:** both sides speak at once for more than about 1 s.
-- **Monologue:** you speak for more than 75 s without a break.
-- **Talk share:** you hold more than 55% of the talk time over the last 5 minutes.
+- **Interrupt:** you start while someone else is talking and keep going: at least 0.6 s of overlap, with them still talking for 0.5 s and you past a short "mm-hm". Starting as they finish only counts if their last words were unfinished ("and", "but", "so" …).
+- **Talk-over:** three or more back-and-forth switches within 4 s, with real overlap, ending with you holding the floor.
+- **Monologue:** a soft nudge after 60 s of you talking without a break (earlier if that is well past your usual turn length in this call, never under 30 s) and a stronger one at 90 s.
+- **Talk share:** you hold more than 65% of the talk time over the last 10 minutes (70% in a one-on-one), once there is at least 5 minutes of speech.
 - **Tone flags:** your loudness and speaking rate, compared with your own baseline from earlier in the same call.
 
-**GPT layer (under about 3 s).** OpenAI transcribes speech live. A judge model reads the recent turns plus the local tone flags and returns at most one cue (aggressive, missed question, not listening, or occasionally an interruption the local layer missed) with a confidence score and a short reason. Requests use `store: false`, and each call has a budget cap (default $1).
+**Transcript rules (on your Mac).** OpenAI transcribes speech live, and simple rules run on the transcript in memory: a question to you that your reply drifts away from, and heated phrasing (absolutes, frustration, repeating yourself; word choice alone also needs a rise in your tone). Heat is never flagged in the first 5 minutes or right after an apology.
+
+**GPT layer (under about 3 s).** A judge model reads the recent turns plus the local tone flags and returns at most one cue (aggressive, missed question, not listening, or occasionally an interruption the local layer missed) with a confidence score and a short reason. Requests use `store: false`, and each call has a budget cap (default $1).
 
 ## The cue
 
