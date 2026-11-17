@@ -14,7 +14,7 @@ A small native macOS app that pops a card in the corner of your screen when a me
 - Re-checks the event right before showing and every 10 seconds while the card is up: a cancelled or declined meeting closes the card, a moved one reschedules, and title or link changes update in place.
 - Shows a "Next up" line for back-to-back meetings, follows light/dark mode, and draws a thin outline in the provider's color.
 - Return joins and Esc ignores, but only after you click or hover the card. A card never steals keyboard focus from the app you are typing in.
-- No Dock icon, no menu bar icon, no window. Registers itself as a login item the first time the installed copy runs.
+- No Dock icon and no window. One small menu bar icon for the optional [call coach](#call-coach), with **Turn On Call Coach** while it's off. Registers itself as a login item the first time the installed copy runs.
 
 Only timed events with a video link get a card, plus invites from someone else that have neither a link nor a location (probably a missing link). All-day events, focus time, out-of-office, working location and declined events are skipped.
 
@@ -75,10 +75,44 @@ Fixture mode renders one card from a JSON file and never calls gws or polls:
 
 Fixtures live in `swift/Tests/Fixtures/`. Developer seams (`--snapshot`, `--appearance`, `MEETING_CARD_SELFTEST`, `MEETING_CARD_DRY_JOIN`, and others) are documented in [`swift/README.md`](swift/README.md).
 
+## Call coach
+
+Call coach is an optional helper for your calls. If you interrupt someone, talk over them, sound aggressive, or miss a question, the edge of your screen glows. Nobody else on the call sees it. How it decides is in [docs/how-it-works.md](docs/how-it-works.md).
+
+**What the colors mean**
+- **Red:** you interrupted, talked over someone, or sounded aggressive.
+- **Amber:** you may not be listening, someone asked a question you didn't answer, or you've been doing most of the talking.
+
+**How it starts**
+Call coach is off by default. Once you turn it on (in Settings, or **Turn On Call Coach** in its menu bar menu), it starts by itself when a call app is using both your mic and your speakers. You can also start it by hand with **Start now** in Settings. A meeting you join from a card gets the coach ready (the chip shows **On**); clicking **Pause** there (or **Skip This Call** in the menu) skips coaching for that call. It stops about 30 seconds after the call app releases your mic and speakers.
+
+**How to pause**
+Click **Pause** on the coach chip on the meeting card, or in the coach's menu bar menu. Click **Resume** to turn it back on. While the coach is running, the chip shows **Listening** (or **Paused**), and the menu shows the same state at the top. The menu bar icon is dimmed while the coach is off or paused.
+
+**Privacy**
+- While the coach is on with an API key, call audio and transcripts go to OpenAI on your own key. No audio is sent when it's off or paused.
+- Without a key (or while OpenAI rejects the saved one), the coach runs only its on-device cues (interruptions, talking over, long monologues, talk share) and nothing leaves your Mac. The menu shows **GPT cues off**.
+- Nothing is saved. There are no transcripts, stats or recaps, nothing is stored on disk, and nothing about the call is logged (the coach logs only counters and states). Audio exists only in memory (RAM) while it's being processed.
+- Your API key is stored in the macOS Keychain, never synced. Keychain caveat: the key is saved with "this device only" (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), but the login keychain ignores that setting. It takes effect only once a properly signed build (with a team ID) stores the key in the data-protection keychain. Builds from `build.sh` are ad-hoc or self-signed, so today the key sits in your login keychain like any other saved password.
+
+**Setup**
+Reopen MeetingCard (double-click it in Finder, or `open ~/Applications/MeetingCardSwift.app` while it runs) to open Settings. Turn on Call coach, then allow mic and system audio recording when macOS asks. Add your OpenAI API key for the GPT cues; without one the on-device cues still run.
+
+**For IT and admins**
+- Opt-in: the boolean UserDefaults key `coach.enabled` in the `com.slatz.meetingcard.swift` domain (absent or false = off). Other settings: `coach.anyApp`, `coach.allowlist` (bundle IDs), `coach.onboarded`.
+- API key: Keychain generic password, service `com.slatz.meetingcard.swift.openai`, account `OPENAI_API_KEY`, never synchronizable. `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is requested on every save, but the login keychain ignores it. It is enforced (readable only while unlocked, never migrated) only once a properly signed build, with a team ID, uses the data-protection keychain. The app tries that keychain first and falls back to the login keychain on `errSecMissingEntitlement`, which is what ad-hoc and self-signed builds from `build.sh` get.
+- Network: `api.openai.com` only (realtime transcription WebSocket, Responses API with `store: false`, `GET /v1/models` to check the key), only while the coach is on, not paused, and has a key.
+- Permissions (TCC): Microphone, System Audio Recording (Core Audio process taps), and Screen Recording (ScreenCaptureKit's audio-only call capture). Reset with `tccutil reset Microphone|AudioCapture|ScreenCapture com.slatz.meetingcard.swift`.
+
+**Screen sharing**
+The glow and the coach chip's card ask macOS to leave them out of screen captures (`NSWindow.sharingType = .none`). A CI probe (`ScreenShareProbeTests`) captures the display with ScreenCaptureKit, which current Zoom, Teams, Meet and Webex builds use to share a screen. On macOS 26.7.2 (25G332) it found our windows absent from the captured pixels while an ordinary window was present, so people you share your screen with don't see the glow. Our windows still appear in ScreenCaptureKit's window list, so an app could offer them as a pick in a "share a window" menu; picking one shares nothing visible. Sharing tools that use older capture paths are untested. If one shows the glow, pause the coach from the chip while you share.
+
 ## Project layout
 
 - `swift/Core/`: `MeetingCardCore.framework`, Foundation only. Event parsing, link detection and dedupe, timing, scheduler, the gws runner, logging, and the controller logic.
-- `swift/App/`: the AppKit shell (the card panel, drawn provider icons, timers).
+- `swift/App/`: the AppKit shell (the card panel, drawn provider icons, timers, the call coach UI).
+- `swift/Packages/ListenMoreKit/`: the call coach, a local Swift package and its single source (capture, voice activity, local and transcript rules, OpenAI client, glow). Rule constants live in one place, `DefaultConfig.swift`. It runs in-process: no helper or interpreter.
+- `docs/`: [how the coach works](docs/how-it-works.md), the [signing plan](docs/SIGNING_PLAN.md) (unsigned for now), and [Mac demo checks](docs/MAC_DEMO_CHECKS.md) run by hand.
 - `swift/Tests/`: XCTest bundle for Core (no app host).
 - `swift/project.yml`: xcodegen spec. The `.xcodeproj` is generated and not committed.
 
@@ -87,7 +121,7 @@ Fixtures live in `swift/Tests/Fixtures/`. Developer seams (`--snapshot`, `--appe
 Open ideas live in the issue tracker. The big ones:
 
 - More calendar sources: Sign in with Google, macOS Calendar (EventKit), Microsoft 365. This would remove the gws requirement.
-- A settings window and a Control Center control (pause, lead time, corner, calendars).
+- More settings and a Control Center control (pause, lead time, corner, calendars). The Settings window covers only the call coach today.
 - Open Zoom links straight in the Zoom app.
 - A split button for invites with several video links.
 - A "+N more" cap for tall stacks of cards.

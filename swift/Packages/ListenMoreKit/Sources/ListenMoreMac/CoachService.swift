@@ -1,0 +1,134 @@
+import AppKit
+import ListenMoreCore
+
+/// The coach for a host app, wired with the real parts: Core Audio running-state drives the trigger
+/// (`AudioActivitySignal`), `MicCapture` + `CallCapture` feed `LocalCoachEngine`, and cues glow on the
+/// call app's display (else the host's fallback display), ordered behind the host's window. Styling,
+/// the key store (and with it the Keychain service name) and self-exclusion are the host's. Off means
+/// no polling, no capture and no network. Nothing outlives the live session.
+@MainActor
+public final class CoachService: CoachSessionDelegate {
+    public enum State: Equatable {
+        case off
+        /// Enabled, waiting for a call.
+        case idle
+        case active(paused: Bool)
+    }
+
+    public let config: ListenMoreConfig
+    public let glow: GlowOverlayController
+    public let session: CoachSession
+    public let ownBundleId: String?
+    public let excludedBundleIds: [String]
+    public private(set) var anyApp: Bool
+    public private(set) var allowlist: [String]?
+    /// The display the host's window is on (glow fallback) and the window to order the glow behind.
+    public var fallbackScreen: () -> NSRect? = { nil }
+    public var hostWindowNumber: () -> Int? = { nil }
+    /// Display for a session's app; injectable for tests.
+    var locateScreen: (String?, NSRect?) -> NSRect? = { CallDisplayLocator.screen(appKey: $0, fallback: $1) }
+    public var onChange: (() -> Void)?
+
+    /// - Parameters:
+    ///   - keys: where the OpenAI key comes from, e.g. `KeychainStore(service: "<host's service>")`.
+    ///   - ownBundleId / excludedBundleIds: never trigger on these (plus the config's `trigger.exclude_bundle_ids`).
+    ///   - callState: optional app-level call state; an `ended` report stops in `trigger.ended_stop_after_s`
+    ///     instead of the Core Audio `trigger.stop_after_s`.
+    public init(config: ListenMoreConfig, glowStyle: GlowStyle, enabled: Bool, anyApp: Bool,
+                allowlist: [String]? = nil,
+                ownBundleId: String? = Bundle.main.bundleIdentifier, excludedBundleIds: [String] = [],
+                keys: APIKeyProvider = KeychainStore(),
+                provider: AudioStateProvider = CoreAudioStateProvider(),
+                callState: CallStateProvider? = nil,
+                mic: MicSource = MicCapture(), call: CallSource? = nil,
+                engine: CoachEngine = LocalCoachEngine(transports: .urlSession()),
+                glow: GlowOverlayController? = nil) {
+        self.config = config
+        self.anyApp = anyApp
+        self.allowlist = allowlist
+        self.ownBundleId = ownBundleId
+        self.excludedBundleIds = excludedBundleIds
+        let glow = glow ?? GlowOverlayController(style: glowStyle)
+        self.glow = glow
+        let settings = TriggerSettings(config: config, anyApp: anyApp, ownPid: getpid(), ownBundleId: ownBundleId,
+                                       excludedBundleIds: excludedBundleIds, allowlist: allowlist)
+        session = CoachSession(config: config, engine: engine, mic: mic, call: call ?? CallCapture(config: config),
+                               signal: AudioActivitySignal(provider: provider), keys: keys, renderer: glow,
+                               settings: settings, enabled: enabled, callState: callState)
+        session.delegate = self
+        glow.placement = { [weak self] in
+            guard let self else { return .init(screen: nil) }
+            return .init(screen: self.locateScreen(self.session.session?.appKey, self.fallbackScreen()),
+                         belowWindow: self.hostWindowNumber())
+        }
+        if enabled { session.startPolling() }
+    }
+
+    public var state: State {
+        guard session.isEnabled else { return .off }
+        guard let s = session.session else { return .idle }
+        return .active(paused: s.paused)
+    }
+
+    /// On (pre-warmed), Listening or Paused; hidden ~`trigger.stop_after_s` after call audio stops.
+    public var indicator: CoachIndicator { session.indicator }
+    public var isCapturing: Bool { session.isCapturing }
+    /// The GPT layer stopped itself this session (local cues continue).
+    public var gptStopped: GptStopReason? { session.gptStopped }
+    /// Cues shown in the current session (a live counter; reset at start, never kept).
+    public var cuesShown: Int { session.cuesShown }
+    /// Mic or call-audio capture failed to start (usually a missing permission).
+    public var captureProblem: Bool { session.captureProblem }
+
+    // MARK: controls
+
+    public func setEnabled(_ on: Bool) {
+        session.setEnabled(on)
+        on ? session.startPolling() : session.stopPolling()
+    }
+
+    public func setAnyApp(_ on: Bool) {
+        anyApp = on
+        updateSettings()
+    }
+
+    /// The user's allowlist; nil restores the config's call apps.
+    public func setAllowlist(_ ids: [String]?) {
+        allowlist = ids
+        updateSettings()
+    }
+
+    private func updateSettings() {
+        session.update(settings: TriggerSettings(config: config, anyApp: anyApp, ownPid: getpid(), ownBundleId: ownBundleId,
+                                                 excludedBundleIds: excludedBundleIds, allowlist: allowlist))
+    }
+
+    /// Manual Start (or Resume, if paused).
+    public func start() { session.startManual() }
+    public func pause() { session.setPaused(true) }
+    public func resume() { session.setPaused(false) }
+    public func stop() { session.stopManual() }
+    /// Pause while pre-warmed: skip this call.
+    public func skipThisCall() { session.skipThisCall() }
+
+    /// The indicator's one control: skip this call while pre-warmed, Pause while listening, Resume while paused.
+    public func chipControl() { session.toggleFromIndicator() }
+
+    /// The user joined a calendar event: a hint for when the call should end, never a start.
+    public func joinHint(endsAt: Date) { session.joinHint(endsAt: endsAt) }
+
+    func poll() { session.tick() }
+
+    // MARK: CoachSessionDelegate
+
+    public func coachSessionDidChange(_ session: CoachSession) { onChange?() }
+
+    public func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) {
+        switch problem {
+        case .micUnavailable: Log.coach.error("mic unavailable")
+        case .callCaptureFailed(let stage): Log.coach.error("call capture failed, stage \(stage.rawValue, privacy: .public)")
+        case .keyUnreadable: Log.coach.error("key unreadable")
+        case .fallbackEngaged(let stage): Log.coach.info("capture fallback, stage \(stage.rawValue, privacy: .public)")
+        }
+    }
+}

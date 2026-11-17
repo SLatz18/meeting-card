@@ -91,8 +91,8 @@ final class CardRootView: NSView {
 /// CAGradientLayer + mask, so CALayer.render(in:) (--snapshot) draws it exactly as on screen.
 final class BorderLayer: CALayer {
     var colors: [CGColor]?
-    var lineWidth: CGFloat = 1.3
-    var radius: CGFloat = 20
+    var lineWidth = CGFloat(CardStyle.Stroke.border)
+    var radius = CGFloat(CardStyle.Radius.card)
 
     override init() {
         super.init()
@@ -123,11 +123,11 @@ final class BorderLayer: CALayer {
     }
 }
 
-/// Layer-backed button with hover + pressed fills from CardPalette.
+/// Layer-backed button with hover + pressed fills from CardStyle.
 final class CardButton: NSButton {
     enum Role { case ignore, join }
     var role: Role = .ignore
-    var palette: () -> CardPalette = { .for(dark: false) }
+    var style: () -> CardStyle = { .for(dark: false) }
     private var hovering = false, pressing = false
     private var area: NSTrackingArea?
 
@@ -136,12 +136,12 @@ final class CardButton: NSButton {
     var state3: ButtonState { pressing ? .pressed : hovering ? .hover : .normal }
 
     func applyFill() {
-        let p = palette()
-        let c = role == .ignore ? p.ignoreFill(state3) : p.joinFillState(state3)
+        let t = style()
+        let c = role == .ignore ? t.controlFill(state3) : t.primaryFill(state3)
         layer?.backgroundColor = Card.ns(c).cgColor
         if role == .ignore {
-            layer?.borderWidth = 0.5
-            layer?.borderColor = Card.ns(p.hairline).cgColor
+            layer?.borderWidth = Theme.cg(CardStyle.Stroke.hairline)
+            layer?.borderColor = Card.ns(t.hairline).cgColor
         }
     }
 
@@ -168,8 +168,8 @@ final class CardButton: NSButton {
 /// no window shadow, provider outline (CardBorder),
 /// hover/pressed buttons, Return/Esc after click or hover only.
 final class Card: CardHandle {
-    static let W = CGFloat(CardLayout.W), H = CGFloat(CardLayout.H)
-    static let radius = CGFloat(CardLayout.radius), border: CGFloat = 1.3
+    static let W = CGFloat(Theme.Metrics.cardWidth), H = CGFloat(Theme.Metrics.cardHeight)
+    static let radius = CGFloat(CardStyle.Radius.card), border = CGFloat(CardStyle.Stroke.border)
 
     private(set) var ev: Event
     let rk: Rechecker
@@ -189,6 +189,11 @@ final class Card: CardHandle {
     private(set) var model: CardModel
     private(set) var ignoreButton: NSButton!
     private(set) var joinButton: NSButton?
+    /// Coach chip (pre-warmed / listening / paused) and its Start / Pause / Resume control; nil
+    /// whenever the coach is not running, so the card is the unchanged reminder card.
+    private(set) var coachChipView: CoachChipView?
+    var coachButton: NSButton? { coachChipView?.control }
+    private(set) var coach: CoachChip?
     private(set) var gate: KeyGate
     private var prevApp: NSRunningApplication?
     private var now: Date
@@ -199,14 +204,13 @@ final class Card: CardHandle {
     weak var target: AnyObject?
     let ignoreAction: Selector
     let joinAction: Selector
+    let coachAction: Selector?
     let log: (String) -> Void
 
-    static func ns(_ c: RGBA) -> NSColor {
-        NSColor(srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: CGFloat(c.a))
-    }
+    static func ns(_ c: RGBA) -> NSColor { Theme.ns(c) }
 
     init(ev: Event, rk: Rechecker, now: Date, target: AnyObject, ignoreAction: Selector, joinAction: Selector,
-         hoverKeys: Bool = KeyGate.hoverKeysDefault,
+         coachAction: Selector? = nil, coach: CoachChip? = nil, hoverKeys: Bool = KeyGate.hoverKeysDefault,
          fixtureRun: Bool = false, log: @escaping (String) -> Void = { _ in }) {
         self.fixtureRun = fixtureRun
         self.ev = ev
@@ -216,6 +220,8 @@ final class Card: CardHandle {
         self.target = target
         self.ignoreAction = ignoreAction
         self.joinAction = joinAction
+        self.coachAction = coachAction
+        self.coach = coach
         self.log = log
         gate = KeyGate(hoverKeys: hoverKeys)
         let ps = CardLayout.panelSize
@@ -227,11 +233,12 @@ final class Card: CardHandle {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false             // OQ-3: no drop shadow
+        panel.hasShadow = CardStyle.Material.shadow      // OQ-3: no drop shadow
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.isMovableByWindowBackground = false
         panel.becomesKeyOnlyIfNeeded = true
+        if coach != nil { panel.sharingType = .none }
 
         root = CardRootView(frame: NSRect(x: 0, y: 0, width: PW, height: PH))
         root.wantsLayer = true
@@ -277,12 +284,13 @@ final class Card: CardHandle {
     /// From the app's appearance (we never set per-view appearances): a view's effectiveAppearance
     /// can still be stale when the KVO change arrives.
     var isDark: Bool { NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
-    var palette: CardPalette { CardPalette.for(dark: isDark) }
+    var style: CardStyle { Theme.style(dark: isDark) }
+    var palette: CardPalette { style.palette }
 
     /// Layer colors are CGColors (not dynamic): resolve them for the current appearance.
     func applyChrome() {
         lastDark = isDark
-        cardView.layer?.backgroundColor = Card.ns(palette.cardFill).cgColor
+        cardView.layer?.backgroundColor = Card.ns(style.surface).cgColor
     }
 
     func appearanceChanged() {
@@ -382,13 +390,13 @@ final class Card: CardHandle {
     func button(_ title: String, _ role: CardButton.Role, _ frame: NSRect, image: NSImage? = nil) -> NSButton {
         let b = CardButton(frame: frame)
         b.role = role
-        b.palette = { [weak self] in self?.palette ?? .for(dark: false) }
+        b.style = { [weak self] in self?.style ?? .for(dark: false) }
         b.isBordered = false
         b.wantsLayer = true
-        b.layer?.cornerRadius = 9
+        b.layer?.cornerRadius = Theme.cg(CardStyle.Radius.control)
         b.layer?.cornerCurve = .continuous
-        let fg: NSColor = role == .ignore ? .labelColor : Card.ns(palette.joinText)
-        b.attributedTitle = Card.attr(title, .systemFont(ofSize: 14, weight: .medium), fg)
+        let fg: NSColor = role == .ignore ? Theme.text(.primary, style) : Card.ns(style.primaryText)
+        b.attributedTitle = Card.attr(title, Theme.font(CardStyle.Typography.button), fg)
         if let image {
             b.image = image
             b.imagePosition = .imageLeft
@@ -407,34 +415,39 @@ final class Card: CardHandle {
         let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
 
         suffix = nil
-        titleLabel = Card.label(Card.attr("", .systemFont(ofSize: 17), .labelColor),
-                                NSRect(x: 17, y: H - 40, width: W - 34, height: 24))
+        let m = Theme.Metrics.self
+        titleLabel = Card.label(Card.attr("", Theme.font(CardStyle.Typography.titlePlaceholder), Theme.text(.primary, style)),
+                                NSRect(x: m.leadingInset, y: Double(H) - m.titleTop, width: Double(W) - 2 * m.leadingInset,
+                                       height: m.titleHeight))
         titleLabel.maximumNumberOfLines = 1
         titleLabel.usesSingleLineMode = true
         v.addSubview(titleLabel)
         setNow(now)
         let ends = NSMutableAttributedString()
-        ends.append(Card.attr(model.ends, .systemFont(ofSize: 13.5), .secondaryLabelColor))
+        let bodyFont = Theme.font(CardStyle.Typography.body)
+        ends.append(Card.attr(model.ends, bodyFont, Theme.text(.secondary, style)))
         if let flag = model.flag {
-            ends.append(Card.attr("  \u{00B7}  " + flag, .systemFont(ofSize: 13.5), Card.ns(palette.flag)))
+            ends.append(Card.attr("  \u{00B7}  " + flag, bodyFont, Theme.text(.warning, style)))
         }
-        v.addSubview(Card.label(ends, NSRect(x: 18, y: H - 67, width: W - 36, height: 20)))
+        v.addSubview(Card.label(ends, NSRect(x: m.textInset, y: Double(H) - m.bodyTop, width: Double(W) - 2 * m.textInset,
+                                             height: m.bodyHeight)))
         if let nextUp {
             // #11: between Ends and the buttons, in the extra height the line adds.
             // #17: own color (palette.nextUp) so it doesn't read as a second Ends line; the title
             // truncates, never " @ <time>".
-            let font = NSFont.systemFont(ofSize: 12.5)
-            let w = W - 36
+            let font = Theme.font(CardStyle.Typography.caption)
+            let w = W - CGFloat(2 * m.textInset)
             let text = NextUp.fit(nextUp, width: Double(w) - 4, measure: {
                 Double(($0 as NSString).size(withAttributes: [.font: font]).width) })
-            let nl = Card.label(Card.attr(text, font, Card.ns(palette.nextUp)),
-                                NSRect(x: 18, y: H - 90, width: w, height: 18))
+            let nl = Card.label(Card.attr(text, font, Theme.text(.accent, style)),
+                                NSRect(x: CGFloat(m.textInset), y: H - CGFloat(m.captionTop), width: w, height: CGFloat(m.captionHeight)))
             nl.maximumNumberOfLines = 1   // belt-and-braces: never wrap, the time stays visible
             nl.usesSingleLineMode = true
             v.addSubview(nl)
         }
 
-        ignoreButton = button("Ignore", .ignore, NSRect(x: 17, y: 15, width: 67, height: 33))
+        ignoreButton = button("Ignore", .ignore, NSRect(x: m.leadingInset, y: m.buttonBottom, width: m.ignoreWidth,
+                                                        height: m.buttonHeight))
         ignoreButton.target = target
         ignoreButton.action = ignoreAction
         v.addSubview(ignoreButton)
@@ -442,27 +455,41 @@ final class Card: CardHandle {
         joinButton = nil
         if let link = model.link, let title = model.openingTitle(isOpening) {
             let b: NSButton
+            let row = { (jw: Double) in NSRect(x: Double(W) - m.trailingInset - jw, y: m.buttonBottom, width: jw, height: m.buttonHeight) }
             if link.provider == "calendar" {
-                let jw: CGFloat = 142
-                b = button(title, .join, NSRect(x: W - 16 - jw, y: 15, width: jw, height: 33))
+                b = button(title, .join, row(m.joinWidthCalendar))
             } else if isOpening {
                 // v2.4: built as "Joining..." (no icon) directly: no intermediate normal title.
-                let jw: CGFloat = link.provider == "meet" ? 110 : 114
-                b = button(title, .join, NSRect(x: W - 16 - jw, y: 15, width: jw, height: 33))
+                b = button(title, .join, row(link.provider == "meet" ? m.joinWidthMeet : m.joinWidth))
                 log(KeyGate.openingTitleLog(id: ev.id ?? "nil", title: title))
             } else {
-                let jw: CGFloat = link.provider == "meet" ? 110 : 114
-                b = button(" " + title, .join, NSRect(x: W - 16 - jw, y: 15, width: jw, height: 33),
-                           image: Icons.icon(link.provider, size: 20))
+                b = button(" " + title, .join, row(link.provider == "meet" ? m.joinWidthMeet : m.joinWidth),
+                           image: Icons.icon(link.provider, size: CGFloat(m.providerIconSize)))
             }
             b.target = target
             b.action = joinAction
             v.addSubview(b)
             joinButton = b
         }
+        coachChipView = nil
+        if let coach {
+            let chip = CoachChipView(chip: coach, joinX: joinButton.map { Double($0.frame.minX) }, style: style,
+                                     target: target, action: coachAction)
+            v.addSubview(chip)
+            coachChipView = chip
+        }
         cardView.addSubview(v)
         content = v
         applyBorder()
+    }
+
+    /// Coach state changed: rebuild in place (same path as a live update). While the chip shows,
+    /// the card asks to be left out of screen shares, like the glow.
+    func setCoach(_ c: CoachChip?) {
+        panel.sharingType = c == nil ? .readOnly : .none
+        guard c != coach else { return }
+        coach = c
+        refresh(ev, now: now)
     }
 
     /// Backing scale changed (screen move): re-raster the outline at the new scale.
@@ -505,7 +532,7 @@ final class Card: CardHandle {
     private func applyOpeningLabel() {
         guard let b = joinButton, let title = model.openingTitle(isOpening) else { return }
         b.image = nil
-        b.attributedTitle = Card.attr(title, .systemFont(ofSize: 14, weight: .medium), Card.ns(palette.joinText))
+        b.attributedTitle = Card.attr(title, Theme.font(CardStyle.Typography.button), Card.ns(style.primaryText))
         if isOpening { log(KeyGate.openingTitleLog(id: ev.id ?? "nil", title: title)) }
         // Relabel, not isEnabled=false: AppKit's disabled look made the label unreadable. A second
         // click / Return while opening is a no-op in Core (Coordinator.join, "already opening").
@@ -517,14 +544,14 @@ final class Card: CardHandle {
         let s = Timing.countdownSuffix(ev, now)
         if s == suffix { return }
         suffix = s
-        let f = NSFont.systemFont(ofSize: 17, weight: .semibold)
+        let f = Theme.font(CardStyle.Typography.title)
         let t = NSMutableAttributedString()
         // v2.5 #4: only the title truncates (measured in this font); " <countdown>" always shows.
         let fit = CardLayout.fitTitle(model.title, fixture: fixtureRun, suffix: s,
                                       width: Double(titleLabel.frame.width) - 4, measure: {
             Double(($0 as NSString).size(withAttributes: [.font: f]).width) })
-        t.append(Card.attr(fit.title, f, .labelColor))
-        t.append(Card.attr(fit.suffix, f, .secondaryLabelColor))
+        t.append(Card.attr(fit.title, f, Theme.text(.primary, style)))
+        t.append(Card.attr(fit.suffix, f, Theme.text(.secondary, style)))
         titleLabel.attributedStringValue = t
     }
 
@@ -577,17 +604,21 @@ final class Card: CardHandle {
     /// Render the layer tree to PNG via CALayer.render(in:) (CTO ruling 7). The PNG is card-sized
     /// (panel frame == card rect).
     func snapshot(to path: String) -> Bool {
+        guard let img = snapshotImage() else { return false }
+        return Card.writePNG(img, path)
+    }
+
+    func snapshotImage() -> CGImage? {
         root.layoutSubtreeIfNeeded()
         root.displayIfNeeded()
         let scale = panel.backingScaleFactor > 0 ? panel.backingScaleFactor : 2
         let w = Int(root.bounds.width * scale), h = Int(root.bounds.height * scale)
         guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
               let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: cs,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.scaleBy(x: scale, y: scale)
         root.layer?.render(in: ctx)
-        guard let img = ctx.makeImage() else { return false }
-        return Card.writePNG(img, path)
+        return ctx.makeImage()
     }
 
     static func writePNG(_ img: CGImage, _ path: String) -> Bool {

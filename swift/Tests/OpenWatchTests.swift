@@ -17,7 +17,7 @@ final class OpenWatchTests: XCTestCase {
         XCTAssertEqual(w.step(p(front: Self.aside, cpt: [9794]), at: 3), .opened("zoom meeting pid 9794"))
     }
 
-    /// Brief refinement (binding): Scott already in a Zoom meeting -> that CptHost must not count.
+    /// Brief refinement (binding): the user already in a Zoom meeting -> that CptHost must not count.
     func testPreExistingCptHostDoesNotOpen() {
         let w = OpenWatch(provider: "zoom", at: 0, probe: p(cpt: [9794]))
         XCTAssertEqual(w.step(p(cpt: [9794]), at: 1), .waiting)

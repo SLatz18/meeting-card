@@ -24,7 +24,11 @@
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>MeetingCard needs system audio so Call coach can hear the other people on your call. Nothing is recorded or saved.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MeetingCard uses your mic during calls so Call coach can notice interruptions and missed questions. Nothing is recorded or saved.</string>
 </dict>
 </plist>

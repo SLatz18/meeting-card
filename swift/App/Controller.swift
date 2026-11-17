@@ -1,4 +1,5 @@
 import AppKit
+import ListenMoreCore
 import MeetingCardCore
 import ServiceManagement
 
@@ -53,6 +54,10 @@ final class Controller: NSObject, NSApplicationDelegate {
     var pollInFlight = false
     var timers: [Timer] = []
     var signalSources: [DispatchSourceSignal] = []
+    /// Call coach (opt-in, off by default). Not created on fixture runs.
+    var coach: CoachController?
+    /// Fixture-run seam: a fixed chip on the card for the CI screenshots.
+    var demoChip: CoachChip?
 
     init(args: Args) {
         self.args = args
@@ -86,6 +91,17 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
         if args.fixture == nil {
             log("env keys: \(ProcessInfo.processInfo.environment.keys.sorted())")
+        }
+        let env = ProcessInfo.processInfo.environment
+        if args.fixture == nil {
+            do {
+                coach = try CoachController()
+            } catch {
+                log(ListenMoreConfig.loadFailureMessage(error))
+            }
+            coach?.visibleCards = { [unowned self] in self.coord.cards }
+        } else {
+            demoChip = UISnapshots.demoChip(env)
         }
         if let f = args.fixture {
             do {
@@ -146,6 +162,12 @@ final class Controller: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ n: Notification) { log("exiting") }
 
+    /// Reopening the app (Finder, Spotlight, `open -a`) opens the call coach Settings.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        coach?.showSettings()
+        return false
+    }
+
     func installSignalHandlers() {
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
@@ -201,8 +223,10 @@ final class Controller: NSObject, NSApplicationDelegate {
     func makeCard(_ ev: Event, _ slot: CardSlot, _ now: Date) -> Card {
         let l = logger
         let env = ProcessInfo.processInfo.environment
+        let chip = MainActor.assumeIsolated { coach?.chip } ?? demoChip
         let c = Card(ev: ev, rk: Rechecker(now: ProcessInfo.processInfo.systemUptime, log: { l.log($0) }), now: now,
                      target: self, ignoreAction: #selector(ignoreClicked(_:)), joinAction: #selector(joinClicked(_:)),
+                     coachAction: #selector(coachClicked(_:)), coach: chip,
                      fixtureRun: args.fixture != nil, log: { l.log($0) })
         c.show(slot)
         // Test seam: flip the app appearance after show to exercise the live refresh path.
@@ -240,6 +264,7 @@ final class Controller: NSObject, NSApplicationDelegate {
                 } catch { self.log("ERROR border swap \(swap): \(type(of: error))") }
             }
         }
+        if args.fixture != nil { MainActor.assumeIsolated { UISnapshots.schedule(env, card: c, controller: self) } }
         if let snap = args.snapshot {
             schedule(0.8, repeats: false) { [unowned self] in
                 guard let last = self.coord.cards.last else { return }
@@ -255,11 +280,18 @@ final class Controller: NSObject, NSApplicationDelegate {
     }
 
     func card(for sender: Any?) -> Card? {
-        coord.cards.first { sender as AnyObject? === $0.ignoreButton || sender as AnyObject? === $0.joinButton }
+        coord.cards.first {
+            sender as AnyObject? === $0.ignoreButton || sender as AnyObject? === $0.joinButton
+                || sender as AnyObject? === $0.coachButton
+        }
     }
+
+    @objc func coachClicked(_ sender: Any?) { MainActor.assumeIsolated { coach?.chipClicked(sender) } }
 
     @objc func joinClicked(_ sender: Any?) {
         guard let c = card(for: sender), let url = coord.join(c) else { return }
+        let end = Timing.times(c.ev)?.end
+        MainActor.assumeIsolated { coach?.joinHint(endsAt: end) }
         if dryJoin {
             log("DRY_JOIN would open \(url)")
         } else if let u = URL(string: url) {

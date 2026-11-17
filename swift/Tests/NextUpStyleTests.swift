@@ -1,7 +1,7 @@
 import XCTest
 @testable import MeetingCardCore
 
-/// #17 (Scott 10:18pm 2026-10-06): "Next up: <title> @ <time>", styled apart from the Ends line,
+/// #17 (owner 10:18pm 2026-10-06): "Next up: <title> @ <time>", styled apart from the Ends line,
 /// long titles truncate with an ellipsis so " @ <time>" always shows.
 final class NextUpStyleTests: XCTestCase {
     let tz = TimeZone(secondsFromGMT: -5 * 3600)!
@@ -77,7 +77,7 @@ final class NextUpStyleTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("App/CardPanel.swift"))
         XCTAssertTrue(src.contains("NextUp.fit(nextUp"))
-        XCTAssertTrue(src.contains("Card.ns(palette.nextUp)"))
+        XCTAssertTrue(src.contains("Theme.text(.accent, style)"), "the CardStyle accent role (palette.nextUp)")
     }
 
     /// Codex P2 (0ef30ab): newlines in the title rendered multiline and hid " @ <time>".

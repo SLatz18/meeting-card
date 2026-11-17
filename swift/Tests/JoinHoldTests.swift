@@ -1,8 +1,8 @@
 import XCTest
 @testable import MeetingCardCore
 
-/// #4 simplified (Scott 2026-10-06 10:24pm): Join (click or Return) shows "Joining..." for a FIXED
-/// 30s (v2.4: 15s; v2.5: 8s, Scott 9:03am 2026-10-07), then the card closes. No meeting / browser / CptHost detection: OpenWatch stays in the
+/// #4 simplified (owner 2026-10-06 10:24pm): Join (click or Return) shows "Joining..." for a FIXED
+/// 30s (v2.4: 15s; v2.5: 8s, owner 9:03am 2026-10-07), then the card closes. No meeting / browser / CptHost detection: OpenWatch stays in the
 /// code but is switched off, so nothing is probed while joining.
 final class JoinHoldTests: XCTestCase {
     typealias Rig = OpenWatchTests.Rig

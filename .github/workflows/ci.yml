@@ -11,21 +11,96 @@ permissions:
 jobs:
   build-and-test:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
         run: |
           xcodebuild -version
+          swift --version
           sw_vers
       - name: Install xcodegen
         run: brew install xcodegen
-      - name: Test + Release build (ad-hoc signed)
+      # App tests, ListenMoreKit tests (swift test; live OpenAI tests skip without the opt-in), then
+      # the Release build, ad-hoc signed. Nothing is installed.
+      - name: Test (app + ListenMoreKit) + Release build (ad-hoc signed)
         working-directory: swift
         run: ./scripts/build.sh build
+      - name: Kit test summary
+        working-directory: swift
+        run: grep -E "Executed [0-9]+ tests" build/kit-test.log | tail -1
+      # Report-only: does ScreenCaptureKit honor sharingType .none for the glow and the coach card?
+      - name: Screen-share probe (report only)
+        working-directory: swift/Packages/ListenMoreKit
+        continue-on-error: true
+        env:
+          LISTEN_MORE_SCK_PROBE: "1"
+          LISTEN_MORE_SCK_PROBE_OUT: ${{ github.workspace }}/swift/build/sck-probe
+        run: |
+          sw_vers
+          swift test --scratch-path ../../build/kit --filter ScreenShareProbeTests 2>&1 | tee ../../build/sck-probe.log
+          grep SCK_PROBE_RESULT ../../build/sck-probe.log || echo "SCK_PROBE_RESULT none"
+      - name: Package the .app (unsigned build artifact, not notarized)
+        working-directory: swift/build/dd/Build/Products/Release
+        run: ditto -c -k --keepParent MeetingCardSwift.app "$GITHUB_WORKSPACE/MeetingCardSwift-app.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeetingCardSwift-app
+          path: MeetingCardSwift-app.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sck-probe
+          path: |
+            swift/build/sck-probe/
+            swift/build/sck-probe.log
+          if-no-files-found: ignore
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
           path: swift/build/*.log
+
+  # Reminder cards rendered at the base and head revisions must be pixel-identical; the coach UI
+  # (chip states, glow, Settings, onboarding) is rendered from head for review.
+  snapshots:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: base
+      - name: Tools
+        run: |
+          sw_vers
+          brew install xcodegen
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow
+      - name: Release builds (base and head; no tests, nothing installed)
+        run: |
+          for rev in base head; do
+            (cd "$rev/swift" && xcodegen generate --quiet && xcodebuild -project MeetingCardSwift.xcodeproj \
+              -scheme MeetingCardSwift -configuration Release -derivedDataPath build/dd build >"$RUNNER_TEMP/build-$rev.log" 2>&1) \
+              || { grep -E "error:" "$RUNNER_TEMP/build-$rev.log" | head -40; exit 1; }
+          done
+      - name: Render reminder cards (base vs head)
+        run: head/swift/scripts/snapshots.sh cards base/swift head/swift "$RUNNER_TEMP/shots/cards"
+      - name: Render coach UI (head)
+        run: head/swift/scripts/snapshots.sh coach "$RUNNER_TEMP/shots/coach"
+      - name: Reminder cards are pixel-identical
+        run: |
+          rc=0
+          "$RUNNER_TEMP/venv/bin/python" head/swift/scripts/compare-snapshots.py \
+            "$RUNNER_TEMP/shots/cards/base" "$RUNNER_TEMP/shots/cards/head" "$RUNNER_TEMP/shots/compare" 12 || rc=$?
+          cat "$RUNNER_TEMP/shots/compare/report.md" >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snapshots
+          path: ${{ runner.temp }}/shots/

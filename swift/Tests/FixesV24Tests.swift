@@ -1,11 +1,11 @@
 import XCTest
 @testable import MeetingCardCore
 
-/// v2.4 (Scott 2026-10-07 8:32am: "flashed multiple times while displaying 'joining'").
+/// v2.4 (owner 2026-10-07 8:32am: "flashed multiple times while displaying 'joining'").
 /// 1: the key give-back never orders the panel out (that out/in WAS the flash).
 /// 2: no key arming while Joining; Join hands key back once.
 /// 3: a refresh during Joining builds the button as "Joining..." directly and doesn't re-place.
-/// 4: hold = 15s (now 8s, Scott 9:03am 2026-10-07).
+/// 4: hold = 15s (now 8s, owner 9:03am 2026-10-07).
 final class FixesV24Tests: XCTestCase {
     typealias Surface = KeyDeliveryTests.Surface
     static let p0 = KeyGate.Point(x: 1000, y: 200)

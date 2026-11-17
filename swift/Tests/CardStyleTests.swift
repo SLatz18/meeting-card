@@ -113,7 +113,7 @@ final class CardStyleTests: XCTestCase {
         XCTAssertEqual(g.handle(.hoverExit), .releaseKey)
         XCTAssertFalse(g.armed)
         XCTAssertNil(g.action(keyCode: 53))
-        // A click while hovered, then exit: still give focus back (Scott has moved on).
+        // A click while hovered, then exit: still give focus back (the user has moved on).
         _ = g.handle(.hoverEnter(cursor: .init(x: 5, y: 5), inCard: true)); _ = g.handle(.click(inCard: true))
         XCTAssertEqual(g.handle(.hoverExit), .releaseKey)
         XCTAssertFalse(g.armed)
