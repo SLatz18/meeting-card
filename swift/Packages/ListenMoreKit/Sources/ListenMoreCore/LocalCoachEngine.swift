@@ -9,6 +9,11 @@ public struct FrameAligner {
     private var mic: [Float] = []
     private var call: [Float] = []
     public private(set) var paddedFrames = 0
+    /// The user's mic is off: mic samples are dropped and each call frame goes out at once, paired
+    /// with silence (no `maxLag` wait for a stream that isn't coming).
+    public var micSilenced = false {
+        didSet { if micSilenced { mic.removeAll() } }
+    }
 
     public init(hop: Int, maxLagSamples: Int) {
         self.hop = hop
@@ -17,7 +22,7 @@ public struct FrameAligner {
 
     public mutating func append(_ stream: AudioStream, _ samples: [Float]) {
         switch stream {
-        case .mic: mic += samples
+        case .mic: if !micSilenced { mic += samples }
         case .call: call += samples
         }
     }
@@ -36,7 +41,7 @@ public struct FrameAligner {
             } else if haveMic && mic.count - call.count > maxLag {
                 call += [Float](repeating: 0, count: hop - call.count)
                 paddedFrames += 1
-            } else if haveCall && call.count - mic.count > maxLag {
+            } else if haveCall && (micSilenced || call.count - mic.count > maxLag) {
                 mic += [Float](repeating: 0, count: hop - mic.count)
                 paddedFrames += 1
             } else {
@@ -60,6 +65,7 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     public weak var delegate: CoachEngineDelegate?
     public private(set) var isRunning = false
     public private(set) var framesProcessed = 0
+    public private(set) var micMuted = false
 
     private let transports: GptTransports?
     private let maxLagMs: Int
@@ -108,6 +114,7 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
         let hop = config.audio.sampleRate * config.audio.frameMs / 1000
         aligner = FrameAligner(hop: hop, maxLagSamples: config.audio.sampleRate * maxLagMs / 1000)
         framesProcessed = 0
+        micMuted = false
         clock.set(0)
         var bridge: AsyncGptBridge?
         if let apiKey, let transports {
@@ -131,6 +138,10 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
                                  onMeter: { [weak self] reading in
                                      guard let self else { return }
                                      self.delegate?.engine(self, meter: reading)
+                                 },
+                                 onClearRejected: { [weak self] speaker in
+                                     guard let self else { return }
+                                     self.delegate?.engine(self, clearRejected: speaker)
                                  })
             box.layer = layer
             layer.start()
@@ -142,7 +153,7 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     }
 
     public func ingest(_ stream: AudioStream, samples: [Float], time: TimeInterval) {
-        guard isRunning, let config, let pipeline else { return }
+        guard isRunning, let config, let pipeline, !(stream == .mic && micMuted) else { return }
         aligner?.append(stream, samples)
         let fs = Double(config.audio.frameMs) / 1000
         for frame in aligner?.popFrames() ?? [] {
@@ -154,6 +165,15 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
                                                                  confidence: cue.confidence, level: cue.level))
             }
         }
+    }
+
+    /// Mic off: the aligner pairs call frames with silence and the pipeline drops what it held of the
+    /// user's speech (see `CoachPipeline.setMicMuted`). Mic on: frames pair up again.
+    public func setMicMuted(_ muted: Bool) {
+        guard isRunning, muted != micMuted else { return }
+        micMuted = muted
+        aligner?.micSilenced = muted
+        pipeline?.setMicMuted(muted)
     }
 
     public func stop() {
@@ -186,6 +206,10 @@ final class AsyncGptBridge: PipelineGpt, @unchecked Sendable {
 
     func onLocal(_ event: LocalEvent) {
         layer?.onLocal(event)
+    }
+
+    func setMicMuted(_ muted: Bool) {
+        layer?.setMicMuted(muted)
     }
 
     func feed(me: [Float], meVad: VadState, others: [Float], othersVad: VadState, meRunS: Double) {

@@ -125,6 +125,9 @@ public final class CoachService: CoachSessionDelegate {
     public func pause() { session.setPaused(true) }
     public func resume() { session.setPaused(false) }
     public func stop() { session.stopManual() }
+    /// The coach's own Mute: it stops listening to the user's mic only (`CoachSession.setMicMuted`).
+    public var micMuted: Bool { session.micMuted }
+    public func setMicMuted(_ muted: Bool) { session.setMicMuted(muted) }
     /// Pause while pre-warmed: skip this call.
     public func skipThisCall() { session.skipThisCall() }
     /// Off for the rest of this call, pre-warmed or in a session.
@@ -163,6 +166,8 @@ public final class CoachService: CoachSessionDelegate {
         case .callCaptureFailed(let stage): Log.coach.error("call capture failed, stage \(stage.rawValue, privacy: .public)")
         case .keyUnreadable: Log.coach.error("key unreadable")
         case .fallbackEngaged(let stage): Log.coach.info("capture fallback, stage \(stage.rawValue, privacy: .public)")
+        // The event type only: no audio, no text, nothing from the server's reply.
+        case .transcriberClearRejected: Log.coach.info("realtime input_audio_buffer.clear rejected")
         }
     }
 }

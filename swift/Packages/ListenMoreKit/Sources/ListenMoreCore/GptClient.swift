@@ -6,6 +6,8 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     func sendAudio(_ pcm16: Data) async throws
     /// Commits the current audio turn; `refT` is the audio time of the turn's end (the VAD offset).
     func commit(refT: TimeInterval) async throws
+    /// Drops the audio sent since the last commit: nothing is transcribed from it.
+    func clear() async throws
     func close() async
 }
 
@@ -19,6 +21,8 @@ public enum TranscriptEvent: Sendable {
     case delta(Speaker, String, item: String)
     /// Billed audio seconds the API reported for one committed segment.
     case usage(Speaker, Double)
+    /// The server refused this transcriber's `clear` (non-fatal: the layer keeps running).
+    case clearRejected(Speaker)
     case error(String)
 }
 
@@ -36,6 +40,10 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
     private var reader: Task<Void, Never>?
     private var commitRefs: [TimeInterval] = []
     private var itemRef: [String: TimeInterval] = [:]
+    /// `event_id`s of clears not yet acknowledged, oldest first: an `error` naming one is that clear's
+    /// rejection, not a session failure.
+    private var pendingClears: [String] = []
+    private var clearCount = 0
 
     public init(config: ListenMoreConfig, key: APIKey, speaker: Speaker, connector: WebSocketConnector,
                 onEvent: @escaping @Sendable (TranscriptEvent) -> Void) {
@@ -83,6 +91,17 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
         try await ws.send(Self.json(["type": "input_audio_buffer.commit"]))
     }
 
+    public func clear() async throws {
+        guard let ws = lock.withLock({ socket }) else { return }
+        let id: String = lock.withLock {
+            clearCount += 1
+            let id = "lm_clear_\(clearCount)"
+            pendingClears.append(id)
+            return id
+        }
+        try await ws.send(Self.json(["type": "input_audio_buffer.clear", "event_id": id]))
+    }
+
     public func close() async {
         let (ws, task) = lock.withLock { (socket, reader) }
         ws?.close()
@@ -124,8 +143,15 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
             }
             let ref: TimeInterval = lock.withLock { itemRef.removeValue(forKey: item) ?? -1 }
             onEvent(.text(speaker, ev["transcript"] as? String ?? "", refT: ref))
+        case "input_audio_buffer.cleared":
+            lock.withLock { if !pendingClears.isEmpty { pendingClears.removeFirst() } }
         case "error":
             let err = ev["error"] as? [String: Any] ?? [:]
+            if let id = err["event_id"] as? String,
+               lock.withLock({ pendingClears.firstIndex(of: id).map { pendingClears.remove(at: $0) } }) != nil {
+                onEvent(.clearRejected(speaker))
+                return
+            }
             onEvent(.error("realtime error \(err["type"] as? String ?? "")/\(err["code"] as? String ?? "")"))
         default:
             break

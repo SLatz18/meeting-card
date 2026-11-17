@@ -195,7 +195,9 @@ final class EventBox: @unchecked Sendable {
     private var _errors: [String] = []
     private var _usage: [(Speaker, Double)] = []
     private var _deltas: [(Speaker, String, String)] = []
+    private var _clearRejections: [Speaker] = []
 
+    var clearRejections: [Speaker] { lock.withLock { _clearRejections } }
     var texts: [(Speaker, String, TimeInterval)] { lock.withLock { _texts } }
     var deltas: [(Speaker, String, String)] { lock.withLock { _deltas } }
     var errors: [String] { lock.withLock { _errors } }
@@ -207,6 +209,7 @@ final class EventBox: @unchecked Sendable {
             case let .text(s, t, ref): _texts.append((s, t, ref))
             case let .delta(s, t, item): _deltas.append((s, t, item))
             case let .usage(s, sec): _usage.append((s, sec))
+            case let .clearRejected(s): _clearRejections.append(s)
             case let .error(m): _errors.append(m)
             }
         }

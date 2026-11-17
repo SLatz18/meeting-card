@@ -151,11 +151,54 @@ final class CoachWiringTests: XCTestCase {
     func testStatusMenuIsAlwaysThere() throws {
         let src = try read("App/CoachController.swift")
         XCTAssertTrue(src.contains("showsStatusItem: Bool = true"))
-        XCTAssertTrue(src.contains("CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable)"))
-        for action in ["enableClicked", "stopClicked", "pauseClicked", "resumeClicked", "startClicked", "turnOffClicked"] {
+        XCTAssertTrue(src.contains("CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable, micMuted: micMuted)"))
+        for action in ["startClicked", "stopClicked", "pauseClicked", "resumeClicked", "muteMicClicked", "unmuteMicClicked"] {
             XCTAssertTrue(src.contains("#selector(\(action)(_:))"), action)
         }
         XCTAssertFalse(try read("App/Controller.swift").contains("showsStatusItem"), "the app keeps the default")
+    }
+
+    /// One Start/Stop toggle in the menu: Start switches the coach on while it's off and starts it now
+    /// while it waits; switching the coach off is only the Settings toggle.
+    func testStartStopToggleAndTurningOffInSettings() throws {
+        let src = try read("App/CoachController.swift")
+        XCTAssertTrue(src.contains("if enabled { service?.start() } else { enableClicked(sender) }"))
+        XCTAssertTrue(src.contains("case .startCoach: return action(CoachCopy.menuStart, sym.start, #selector(startClicked(_:)))"))
+        for gone in ["turnOffClicked", "menuTurnOff", "menuEnable", "case .startNow", "case .stopForCall", "case .turnOff"] {
+            XCTAssertFalse(src.contains(gone), gone)
+        }
+        let copy = try read("App/CoachCopy.swift")
+        XCTAssertFalse(copy.contains("Turn Off Call Coach") || copy.contains("Turn On Call Coach"))
+        XCTAssertTrue(try read("App/CoachSettingsWindow.swift").contains("coach.setEnabled(sender.state == .on)"), "Settings switches it off")
+    }
+
+    /// Start Coach, then Settings: the Call coach switch reads on at once. Start writes the setting
+    /// before refreshing, the refresh updates an open Settings window, and opening Settings (or leaving
+    /// onboarding) reads the setting again. The snapshot job runs it for real (startToggleCheck, gated).
+    func testStartThenSettingsShowsTheCoachOn() throws {
+        let src = try read("App/CoachController.swift")
+        let enable = try XCTUnwrap(src.components(separatedBy: "@objc func enableClicked(_ sender: Any?) {").dropFirst().first?
+            .components(separatedBy: "\n    }").first)
+        XCTAssertTrue(enable.contains("setEnabled(true)"))
+        let set = try XCTUnwrap(src.components(separatedBy: "func setEnabled(_ on: Bool, completion:").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        let write = try XCTUnwrap(set.range(of: "defaults.set(on, forKey: Keys.enabled)"))
+        let refresh = try XCTUnwrap(set.range(of: "refresh()", range: write.upperBound..<set.endIndex))
+        XCTAssertLessThan(write.upperBound, refresh.lowerBound, "the setting is written before the refresh")
+        let refreshBody = try XCTUnwrap(src.components(separatedBy: "    func refresh() {").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(refreshBody.contains("settingsWindow?.update()"), "an open Settings window follows")
+        let settings = try read("App/CoachSettingsWindow.swift")
+        XCTAssertTrue(settings.contains("toggle.state = coach.enabled ? .on : .off"))
+        let present = try XCTUnwrap(settings.components(separatedBy: "func present() {").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(present.contains("update()"), "opening Settings reads it")
+        let build = try XCTUnwrap(settings.components(separatedBy: "private func build() {").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(build.contains("update()"), "leaving onboarding reads it")
+        let snapshots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
+        XCTAssertTrue(snapshots.contains("startToggleCheck(tag: tag, controller: controller)"))
+        XCTAssertTrue(script.contains("coach check start-toggle-$a before=off open=on reopened=on fresh=on"))
     }
 
     /// Saved transcripts are an opt-in, so no shipped string may still promise "no transcripts" or

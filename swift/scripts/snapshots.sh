@@ -5,8 +5,9 @@
 #       <out>/head; a pair is re-rendered once if they differ (the clock minute can roll over
 #       between the two renders and the card shows absolute times)
 #   scripts/snapshots.sh coach <out-dir>
-#       coach chip states (incl. the multi-link card, full and collapsed), glow, Settings (incl. the
-#       TypeSafe cue judge, and its feedback row), onboarding, status menu, the feedback notice, caption
+#       coach chip states (incl. the multi-link card, full and collapsed, and the mic-off chip), glow,
+#       Settings (incl. the TypeSafe cue judge, and its feedback row), onboarding, status menu (incl.
+#       its Mute and Unmute entries), the feedback notice, caption
 #       strip, saving indicator, transcript notice, transcript settings and the design packet
 #       (packet-<surface>-<appearance>.png, listed in packet-list.txt), and the coach card and pill
 #       states with the morph and collapse end states (coach-<state>-<appearance>.png) from this
@@ -41,7 +42,7 @@ case "${1:-}" in
     ;;
   coach)
     OUT="$(mkdir -p "$2" && cd "$2" && pwd)"
-    for chip in on listening paused muted; do
+    for chip in on listening paused muted mic-off; do
       for a in light dark; do
         shot "$HERE" meet "$a" "$OUT/coach-chip-$chip-$a.png" MEETING_CARD_COACH_CHIP="$chip"
       done
@@ -60,7 +61,7 @@ case "${1:-}" in
     for a in light dark; do
       (cd "$HERE" && MEETING_CARD_COACH_CHIP=listening MEETING_CARD_COACH_SHOTS="$OUT" \
         scripts/show-fixture.sh meet "$a" 30 >/dev/null 2>&1) || true
-      grep -hE "coach (shot|packet|menu|notice)" "$LOG" >> "$OUT/coach-shots.log" 2>/dev/null || true
+      grep -hE "coach (shot|packet|menu|notice|check)" "$LOG" >> "$OUT/coach-shots.log" 2>/dev/null || true
     done
     # The coach card and pill in each state, and the morph and collapse end states (coach-<name>-<appearance>.png;
     # names from UISnapshots.coachCardStates).
@@ -74,17 +75,22 @@ case "${1:-}" in
     (cd "$OUT" && ls packet-*.png) > "$OUT/packet-list.txt" 2>/dev/null || true
     missing=0
     for s in card-idle card-listening card-paused card-muted card-nudge-amber card-nudge-rose card-increased-contrast \
-             card-saving card-saving-nudge \
+             card-saving card-saving-nudge card-mic-off pill-mic-off \
              pill-idle pill-muted pill-paused pill-nudge-amber pill-nudge-rose \
              pill-mute-disabled-meet pill-mute-disabled-off pill-mute-disabled-permission morph-end collapse-end; do
       for a in light dark; do
         [[ -s "$OUT/coach-$s-$a.png" ]] || { echo "missing coach-$s-$a.png" >&2; missing=1; }
       done
     done
-    for s in chip-muted settings settings-call-controls menu-muted caption-feed-card caption-feed-card-empty; do
+    for s in chip-muted settings settings-call-controls menu-muted menu-waiting menu-mute menu-unmute caption-feed-card caption-feed-card-empty; do
       for a in light dark; do
         [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
       done
+    done
+    # Start Coach while off shows in Settings at once (UISnapshots.startToggleCheck), light and dark.
+    for a in light dark; do
+      grep -q "coach check start-toggle-$a before=off open=on reopened=on fresh=on" "$OUT/coach-shots.log" \
+        || { echo "Start Coach didn't show in Settings ($a)" >&2; missing=1; }
     done
     [[ $missing == 0 ]]
     ;;

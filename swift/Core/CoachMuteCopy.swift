@@ -1,6 +1,6 @@
 import Foundation
 
-/// Why the coach's Mute control can't act. Raw values match ListenMoreKit's `MuteUnavailableReason`;
+/// Why the coach card's Mute in Zoom control can't act. Raw values match ListenMoreKit's `MuteUnavailableReason`;
 /// the App maps one to the other with an exhaustive switch (`CoachController.muteDisabledReason`).
 public enum MuteDisabledReason: String, CaseIterable, Sendable {
     case toggleOff
@@ -27,7 +27,9 @@ public struct MuteControlPresentation: Equatable, Sendable {
     public var disabledKey: String?
 }
 
-/// User-facing Mute copy (approved wording). Disabled texts are keyed for a future strings table.
+/// Copy for the coach card's Mute in Zoom control, which presses Zoom's own mute. It is never the
+/// coach's own Mute (the menu's Mute My Mic for Coach), so every line names Zoom or Meet and none is
+/// a bare Mute. Disabled texts are keyed for a future strings table.
 public enum CoachMuteCopy {
     public static let disabledOffKey = "coach.mute.disabled.off"
     public static let disabledPermissionKey = "coach.mute.disabled.permission"
@@ -36,16 +38,16 @@ public enum CoachMuteCopy {
     public static let accessibilityDisabledMeetKey = "coach.a11y.mute.disabled.meet"
 
     public static let strings: [String: String] = [
-        disabledOffKey: "Turn on \"Use Zoom/Meet controls\" in Settings to mute here.",
-        disabledPermissionKey: "Allow MeetingCard in Privacy & Security to mute here.",
-        disabledMeetKey: "Mute from the Meet window",
-        accessibilityDisabledMeetKey: "Mute unavailable. Mute from the Meet window.",
+        disabledOffKey: "Turn on \"Use Zoom/Meet controls\" in Settings to mute in Zoom from here.",
+        disabledPermissionKey: "Allow MeetingCard in Privacy & Security to mute in Zoom from here.",
+        disabledMeetKey: "Meet can't be muted from here. Mute in the Meet window.",
+        accessibilityDisabledMeetKey: "Mute in Zoom is unavailable in a Meet call. Mute in the Meet window.",
     ]
 
-    public static let muteTooltip = "Mute your mic"
-    public static let unmuteTooltip = "Unmute your mic"
-    public static let muteAccessibilityLabel = "Mute your Zoom mic"
-    public static let unmuteAccessibilityLabel = "Unmute your Zoom mic"
+    public static let muteTooltip = "Mute in Zoom"
+    public static let unmuteTooltip = "Unmute in Zoom"
+    public static let muteAccessibilityLabel = "Mute your mic in Zoom"
+    public static let unmuteAccessibilityLabel = "Unmute your mic in Zoom"
 
     /// The disabled text's key for `reason`; nil for `noZoomCall`, which hides the control instead.
     public static func disabledKey(_ reason: MuteDisabledReason) -> String? {

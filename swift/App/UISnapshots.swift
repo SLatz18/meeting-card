@@ -5,7 +5,7 @@ import MeetingCardCore
 
 /// Fixture-run seams for the CI screenshots of the call coach UI (never active on a live run, and
 /// they render UI only: no audio, no service, no network).
-///   MEETING_CARD_COACH_CHIP=on|listening|paused|muted  put that chip on the fixture card
+///   MEETING_CARD_COACH_CHIP=on|listening|paused|muted|mic-off  put that chip on the fixture card
 ///   MEETING_CARD_COACH_CHIP_LABEL=<text>         a longer chip label (shows the icon-only collapse)
 ///   MEETING_CARD_COACH_SHOTS=<dir>               write glow, Settings, onboarding, menu and
 ///                                                 feedback-notice PNGs, plus the design packet, then quit
@@ -15,7 +15,7 @@ import MeetingCardCore
 ///                                                 end states, then quit
 /// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
 /// surface (chip, the Muted chip, glow, Settings, Settings with Use Zoom/Meet controls on, onboarding,
-/// status menu off / listening / muted, feedback notice, the caption feed as it sits in a card, the
+/// status menu off / listening / muted / Mute / Unmute, feedback notice, the caption feed as it sits in a card, the
 /// saving indicator, the transcript notice and transcript settings) for a side-by-side design review.
 /// Caption text is synthetic and nothing is saved (an in-memory transcript store).
 enum UISnapshots {
@@ -144,6 +144,7 @@ enum UISnapshots {
         case "listening": return CoachChip(mode: .listening, labelOverride: label)
         case "paused": return CoachChip(mode: .paused, labelOverride: label)
         case "muted": return CoachChip(mode: .muted, labelOverride: label)
+        case "mic-off": return CoachChip(mode: .micOff, labelOverride: label)
         default: return nil
         }
     }
@@ -206,6 +207,7 @@ enum UISnapshots {
                         }
                         settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                             transcriptShots(dir: dir, tag: tag, controller: controller, packet: packet) {
+                                startToggleCheck(tag: tag, controller: controller)
                                 menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
                                 noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
                             }
@@ -257,6 +259,7 @@ enum UISnapshots {
         ("card-listening", shotState(.listening, liveMute, nil, .card), false),
         ("card-paused", shotState(.paused, liveMute, nil, .card), false),
         ("card-muted", shotState(.muted, mutedMute, nil, .card), false),
+        ("card-mic-off", shotState(.micOff, liveMute, nil, .card), false),
         ("card-nudge-amber", shotState(.listening, liveMute, amberNudge, .card), false),
         ("card-nudge-rose", shotState(.listening, liveMute, roseNudge, .card), false),
         ("card-increased-contrast", shotState(.listening, liveMute, amberNudge, .card, ic: true), false),
@@ -265,6 +268,7 @@ enum UISnapshots {
         ("card-saving-nudge", shotState(.listening, liveMute, amberNudge, .card, saving: true), false),
         ("pill-idle", shotState(.idle, liveMute, nil, .pill), false),
         ("pill-muted", shotState(.muted, mutedMute, nil, .pill), false),
+        ("pill-mic-off", shotState(.micOff, liveMute, nil, .pill), false),
         ("pill-paused", shotState(.paused, liveMute, nil, .pill), false),
         ("pill-nudge-amber", shotState(.listening, liveMute, amberNudge, .pill), false),
         ("pill-nudge-rose", shotState(.listening, liveMute, roseNudge, .pill), false),
@@ -412,8 +416,49 @@ enum UISnapshots {
         return ctx.makeImage()
     }
 
-    /// The coach status menu, off and while listening (no key, so the GPT-off note shows), opened
-    /// as a real NSMenu and captured from the screen while it tracks. The capture uses
+    /// Start Coach while the coach is off must show in Settings at once: with Settings already open
+    /// (and still after reopening it), and with Settings opened after Start. Writes one fixture log
+    /// line that snapshots.sh gates on; the coach is switched off again and nothing is kept.
+    @MainActor
+    static func startToggleCheck(tag: String, controller: Controller) {
+        let suite = AppIdentity.current.scoped("start-check")
+        guard let defaults = UserDefaults(suiteName: suite) else { return }
+        let keychain = KeychainStore(service: suite, account: "none")
+        func coach() -> CoachController? {
+            defaults.removePersistentDomain(forName: suite)
+            defaults.set(true, forKey: CoachController.Keys.onboarded)
+            return try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false,
+                                        transcriptStore: MemoryTranscriptStore())
+        }
+        func state(_ c: CoachController) -> String { c.settingsWindow?.coachSwitchOn == true ? "on" : "off" }
+        func done(_ c: CoachController) {
+            c.settingsWindow?.window.orderOut(nil)
+            c.setEnabled(false) { _ in }
+        }
+        var result = "unavailable"
+        if let open = coach() {
+            open.showSettings()
+            let before = state(open)
+            open.startClicked(nil)
+            let after = state(open)
+            open.settingsWindow?.window.orderOut(nil)
+            open.showSettings()
+            let reopened = state(open)
+            done(open)
+            if let fresh = coach() {
+                fresh.startClicked(nil)
+                fresh.showSettings()
+                result = "before=\(before) open=\(after) reopened=\(reopened) fresh=\(state(fresh))"
+                done(fresh)
+            }
+        }
+        defaults.removePersistentDomain(forName: suite)
+        controller.log("coach check start-toggle-\(tag) \(result)")
+    }
+
+    /// The coach status menu, off, waiting for a call (Start Coach), while listening (no key, so the
+    /// GPT-off note shows), muted in the call app, and with a key the Mute and Unmute entries
+    /// (listening, and the coach's own mic off), opened as a real NSMenu and captured from the screen while it tracks. The capture uses
     /// `screencapture` on the menu's window; without screen-recording access it falls back to the
     /// window's layer render.
     @MainActor
@@ -425,8 +470,11 @@ enum UISnapshots {
         defaults.removePersistentDomain(forName: suite)
         let states: [(String, [CoachMenuItem])] = [
             ("menu-off", CoachMenu.items(enabled: false, indicator: .hidden, gptAvailable: false)),
+            ("menu-waiting", CoachMenu.items(enabled: true, indicator: .hidden, gptAvailable: true)),
             ("menu-listening", CoachMenu.items(enabled: true, indicator: .listening, gptAvailable: false)),
             ("menu-muted", CoachMenu.items(enabled: true, indicator: .muted, gptAvailable: false)),
+            ("menu-mute", CoachMenu.items(enabled: true, indicator: .listening, gptAvailable: true)),
+            ("menu-unmute", CoachMenu.items(enabled: true, indicator: .micOff, gptAvailable: true, micMuted: true)),
         ]
         NSApp.activate()
         for (name, items) in states {

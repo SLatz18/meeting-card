@@ -20,6 +20,7 @@ extension CoachCardState.Status {
         case .listening: self = .listening
         case .paused: self = .paused
         case .muted: self = .muted
+        case .micOff: self = .micOff
         }
     }
 
@@ -30,8 +31,12 @@ extension CoachCardState.Status {
         case .listening: CoachCopy.coachListening
         case .paused: CoachCopy.coachPaused
         case .muted: CoachCopy.coachMuted
+        case .micOff: CoachCopy.coachMicOff
         }
     }
+
+    /// The status glyph: the coach's, or the mic-off glyph while the coach's own Mute is on.
+    var symbol: String { self == .micOff ? Theme.CoachCard.Symbols.micOff : Theme.CoachCard.Symbols.status }
 }
 
 extension CoachNudge {
@@ -182,8 +187,8 @@ class CoachSurfaceView: NSView {
         return v
     }
 
-    static func glyphImage(_ label: String) -> NSImage? {
-        CoachChipView.symbol(Theme.CoachCard.Symbols.status, size: Theme.CoachCard.glyphSize,
+    static func glyphImage(_ label: String, symbol: String = Theme.CoachCard.Symbols.status) -> NSImage? {
+        CoachChipView.symbol(symbol, size: Theme.CoachCard.glyphSize,
                              weight: Theme.weight(Theme.CoachCard.iconGlyph), label: label)
     }
 
@@ -195,12 +200,12 @@ class CoachSurfaceView: NSView {
     /// Status line (or nudge words) color.
     var lineColor: NSColor {
         let k = Theme.CoachCard.self
-        return Theme.text(state.nudge != nil ? k.nudgeText : state.held ? k.heldText : k.statusText, style)
+        return Theme.text(state.nudge != nil ? k.nudgeText : (state.held || state.status == .micOff) ? k.heldText : k.statusText, style)
     }
 }
 
 /// The full coach card: status line (the nudge band while a nudge holds) with Minimize, the
-/// captions area, and Stop coach, Mute and Pause/Resume on the button row.
+/// captions area, and Stop Coach, Mute and Pause/Resume on the button row.
 final class CoachFullCardView: CoachSurfaceView {
     private let band = CoachSurfaceView.layerView()
     private let bar = CoachSurfaceView.layerView()
@@ -300,7 +305,7 @@ final class CoachFullCardView: CoachSurfaceView {
         let h = line.intrinsicContentSize.height
         line.frame.origin.y = (band.frame.height - h) / 2
         line.frame.size.height = h
-        glyph.image = Self.glyphImage(text)
+        glyph.image = Self.glyphImage(text, symbol: s.status.symbol)
         glyph.contentTintColor = glyphTint(fg)
         band.setAccessibilityLabel([text, s.savingBadge].compactMap { $0 }.joined(separator: ", "))
         applyNudge(s.nudge, box: band, bar: bar)
@@ -424,7 +429,7 @@ final class CoachPillView: CoachSurfaceView {
         grabber.toolTip = size.tooltip
         grabber.setAccessibilityLabel(size.accessibilityLabel)
         toolTip = size.tooltip
-        glyph.image = Self.glyphImage(s.status.text)
+        glyph.image = Self.glyphImage(s.status.text, symbol: s.status.symbol)
         glyph.contentTintColor = glyphTint(fg)
         words.isHidden = s.nudge == nil
         words.font = Theme.font(p.wordsFont)

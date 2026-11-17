@@ -279,11 +279,14 @@ public enum Theme {
         public static let symbol = "ear.badge.waveform"
         public static let pauseSymbol = "pause.fill"
         public static let resumeSymbol = "play.fill"
+        /// The coach's own Mute: the glyph on the chip, the card's status line and the menu.
+        public static let micOffSymbol = "mic.slash"
         /// SF Symbols for the coach status menu, drawn at the body font size like a native menu.
-        public static let menuSymbols = (enable: "power", start: resumeSymbol, stop: CoachCard.Symbols.stop,
-                                         pause: pauseSymbol, resume: resumeSymbol, turnOff: "power",
+        public static let menuSymbols = (start: resumeSymbol, stop: CoachCard.Symbols.stop,
+                                         pause: pauseSymbol, resume: resumeSymbol,
                                          gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
-                                         settings: "gearshape", feedback: "bubble.left")
+                                         settings: "gearshape", feedback: "bubble.left",
+                                         mute: micOffSymbol, unmute: "mic")
         public static let menuSymbolSize = CardStyle.Typography.body.size
         /// The status bar glyph, at the button font size and weight.
         public static let statusSymbolFont = CardStyle.Typography.button
@@ -394,7 +397,7 @@ public enum Theme {
 
     /// The call coach card the reminder card morphs into: card width, radius, fill and insets; a
     /// status row (the nudge band while a nudge holds) with Minimize, the captions area, and a
-    /// button row with Stop coach in the Ignore slot and Mute and Pause/Resume where Join sits.
+    /// button row with Stop Coach in the Ignore slot and Mute and Pause/Resume where Join sits.
     public enum CoachCard {
         public static let width = CardLayout.W
         public static let radius = CardStyle.Radius.card
@@ -423,7 +426,7 @@ public enum Theme {
         public static let iconButton = CardStyle.Size.control
         public static let iconButtonRadius = CardStyle.Radius.control
         public static let iconGlyph = CardStyle.Typography.button
-        /// Stop coach: the Ignore button, as wide as its label plus the card's text inset each side.
+        /// Stop Coach: the Ignore button, as wide as its label plus the card's text inset each side.
         public static let textButtonPadding = CardStyle.Spacing.leading
         public static let bandRadius = CardStyle.Radius.control
         /// Status text and glyph inset inside the band, clear of the nudge bar.
@@ -435,6 +438,7 @@ public enum Theme {
             public static let status = Coach.symbol
             public static let mute = "mic.fill"
             public static let unmute = "mic.slash.fill"
+            public static let micOff = Coach.micOffSymbol
             public static let pause = Coach.pauseSymbol
             public static let resume = Coach.resumeSymbol
             public static let stop = "stop.fill"

@@ -18,10 +18,10 @@ enum CoachCopy {
     static let coachOn = "Coach on"
     static let coachPaused = "Coach paused"
     static let coachListening = "Coach on, listening"
-    static let coachMuted = "Coach paused while you're muted"
-    static let chipMuted = "Muted"
+    static let coachMuted = "Coach paused while you're muted in Zoom"
+    static let chipMuted = "Muted in Zoom"
     static let callControlsToggle = "Use Zoom/Meet controls"
-    static let callControlsHelp = "Stops the coach a few seconds after you leave a Zoom call or close a Meet tab, and pauses it while you're muted in Zoom. Reads only Zoom's meeting controls and whether a Meet tab is open: never titles, names, chat or other tabs. With Accessibility it can also press Zoom's own Mute button when you ask. Off by default."
+    static let callControlsHelp = "Stops the coach a few seconds after you leave a Zoom call or close a Meet tab, and pauses it while you're muted in Zoom. Reads only Zoom's meeting controls and whether a Meet tab is open: never titles, names, chat or other tabs. With Accessibility, the coach card's Mute in Zoom button can also press Zoom's own mute for you. Off by default."
     static let requestAccess = "Request access"
     static let callControlsDiaUnsupported = "This version of Dia can't share its tabs, so for Dia the coach goes by audio activity."
 
@@ -35,8 +35,6 @@ enum CoachCopy {
     }
     static let menuOff = "Call coach: off"
     static let menuWaiting = "Coach on, waiting for a call"
-    static let menuEnable = "Turn On Call Coach"
-    static let menuTurnOff = "Turn Off Call Coach"
     static let menuGptOffNoKey = "GPT cues off: no API key"
     static let menuGptOffRejected = "GPT cues off: key not accepted"
     static let pause = "Pause"
@@ -124,6 +122,30 @@ enum CoachCopy {
     static let noticeBody = "Captions and saved transcripts include what everyone on the call says, not just you. The audio is sent to OpenAI for transcription using your API key. You are responsible for telling the other people on the call and for following the laws where you and they are, and any policies that apply to you, such as your employer's."
     static let noticeConfirm = "I Understand, Turn On"
     static let noticeCancel = "Not Now"
+
+    // MARK: Final copy (VP Comms): the coach menu's Start/Stop toggle and its Mute, mic only
+
+    static let menuStart = "Start Coach"
+    static let menuStop = "Stop Coach"
+    static let menuMute = "Mute My Mic for Coach"
+    static let menuUnmute = "Unmute My Mic for Coach"
+    static let menuMuteHelp = "The coach stops hearing your mic. It still hears the others. This doesn't mute you in Zoom or Meet."
+    static let menuUnmuteHelp = "The coach hears your mic again."
+    static let coachMicOff = "Coach is hearing others only"
+    static let chipMicOff = "Coach can't hear you"
+    static let micMutedAnnouncement = "Call coach stopped hearing your mic. It still hears the others."
+    static let micUnmutedAnnouncement = "Call coach hears your mic again."
+
+    // MARK: The hidden Edit menu (`EditMenu`): never drawn, so these names only label its key
+    // equivalents for macOS (standard macOS wording)
+
+    static let editMenu = "Edit"
+    static let editUndo = "Undo"
+    static let editRedo = "Redo"
+    static let editCut = "Cut"
+    static let editCopy = "Copy"
+    static let editPaste = "Paste"
+    static let editSelectAll = "Select All"
 
     struct Screen {
         let title: String

@@ -21,6 +21,7 @@ public enum DefaultConfig {
     "cut_in_trailing_min_overlap_ms": 300,
     "cut_in_trailing_window_s": 1.0,
     "cut_in_trailing_yield_s": 2.3,
+    "unmute_grace_s": 1.0,
     "talk_over_switches": 3,
     "talk_over_window_s": 4.0,
     "talk_over_min_overlap_ms": 100,

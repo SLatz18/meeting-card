@@ -6,11 +6,11 @@ import Foundation
 
 /// Approved copy for the coach card and pill. The nesting follows the spec's string IDs
 /// (`coach.button.stop` is `Button.stop`, `coach.a11y.skipped` is `A11y.skipped`, and so on).
-/// Mute's copy is `CoachMuteCopy`'s.
+/// The Mute in Zoom control's copy is `CoachMuteCopy`'s.
 public enum CoachCardCopy {
     public enum Button {
         /// Replaces "Skip this call": ends the coach for the rest of this call.
-        public static let stop = "Stop coach"
+        public static let stop = "Stop Coach"
     }
 
     public enum Tooltip {
@@ -163,6 +163,8 @@ public struct CoachCardState: Equatable, Sendable {
         case paused
         /// Held while the call app reports the mic muted.
         case muted
+        /// Listening to the call with the user's mic off (the coach's own Mute): the other side is still coached.
+        case micOff
     }
 
     public enum Mode: Equatable, Sendable { case card, pill }
@@ -226,7 +228,7 @@ public extension CoachCardState {
                             enabled: mute.visibility == .enabled)
     }
 
-    /// Pause while listening or muted, Resume while paused; nothing to pause before a session starts.
+    /// Pause while listening, muted or mic off, Resume while paused; nothing to pause before a session starts.
     var pauseControl: CoachControl {
         let s = Theme.CoachCard.Symbols.self
         switch status {
@@ -235,7 +237,7 @@ public extension CoachCardState {
         case .idle:
             return CoachControl(symbol: s.pause, tooltip: CoachCardCopy.Tooltip.pause, accessibilityLabel: CoachCardCopy.A11y.pause,
                                 enabled: false)
-        case .listening, .muted:
+        case .listening, .muted, .micOff:
             return CoachControl(symbol: s.pause, tooltip: CoachCardCopy.Tooltip.pause, accessibilityLabel: CoachCardCopy.A11y.pause)
         }
     }

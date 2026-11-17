@@ -75,6 +75,11 @@ public final class Prosody {
         if active { cur.append(db) }
     }
 
+    /// Drops the utterance in progress without reading it (the baseline is kept).
+    public func dropUtterance() {
+        cur = []
+    }
+
     public func onUtteranceEnd(t: TimeInterval) -> ProsodyReading? {
         let frames = cur
         cur = []

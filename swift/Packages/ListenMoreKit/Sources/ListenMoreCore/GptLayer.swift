@@ -23,6 +23,8 @@ public final class GptCore {
     public enum TxAction: Equatable {
         case send(Speaker, [Float])
         case commit(Speaker, refT: TimeInterval)
+        /// Drop the speaker's uncommitted audio (`TranscriptionSession.clear`).
+        case clear(Speaker)
     }
 
     public struct JudgeRequest: Equatable, Sendable {
@@ -119,6 +121,10 @@ public final class GptCore {
     public private(set) var callSeconds = 0.0
     private var failuresInARow = 0
     private let judges: Bool
+    /// The user's mic is off (`setMeMuted`): nothing of theirs is sent, committed, kept or judged.
+    public private(set) var meMuted = false
+    /// Speakers whose last clear the transcriber refused; it's sent again before their next audio.
+    private var clearRetry: Set<Speaker> = []
 
     public init(config: ListenMoreConfig) {
         self.config = config
@@ -178,10 +184,36 @@ public final class GptCore {
         meRunS = seconds
     }
 
+    /// The user's mic went off (true) or came back. Going off drops their open segment (held frames,
+    /// pre-roll, a commit still waiting on the gap) and clears what was already sent of it, so no line
+    /// of theirs is transcribed after the mute; their frames and transcripts are ignored until it's
+    /// back. Either way the judge's "they spoke, now you reply" trigger starts over, so the user's
+    /// first line back isn't judged as a reply to what was said during the gap.
+    public func setMeMuted(_ muted: Bool) -> [TxAction] {
+        guard muted != meMuted else { return [] }
+        meMuted = muted
+        othersSpoke = false
+        guard muted else { return clearRetry.remove(.me) != nil && enabled ? [.clear(.me)] : [] }
+        let open = streaming[.me] == true || commitDue[.me] != nil || (cost.openS[.me] ?? 0) > 0
+        streaming[.me] = false
+        tail[.me] = []
+        preroll[.me]?.clear()
+        commitDue[.me] = nil
+        cost.discardOpen(speaker: .me)
+        return open && enabled ? [.clear(.me)] : []
+    }
+
+    /// The transcriber refused (or couldn't send) a clear. Nothing stops: the other side keeps
+    /// streaming, and the clear goes out again when the user unmutes, before any of their new audio,
+    /// so the dropped segment can't be transcribed with their next line.
+    public func clearRejected(_ speaker: Speaker) {
+        clearRetry.insert(speaker)
+    }
+
     /// One frame of one stream. The driver performs the returned actions in order.
     public func feed(_ speaker: Speaker, frame: [Float], vad: VadState, now: TimeInterval) -> [TxAction] {
         if now > callSeconds { callSeconds = now }
-        guard enabled else { return [] }
+        guard enabled, !(speaker == .me && meMuted) else { return [] }
         if cost.exhausted {
             budgetStop()
             return []
@@ -248,8 +280,9 @@ public final class GptCore {
     /// A transcript arrived. Returns the segment's reference time (for the transcript rules) and a judge
     /// request to start now, if any.
     public func onText(_ speaker: Speaker, text: String, refT: TimeInterval, now: TimeInterval) -> (refT: TimeInterval, start: JudgeRequest?) {
-        transcript.add(t: now, speaker: speaker, text: text)
         let ref = refT >= 0 ? refT : now
+        if speaker == .me && meMuted { return (ref, nil) }
+        transcript.add(t: now, speaker: speaker, text: text)
         if speaker == .others {
             if text.split(whereSeparator: \.isWhitespace).count >= config.gpt.judgeMinOthersWords { othersSpoke = true }
             return (ref, nil)
@@ -425,6 +458,7 @@ public final class GptLayer: @unchecked Sendable {
         case start
         case frame(me: [Float], meVad: VadState, others: [Float], othersVad: VadState, meRunS: Double)
         case local(LocalEvent)
+        case micMuted(Bool)
         case transcript(TranscriptEvent)
         case runJudge(GptCore.JudgeRequest)
         case judgeDone(GptCore.JudgeRequest, Result<JudgeReply, Error>, latencyMs: Int)
@@ -440,6 +474,7 @@ public final class GptLayer: @unchecked Sendable {
     private let onJudgeStopped: (@Sendable (JudgeFailure) -> Void)?
     private let onCaption: CaptionSink?
     private let onMeter: MeterSink?
+    private let onClearRejected: (@Sendable (Speaker) -> Void)?
     private let scheduler: GptScheduler
     private let judge: JudgeProvider?
     private var transcribers: [Speaker: TranscriptionSession] = [:]
@@ -458,6 +493,7 @@ public final class GptLayer: @unchecked Sendable {
                 onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
                 onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil,
                 onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil,
+                onClearRejected: (@Sendable (Speaker) -> Void)? = nil,
                 provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
@@ -469,6 +505,7 @@ public final class GptLayer: @unchecked Sendable {
         self.onJudgeStopped = onJudgeStopped
         self.onCaption = onCaption
         self.onMeter = onMeter
+        self.onClearRejected = onClearRejected
         self.judge = provider
         self.scheduler = scheduler
         var continuation: AsyncStream<Command>.Continuation!
@@ -502,9 +539,10 @@ public final class GptLayer: @unchecked Sendable {
                             now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
                             onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
                             onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil,
-                            onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil) {
+                            onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil,
+                            onClearRejected: (@Sendable (Speaker) -> Void)? = nil) {
         self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped, onJudgeStopped: onJudgeStopped,
-                  onCaption: onCaption, onMeter: onMeter,
+                  onCaption: onCaption, onMeter: onMeter, onClearRejected: onClearRejected,
                   provider: JudgeProviders.make(config: config, openAIKey: key, judgeKey: judgeKey, http: transports.http,
                                                 scheduler: transports.scheduler),
                   scheduler: transports.scheduler) { speaker, onEvent in
@@ -522,6 +560,10 @@ public final class GptLayer: @unchecked Sendable {
     }
 
     public func onLocal(_ event: LocalEvent) { inbox.yield(.local(event)) }
+
+    /// The user's mic went off or came back (`GptCore.setMeMuted`), in order with the frames: while
+    /// it's off, no "me" audio is sent and no "me" text reaches captions, the transcript rules or the judge.
+    public func setMicMuted(_ muted: Bool) { inbox.yield(.micMuted(muted)) }
 
     public func snapshot() async -> Snapshot {
         await withCheckedContinuation { inbox.yield(.snapshot($0)) }
@@ -550,17 +592,23 @@ public final class GptLayer: @unchecked Sendable {
             await perform(core.feed(.others, frame: others, vad: othersVad, now: now()))
         case .local(let ev):
             core.onLocal(ev)
+        case .micMuted(let muted):
+            await perform(core.setMeMuted(muted))
         case .transcript(.text(let speaker, let text, let refT)):
+            guard !(speaker == .me && core.meMuted) else { break }
             let t = now()
             let r = core.onText(speaker, text: text, refT: refT, now: t)
             onSegment?(speaker, text, r.refT, t)
             if core.enabled { onCaption?(.final(speaker, text: text)) }
             if let req = r.start { schedule(req) }
         case .transcript(.delta(let speaker, let text, let item)):
+            guard !(speaker == .me && core.meMuted) else { break }
             if core.enabled { onCaption?(.partial(speaker, item: item, text: text)) }
         case .transcript(.usage(let speaker, let seconds)):
             core.addApiAudio(seconds: seconds, speaker: speaker)
             onMeter?(core.cost.reading)
+        case .transcript(.clearRejected(let speaker)):
+            clearRejected(speaker)
         case .transcript(.error(let msg)):
             core.fail(msg)
         case .runJudge(let req):
@@ -599,17 +647,29 @@ public final class GptLayer: @unchecked Sendable {
     private func perform(_ actions: [GptCore.TxAction]) async {
         for action in actions {
             guard core.enabled else { return }
+            if case let .clear(speaker) = action {
+                do { try await transcribers[speaker]?.clear() } catch { clearRejected(speaker) }
+                continue
+            }
             do {
                 switch action {
                 case let .send(speaker, samples):
                     try await transcribers[speaker]?.sendAudio(AudioMath.pcm16Data(samples[...]))
                 case let .commit(speaker, refT):
                     try await transcribers[speaker]?.commit(refT: refT)
+                case .clear:
+                    break
                 }
             } catch {
                 core.fail("realtime send: \(GptError.safe(error))")
             }
         }
+    }
+
+    /// A clear that didn't take is never fatal (see `GptCore.clearRejected`); the host hears of it.
+    private func clearRejected(_ speaker: Speaker) {
+        core.clearRejected(speaker)
+        onClearRejected?(speaker)
     }
 
     private func closeTranscribers() async {

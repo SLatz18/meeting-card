@@ -119,6 +119,7 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
     private var _startedWithKey: [Bool] = []
     private var _ingested: [AudioStream: Int] = [:]
     private var _stops = 0
+    private var _micMutes: [Bool] = []
 
     var delegate: CoachEngineDelegate? {
         get { lock.withLock { _delegate } }
@@ -128,6 +129,12 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
     var startedWithKey: [Bool] { lock.withLock { _startedWithKey } }
     var ingested: [AudioStream: Int] { lock.withLock { _ingested } }
     var stops: Int { lock.withLock { _stops } }
+    /// Every `setMicMuted` call, in order.
+    var micMutes: [Bool] { lock.withLock { _micMutes } }
+
+    func setMicMuted(_ muted: Bool) {
+        lock.withLock { _micMutes.append(muted) }
+    }
 
     func start(config: ListenMoreConfig, apiKey: APIKey?) {
         lock.withLock {
@@ -318,6 +325,7 @@ final class FakeTranscriber: TranscriptionSession, @unchecked Sendable {
     private let lock = NSLock()
     private var _bytes = 0
     private var _commits: [TimeInterval] = []
+    private var _clears = 0
     private var script: [String]
     private let speaker: Speaker
     private let onEvent: @Sendable (TranscriptEvent) -> Void
@@ -336,6 +344,11 @@ final class FakeTranscriber: TranscriptionSession, @unchecked Sendable {
 
     var bytesSent: Int { lock.withLock { _bytes } }
     var commits: [TimeInterval] { lock.withLock { _commits } }
+    var clears: Int { lock.withLock { _clears } }
+
+    func clear() async throws {
+        lock.withLock { _clears += 1 }
+    }
 
     func start() async throws {}
 

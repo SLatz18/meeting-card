@@ -38,6 +38,10 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var cutInTrailingMinOverlapMs: Double
         public var cutInTrailingWindowS: Double
         public var cutInTrailingYieldS: Double
+        /// After the coach's Mute ends, the user's onsets this soon neither open a cut-in nor count as a
+        /// talk-over switch: the host's echo canceller restarts with the mic and can let call audio
+        /// through while it settles, which would read as the user talking over the other side.
+        public var unmuteGraceS: Double
         public var talkOverSwitches: Int
         public var talkOverWindowS: Double
         public var talkOverMinOverlapMs: Double

@@ -95,6 +95,7 @@ public final class LocalLayer {
     private let prosodyEnabled: Bool
     private let cutOverlap, cutContinue, cutBackchannel, cutPause, cutMidPause, cutAfterTalkOver: Double
     private let cutTrailingOverlap, cutTrailingWindow, cutTrailingYield: Double
+    private let unmuteGrace: Double
     private let toSwitches: Int
     private let toWindow, toOverlap, toHold: Double
     private let monoSoft, monoStrong, relFactor, relMinS, relMinRunS, howWhyRaise, monoFloor, monoGap: Double
@@ -118,6 +119,10 @@ public final class LocalLayer {
     private var runs: [Double] = []
     private var meLastActive = -1e9
     private var othersSoloSince: TimeInterval?
+    /// The user's mic is off (`setMicMuted`): their side reads as silence.
+    public private(set) var micMuted = false
+    private var unmutePending = false
+    private var unmuteGraceUntil: TimeInterval?
 
     /// `participants`: people on the call (2 = a 1:1), for the talk-share limit.
     public init(config: ListenMoreConfig, participants: Int = 2, context: LocalTextContext? = nil) {
@@ -137,6 +142,7 @@ public final class LocalLayer {
         cutTrailingOverlap = l.cutInTrailingMinOverlapMs / 1000
         cutTrailingWindow = l.cutInTrailingWindowS
         cutTrailingYield = l.cutInTrailingYieldS
+        unmuteGrace = l.unmuteGraceS
         toSwitches = l.talkOverSwitches
         toWindow = l.talkOverWindowS
         toOverlap = l.talkOverMinOverlapMs / 1000
@@ -164,9 +170,38 @@ public final class LocalLayer {
         vad.active && t - vad.lastSpeechT <= Self.speakingTailS
     }
 
+    /// The user's mic went off (true) or came back. Either way the user's utterance and turn in
+    /// progress are dropped unread (no offset, no prosody reading, no monologue run recorded), a
+    /// pending cut-in is dropped and the talk-over switch log starts over, so nothing measured across
+    /// the gap can fire. While off, the user's VAD isn't run: they read as silent, which is what the
+    /// call heard, so talk share keeps counting the other side and the gap can only lower the user's
+    /// share. Back on, the first `local.unmute_grace_s` seconds open no cut-in and log no switch.
+    public func setMicMuted(_ muted: Bool) {
+        guard muted != micMuted else { return }
+        micMuted = muted
+        me.reset()
+        prosody.dropUtterance()
+        cut = nil
+        switchLog.removeAll()
+        overlapFrames.removeAll()
+        lastOnsetWho = nil
+        turnStart = nil
+        turnLevel = nil
+        turnRaise = nil
+        turnExempt = nil
+        othersSoloSince = nil
+        unmutePending = !muted
+        unmuteGraceUntil = nil
+    }
+
     public func step(t: TimeInterval, mic: ArraySlice<Float>, call: ArraySlice<Float>) -> (events: [LocalEvent], me: VadState, others: VadState) {
         var ev: [LocalEvent] = []
-        let s = me.process(tEnd: t, frame: mic)
+        if unmutePending {
+            unmutePending = false
+            unmuteGraceUntil = t + unmuteGrace
+        }
+        let s = micMuted ? VadState(raw: false, active: false, onset: nil, offset: nil, dbfs: AudioMath.rmsDbfs(mic))
+                         : me.process(tEnd: t, frame: mic)
         let o = others.process(tEnd: t, frame: call)
         if prosodyEnabled {
             prosody.onFrame(active: s.active || s.offset != nil, raw: s.raw, db: s.dbfs)
@@ -184,10 +219,11 @@ public final class LocalLayer {
         }
         if let on = s.onset {
             ev.append(LocalEvent(kind: .meOnset, t: t, onset: on))
-            onset(on, .me)
+            let settling = unmuteGraceUntil.map { on < $0 } ?? false
+            if !settling { onset(on, .me) }
             let midSpeech = o.active || on - others.lastSpeechT <= cutMidPause
             let afterTalkOver = on - toFiredAt < cutAfterTalkOver
-            if midSpeech && cut == nil && !afterTalkOver {
+            if midSpeech && cut == nil && !afterTalkOver && !settling {
                 cut = CutIn(onset: on)
             }
         }

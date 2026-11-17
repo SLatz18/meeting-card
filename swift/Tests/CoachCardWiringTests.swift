@@ -43,7 +43,7 @@ final class CoachCardWiringTests: XCTestCase {
             .components(separatedBy: "\n    }").first)
         XCTAssertTrue(body.contains("service?.stopForThisCall()"))
         XCTAssertTrue(body.contains("CoachCardPresenter.announce(CoachCardCopy.A11y.skipped)"))
-        XCTAssertTrue(controller.contains("case .stopForCall: return action(CoachCardCopy.Button.stop, sym.stop, #selector(stopClicked(_:)))"))
+        XCTAssertTrue(controller.contains("case .stopCoach: return action(CoachCopy.menuStop, sym.stop, #selector(stopClicked(_:)), tooltip: CoachCardCopy.Tooltip.stop)"))
         XCTAssertTrue(controller.contains("stop: { [weak self] in self?.stopForThisCall() }"))
         for f in ["App/CoachCopy.swift", "App/CoachController.swift"] + Self.cardFiles {
             let c = try read(f)
@@ -145,7 +145,7 @@ final class CoachCardWiringTests: XCTestCase {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
         let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
-        XCTAssertEqual(found.count, 17, "#19's 15 states plus #13c's card-saving and card-saving-nudge")
+        XCTAssertEqual(found.count, 19, "#19's 15 states, #13c's card-saving and card-saving-nudge, and the mic-off card and pill")
         for n in found + ["morph-end", "collapse-end"] {
             XCTAssertNotNil(script.range(of: #"(\s|\\\n)\#(n)(\s|;)"#, options: .regularExpression), "snapshots.sh doesn't check \(n)")
         }

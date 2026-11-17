@@ -99,4 +99,12 @@ public final class StreamVAD {
         st.active = active
         return st
     }
+
+    /// Forgets the utterance in progress (its stream went away): no offset is ever reported for it.
+    public func reset() {
+        recent.removeAll()
+        active = false
+        silentRun = 0
+        activeSince = nil
+    }
 }
