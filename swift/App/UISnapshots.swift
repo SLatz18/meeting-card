@@ -159,7 +159,8 @@ enum UISnapshots {
         let p = CoachCardPresenter(defaults: defaults, positionKey: CoachController.Keys.cardPosition, captions: CoachCaptionsPlaceholder())
         p.reduceMotion = { false }
         func write(_ name: String, tooltip: String? = nil) {
-            let img = layerImage(p.root, scale: p.panel.backingScaleFactor).flatMap { framed($0, tooltip: tooltip, dark: card.isDark) }
+            let scale = p.panel.backingScaleFactor > 0 ? p.panel.backingScaleFactor : 2
+            let img = layerImage(p.root, scale: scale).flatMap { framed($0, tooltip: tooltip, dark: card.isDark, scale: scale) }
             let ok = img.map { Card.writePNG($0, "\(dir)/coach-\(name)-\(tag).png") } ?? false
             controller.log("coach card shot \(name)-\(tag) ok=\(ok)")
         }
@@ -221,8 +222,8 @@ enum UISnapshots {
 
     /// A coach surface on the desktop tone, with room around it; `tooltip` is drawn under it like
     /// AppKit's tooltip, for the states whose difference only shows on hover.
-    static func framed(_ img: CGImage, tooltip: String?, dark: Bool) -> CGImage? {
-        let scale: CGFloat = 2, pad = CGFloat(CardStyle.Spacing.stack) * scale
+    static func framed(_ img: CGImage, tooltip: String?, dark: Bool, scale: CGFloat) -> CGImage? {
+        let pad = CGFloat(CardStyle.Spacing.stack) * scale
         let font = Theme.font(CardStyle.Typography.caption)
         let text = tooltip.map { NSAttributedString(string: $0, attributes: [.font: font, .foregroundColor: dark ? NSColor.white : NSColor.black]) }
         let ts = text?.size() ?? .zero

@@ -215,7 +215,10 @@ final class CoachFullCardView: CoachSurfaceView {
     static var size: NSSize { NSSize(width: Theme.CoachCard.width, height: Theme.CoachCard.height) }
 
     static func stopLabelWidth() -> Double {
-        Double((CoachCardCopy.Button.stop as NSString).size(withAttributes: [.font: Theme.font(Theme.CoachCard.buttonFont)]).width.rounded(.up))
+        let f = CoachSurfaceView.label()
+        f.font = Theme.font(Theme.CoachCard.buttonFont)
+        f.stringValue = CoachCardCopy.Button.stop
+        return Double(f.intrinsicContentSize.width.rounded(.up))
     }
 
     init(state: CoachCardState, actions: CoachCardActions, captions: NSView) {
@@ -314,10 +317,13 @@ final class CoachPillView: CoachSurfaceView {
 
     override var surfaceRadius: Double { Theme.CoachPill.radius }
 
+    /// The words' label width, including the text field's cell padding, so they never clip.
     static func wordsWidth(_ nudge: CoachNudge?) -> Double {
         guard let nudge else { return 0 }
-        let w = (nudge.words as NSString).size(withAttributes: [.font: Theme.font(Theme.CoachPill.wordsFont)]).width
-        return Double(w.rounded(.up))
+        let f = CoachSurfaceView.label()
+        f.font = Theme.font(Theme.CoachPill.wordsFont)
+        f.stringValue = nudge.words
+        return Double(f.intrinsicContentSize.width.rounded(.up))
     }
 
     static func width(for s: CoachCardState) -> Double { s.pillWidth(wordsWidth: wordsWidth(s.nudge)) }
