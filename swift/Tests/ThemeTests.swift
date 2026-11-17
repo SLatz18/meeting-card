@@ -17,6 +17,35 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(Theme.palette(dark: true).cardFill, CardPalette.for(dark: true).cardFill)
     }
 
+    /// CardStyle carries the card's tokens per appearance; Theme's card layout reads the same values.
+    func testCardStyleIsTheCardsTokens() {
+        for dark in [false, true] {
+            let t = CardStyle.for(dark: dark), p = CardPalette.for(dark: dark)
+            XCTAssertEqual(t.surface, p.cardFill)
+            XCTAssertEqual(t.hairline, p.hairline)
+            XCTAssertEqual(t.accent, p.nextUp)
+            XCTAssertEqual(t.warning, p.flag)
+            XCTAssertEqual(t.primaryText, p.joinText)
+            for s in [ButtonState.normal, .hover, .pressed] {
+                XCTAssertEqual(t.controlFill(s), p.ignoreFill(s))
+                XCTAssertEqual(t.primaryFill(s), p.joinFillState(s))
+            }
+        }
+        XCTAssertEqual(CardStyle.Radius.card, 20)
+        XCTAssertEqual(CardStyle.Radius.control, 9)
+        XCTAssertEqual(CardStyle.Radius.concentric(outer: 9, inset: 5.5), 3.5)
+        XCTAssertEqual(CardStyle.Spacing.control, 8)
+        XCTAssertEqual(CardStyle.Spacing.leading, 17)
+        XCTAssertEqual(CardStyle.Stroke.hairline, 0.5)
+        XCTAssertEqual(CardStyle.Stroke.border, 1.3)
+        XCTAssertEqual(CardStyle.Size.control, 33)
+        XCTAssertEqual(CardStyle.Size.icon, 20)
+        XCTAssertTrue(CardStyle.Material.opaque)
+        XCTAssertFalse(CardStyle.Material.shadow)
+        XCTAssertEqual(Theme.Metrics.buttonRadius, CardStyle.Radius.control)
+        XCTAssertEqual(Theme.Fonts.button, CardStyle.Typography.button)
+    }
+
     func testGlowCycleIsThreeSecondsAndCalm() {
         XCTAssertEqual(Theme.Glow.cycle, 3.0, accuracy: 1e-9, "rise + hold + fade")
         XCTAssertEqual(Theme.Glow.rise, 0.32)
@@ -87,7 +116,9 @@ final class ThemeTests: XCTestCase {
                         "width: 67, height: 33"] {
             XCTAssertFalse(src.contains(literal), literal)
         }
-        XCTAssertTrue(src.contains("Theme.Fonts.title"))
-        XCTAssertTrue(src.contains("Theme.Metrics.buttonRadius"))
+        XCTAssertTrue(src.contains("CardStyle.Typography.title"))
+        XCTAssertTrue(src.contains("CardStyle.Radius.control"))
+        XCTAssertFalse(src.contains("Theme.Fonts."), "the card reads CardStyle directly")
+        XCTAssertFalse(src.contains("cornerRadius: 20") || src.contains("CGFloat = 20") || src.contains("CGFloat = 1.3"))
     }
 }

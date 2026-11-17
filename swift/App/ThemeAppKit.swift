@@ -17,5 +17,17 @@ extension Theme {
 
     static func cg(_ v: Double) -> CGFloat { CGFloat(v) }
 
+    /// A `CardStyle` text role as an AppKit color (semantic label colors track the system).
+    static func text(_ t: CardStyle.Text, _ style: CardStyle) -> NSColor {
+        switch t {
+        case .primary: .labelColor
+        case .secondary: .secondaryLabelColor
+        case .tertiary: .tertiaryLabelColor
+        case .accent: ns(style.accent)
+        case .warning: ns(style.warning)
+        case .critical: .systemRed
+        }
+    }
+
     static var isDark: Bool { NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
 }

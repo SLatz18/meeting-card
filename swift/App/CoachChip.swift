@@ -78,7 +78,8 @@ final class CoachChipView: NSView {
         return (NSRect(x: l.x, y: m.buttonBottom, width: l.width, height: Theme.Coach.height), l.showsLabel)
     }
 
-    init(chip: CoachChip, joinX: Double?, palette: CardPalette, target: AnyObject?, action: Selector?) {
+    init(chip: CoachChip, joinX: Double?, style: CardStyle, target: AnyObject?, action: Selector?) {
+        let palette = style.palette
         self.chip = chip
         let (frame, showsLabel) = Self.frame(chip, joinX: joinX)
         self.showsLabel = showsLabel
