@@ -13,7 +13,8 @@ Swift-native inside the app: no helper process, no interpreter.
   judge providers (`JudgeProvider`: the GPT judge, the default, or `TypeSafeJudge` for TypeSafe System One), the
   engine (`LocalCoachEngine`), the Core Audio trigger (`CoachTrigger`, `AudioActivitySignal`) and
   `CoachSession`, which reaches capture, rendering and the key store only through protocols.
-- `ListenMoreMac` (macOS only): mic capture (AVAudioEngine with voice processing), call audio
+- `ListenMoreMac` (macOS only): mic capture (AVAudioEngine with voice processing, other-audio
+  ducking set to its minimum by `MicProcessing`), call audio
   (ScreenCaptureKit audio-only, Chromium helper fallback, Core Audio process tap), the Core Audio
   running-state provider, URLSession transports (ephemeral, no cache or cookies), Keychain store,
   glow overlay and `CoachService`. The host injects the glow style and the Keychain service name.
@@ -35,7 +36,9 @@ counters and enums.
 
 A host can pass an optional `CallStateProvider` (to `CoachService`, `CoachSession` or `CoachMonitor`)
 reporting each call app's state as started, ended or muted. An ended call stops the session after
-`ended_stop_after_s` (3 s) instead of waiting for Core Audio's 30 s stop; a muted app holds the
+`ended_stop_after_s` (3 s) instead of waiting for Core Audio's 30 s stop. The coach releases the
+mic on the first poll that sees the ended report, and if the report flips back within those 3 s
+only the mic reopens. A muted app holds the
 session's capture (the pause path) until unmute; without a provider, Core Audio alone decides.
 `CoachMenu` lists what a host's coach menu offers in each state.
 

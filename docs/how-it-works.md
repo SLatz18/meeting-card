@@ -35,7 +35,7 @@ A cue from the judge model only fires when its confidence is 0.7 or higher. In M
 
 The coach starts on its own when an allowlisted call app (or any app, if you turn that on in Settings) has both the microphone and speakers active for about 3 s. It stops about 30 s after either one goes off, or, for a meeting you joined from a MeetingCard card, when that calendar event ends.
 
-Core Audio is the fallback signal, and it lags: a call app can keep the mic and speakers open after you leave. The trigger therefore accepts an optional app-level call-state signal (`CallStateProvider`: started, ended or muted per app). When that signal reports a call ended, the coach stops about 3 s later (`ended_stop_after_s`) and doesn't restart for that app while its audio stays open. While it reports the session's app muted, the coach holds capture the same way Pause does (no capture, no streams) and resumes on unmute; your own Pause stays in place until you resume. Started and muted never start or hold a session.
+Core Audio is the fallback signal, and it lags: a call app can keep the mic and speakers open after you leave. The trigger therefore accepts an optional app-level call-state signal (`CallStateProvider`: started, ended or muted per app). When that signal reports a call ended, the coach releases the microphone right away, stops about 3 s later (`ended_stop_after_s`) and doesn't restart for that app while its audio stays open. While it reports the session's app muted, the coach holds capture the same way Pause does (no capture, no streams) and resumes on unmute; your own Pause stays in place until you resume. Started and muted never start or hold a session.
 
 MeetingCard's provider is the **Use Zoom/Meet controls** setting (off by default). Without it, or for any app whose permission is missing, revoked or unsupported, the 30 s Core Audio stop applies.
 
@@ -43,6 +43,8 @@ MeetingCard's provider is the **Use Zoom/Meet controls** setting (off by default
 - **Meet in Chrome and Dia** (Automation, AppleScript): in a call while any tab is a `meet.google.com` meeting (`/abc-defg-hij`). The browser itself narrows its tabs to the Meet host (`whose URL starts with`), the script checks the meeting path and returns only a count, so no title and no other URL leaves the browser. **Meet mute is not detected**: Meet's mute state isn't readable without page content, so it's never reported, and muting in Meet (Chrome or Dia) doesn't pause the coach. Only Zoom's mute does. There is no Mute action for Meet either (`canMute` is false with reason `meet`: mute from Meet), and the coach never "mutes" by stopping its own audio capture. Dia lists a window's tabs per space, so its script walks every space. Dia added AppleScript in 1.7.0. On a Dia that can't list tab URLs this way (an older Dia, or one without `whose` on tabs), Dia falls back to Core Audio.
 
 An ended call is reported for up to `stop_after_s` (30 s) after it ends; after that Core Audio decides again.
+
+While the coach listens it uses Apple's voice processing, so call audio from your speakers isn't mistaken for you. Voice processing lowers other audio a little while it runs, and the coach sets that to Apple's minimum. Pause and, with **Use Zoom/Meet controls**, being muted in Zoom or leaving the call release the mic and end that ducking at once; without it, leaving the call ends it at the 30 s stop.
 
 ## Without an API key
 
