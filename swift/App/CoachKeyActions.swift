@@ -34,7 +34,7 @@ extension CoachController {
 
 /// The key as the coach service sees it: the Keychain item, withheld while OpenAI rejects it so
 /// GPT cues stay off and local cues keep running.
-final class KeyGate: APIKeyProvider {
+final class CoachKeyGate: APIKeyProvider {
     let store: KeychainStore
     var rejected = false
 

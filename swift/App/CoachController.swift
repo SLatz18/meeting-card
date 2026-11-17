@@ -23,7 +23,7 @@ final class CoachController: NSObject {
     let config: ListenMoreConfig
     let keychain: KeychainStore
     /// What the service reads the key through: nil while the stored key is known to be rejected.
-    let keyGate: KeyGate
+    let keyGate: CoachKeyGate
     /// Cards on screen, newest last (the chip goes on each).
     var visibleCards: () -> [Card] = { [] }
     /// The coach status menu: always there, so the coach can be enabled from it while off.
@@ -39,7 +39,7 @@ final class CoachController: NSObject {
          showsStatusItem: Bool = true) throws {
         self.defaults = defaults
         self.keychain = keychain
-        keyGate = KeyGate(keychain)
+        keyGate = CoachKeyGate(keychain)
         self.showsStatusItem = showsStatusItem
         config = try ListenMoreConfig.builtIn()
         super.init()
