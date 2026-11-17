@@ -9,13 +9,14 @@ comments and below (`#4`, `#8`, `#12`, ...) refer to the pre-public tracker, not
   Logger/StateWriter, Coordinator (all controller logic except AppKit). Shared with a future WidgetKit target.
 - `App/` - AppKit shell: NSPanel card, drawn icons, timers, test seams.
 - `Tests/` - hostless XCTest bundle on Core.
+- `Packages/ListenMoreKit/` - the call coach engine (local Swift package; Core tests run on Linux too).
 - `project.yml` - xcodegen spec; the `.xcodeproj` is generated, not committed.
 
 Build: `scripts/build.sh` (xcodegen + test + Release build + sign + install to `~/Applications/MeetingCardSwift.app`,
 never launches anything). `scripts/build.sh test` = tests only; `scripts/build.sh build` = no install.
 
 Signing: `$SIGN_IDENTITY`, else a `Local Self-Signed` Keychain identity if present, else ad-hoc. No hardened runtime,
-no sandbox (it must exec `gws`; no TCC grants needed).
+no sandbox (it must exec `gws`; no TCC grants needed unless the call coach is turned on).
 
 Paths: log `~/Library/Logs/MeetingCardSwift.log`, state `~/Library/Application Support/MeetingCardSwift/last-card.json`
 . `--fixture` runs use `MeetingCardSwift-fixture.log` / `MeetingCardSwift-fixture/` instead. Fixture cards stack from the screen's bottom-LEFT corner (live cards: bottom-right) and their title is prefixed `DEMO · `, so a demo card never sits in, or passes for, the live slot. Tests use temp dirs; Core refuses the production paths under XCTest.
@@ -25,6 +26,14 @@ Seams: `--fixture <json>`, `--no-poll`, `--no-recheck`, `--snapshot <png>` (CALa
 `MEETING_CARD_BORDER_SWAP=<fixture path>` (fixture: `refresh` the live card with that event after
 `MEETING_CARD_BORDER_SWAP_DELAY` s, default 3; logs `border demo: <provider|none>` + `border layers=<n>` per apply),
 `MEETING_CARD_SELFTEST=join|ignore` (+ `MEETING_CARD_SELFTEST_DELAY`), `MEETING_CARD_DRY_JOIN=1`.
+Coach seams (fixture runs only; the coach itself is never created on a fixture run):
+`MEETING_CARD_COACH_CHIP=on|listening|paused` (that chip on the card), `MEETING_CARD_COACH_SHOTS=<dir>` (write glow,
+Settings and onboarding PNGs, then quit). `scripts/snapshots.sh` renders them, and CI pixel-compares every reminder
+card at the base and head revisions (`scripts/compare-snapshots.py`).
+
+Call coach (opt-in, off by default): `App/Coach*.swift` (controller, chip, Settings, copy) on top of ListenMoreKit.
+Shared look in `Core/Theme.swift` (card metrics/fonts, glow and chip tokens); the reminder card draws from it.
+Needs Microphone, System Audio Recording and Screen Recording only once the user turns the coach on.
 
 Snapshots (`docs/`): `card-{meet,zoom,multilink,countdown,nolink,nextup}-{light,dark}.png`, made with
 `scripts/show-fixture.sh <fixture> <light|dark> 2 --snapshot docs/...` (countdown/nolink with `SHIFT=90`, others `SHIFT=none`).
