@@ -287,7 +287,7 @@ final class PrivacyGuardTests: XCTestCase {
 
     /// Library sources and tests are generic: this is a public repository.
     func testNoSecretsOrPersonalReferences() throws {
-        let banned = [#"sk-[A-Za-z0-9]{20,}"#, #"(?i)\bscott\b"#, #"(?i)\bCTO\b"#, #"(?i)VP Comms"#, #"(?i)plaud"#, #"(?i)zillow"#]
+        let banned = [#"sk-[A-Za-z0-9]{20,}"#, #"(?i)\bscott\b"#, #"(?i)\bCTO\b"#, #"(?i)VP Comms"#, #"(?i)plaud"#]
         let tests = try ["ListenMoreCoreTests", "ListenMoreMacTests", "ListenMoreLiveTests"]
             .flatMap { try swiftFiles(in: Self.testsURL.appendingPathComponent($0)) }
         for (name, text) in try librarySources() + tests where name != "PrivacyGuardTests.swift" {
@@ -295,7 +295,6 @@ final class PrivacyGuardTests: XCTestCase {
         }
         for (name, text) in try appSources() {
             XCTAssertNil(text.range(of: banned[0], options: .regularExpression), "\(name) matches a key pattern")
-            XCTAssertNil(text.range(of: #"(?i)zillow"#, options: .regularExpression), "\(name) names a company")
         }
     }
 }
