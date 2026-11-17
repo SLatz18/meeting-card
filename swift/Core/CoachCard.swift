@@ -38,16 +38,18 @@ public enum CoachCardCopy {
         public static let empty = "Captions will show here once someone talks."
     }
 
-    // MARK: DRAFT: call-mode tip (not yet copy-reviewed; edit before release)
+    // MARK: call-mode tip (approved copy)
 
-    /// The tip under the card when the user's headphones are in call mode. Generic on purpose: it
+    /// The tip under the card when the user's headphones may be in call mode. Generic on purpose: it
     /// never names the call app or claims to know its settings.
     public enum CallModeTip {
-        /// Set while any string below is still a draft.
-        public static let isDraft = true
-        public static let text = "Your headphones are in call mode, which lowers audio. Using your Mac's mic in the call app keeps full volume."
-        public static let dismiss = "Dismiss"
-        public static let dismissAccessibilityLabel = "Dismiss call mode tip"
+        /// False once the strings below are approved.
+        public static let isDraft = false
+        public static let title = "Headphones sound quiet?"
+        public static let body = "Your headphones may be in call mode, which lowers sound quality and volume. To keep full volume, choose your Mac's mic in your call app."
+        public static let dismiss = "Got it"
+        /// What VoiceOver reads for the tip.
+        public static let accessibilityLabel = "Tip: your headphones may be in call mode, which lowers volume. Choose your Mac's mic in your call app to keep full volume."
     }
 }
 

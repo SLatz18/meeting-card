@@ -227,6 +227,7 @@ final class CoachFullCardView: CoachSurfaceView {
     /// A plain label (not the truncating status label): sized to its text, it never cuts it.
     private let badgeLabel = NSTextField(labelWithString: "")
     private var lineWidth: CGFloat = 0
+    private let tipTitle = NSTextField(labelWithString: "")
     private let tipLabel = NSTextField(wrappingLabelWithString: "")
     private(set) var dismissTip: NSButton!
     private(set) var minimize: CardButton!
@@ -309,6 +310,12 @@ final class CoachFullCardView: CoachSurfaceView {
         pause.frame = rect(k.pauseButton)
         addSubview(pause)
 
+        let titleArea = k.tipTitle
+        tipTitle.frame = NSRect(x: titleArea.x, y: titleArea.y, width: titleArea.width, height: titleArea.height)
+        tipTitle.isSelectable = false
+        tipTitle.setAccessibilityElement(false)
+        tipTitle.isHidden = !state.callModeTip
+        addSubview(tipTitle)
         let tipArea = k.tipText
         tipLabel.frame = NSRect(x: tipArea.x, y: tipArea.y, width: tipArea.width, height: tipArea.height)
         tipLabel.maximumNumberOfLines = k.tipLines
@@ -361,13 +368,17 @@ final class CoachFullCardView: CoachSurfaceView {
         stop.setAccessibilityLabel(stopControl.accessibilityLabel)
         stop.applyFill()
 
+        tipTitle.font = Theme.font(k.tipTitleFont)
+        tipTitle.textColor = Theme.text(k.tipTitleColor, style)
+        tipTitle.stringValue = CoachCardCopy.CallModeTip.title
+        tipTitle.isHidden = !s.callModeTip
         tipLabel.font = Theme.font(k.tipFont)
         tipLabel.textColor = Theme.text(k.tipTextColor, style)
-        tipLabel.stringValue = CoachCardCopy.CallModeTip.text
+        tipLabel.stringValue = CoachCardCopy.CallModeTip.body
+        tipLabel.setAccessibilityLabel(CoachCardCopy.CallModeTip.accessibilityLabel)
         tipLabel.isHidden = !s.callModeTip
         dismissTip.attributedTitle = Card.attr(CoachCardCopy.CallModeTip.dismiss, Theme.font(k.tipButtonFont),
                                                Theme.text(k.tipButtonTextColor, style))
-        dismissTip.setAccessibilityLabel(CoachCardCopy.CallModeTip.dismissAccessibilityLabel)
         dismissTip.isHidden = !s.callModeTip
     }
 

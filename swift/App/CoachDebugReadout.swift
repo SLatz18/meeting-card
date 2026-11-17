@@ -16,7 +16,7 @@ final class CoachDebugReadout: NSObject, NSWindowDelegate, NSMenuDelegate {
     static let diagnosticsHeading = "Speaker mic diagnostics (test build)"
     static let diagnosticsNote = "Speakers only. Headphones always run without voice processing; Bluetooth output always uses the built-in mic. Not saved: resets when the app quits."
     static let statusTag = 7301
-    static let voiceProcessingChoices: [(title: String, value: Bool?)] = [("Standard (on)", nil), ("On", true), ("Off", false)]
+    static let voiceProcessingChoices: [(title: String, value: Bool?)] = [("Standard", nil), ("On", true), ("Off", false)]
     static let micSourceChoices: [(title: String, value: MicDiagnostics.Source)] = [
         ("System default", .systemDefault), ("Built-in mic", .builtIn),
     ]

@@ -312,8 +312,13 @@ final class ThemeTests: XCTestCase {
         let k = Theme.CoachCard.self
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: CGFloat(k.tipFont.size))]
         let bound = NSSize(width: CGFloat(k.tipText.width), height: CGFloat.greatestFiniteMagnitude)
-        let rect = (CoachCardCopy.CallModeTip.text as NSString).boundingRect(with: bound, options: [.usesLineFragmentOrigin], attributes: attrs)
+        let rect = (CoachCardCopy.CallModeTip.body as NSString).boundingRect(with: bound, options: [.usesLineFragmentOrigin], attributes: attrs)
         XCTAssertLessThanOrEqual(Double(rect.height.rounded(.up)), k.tipTextHeight, "the tip text needs more lines than its row has")
+        XCTAssertEqual(k.tipTitleFont.weight, .semibold)
+        let titleFont = NSFont.systemFont(ofSize: CGFloat(k.tipTitleFont.size), weight: .semibold)
+        let title = (CoachCardCopy.CallModeTip.title as NSString).size(withAttributes: [.font: titleFont])
+        XCTAssertLessThanOrEqual(Double(title.width), k.tipTitle.width, "the tip's title fits its one line")
+        XCTAssertLessThanOrEqual(Double(title.height), k.tipTitleHeight + 1e-9)
     }
 
     /// The coach UI files carry no literal sizes, radii or colors of their own.

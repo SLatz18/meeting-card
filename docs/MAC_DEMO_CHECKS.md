@@ -70,7 +70,7 @@ The test build's coach menu also shows a **Mic: …** line under its status line
 `Mic: built-in · voice processing off · bluetooth`.
 
 **Speaker mic diagnostics** is a hidden switch in this window, test build only. It has two controls:
-- **Speakers: voice processing**: Standard (on), On or Off.
+- **Speakers: voice processing**: Standard, On or Off (Standard is the shipping behavior: voice processing on).
 - **Speakers: mic source**: System default or Built-in mic.
 
 It applies at once (the mic reopens), affects the speakers route only (headphones and Bluetooth output ignore it),

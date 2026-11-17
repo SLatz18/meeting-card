@@ -30,15 +30,16 @@ final class CoachCardTests: XCTestCase {
         XCTAssertFalse(CoachCardState(status: .listening, mute: Self.live, savingBadge: "Saving transcript").callModeTip)
     }
 
-    /// The tip's words are draft copy for review: exactly this text, and nothing about the call app's settings.
-    func testCallModeTipDraftCopy() {
+    /// The tip's approved words, exactly, and nothing naming a call app.
+    func testCallModeTipApprovedCopy() {
         let c = CoachCardCopy.CallModeTip.self
-        XCTAssertTrue(c.isDraft, "not yet copy-reviewed")
-        XCTAssertEqual(c.text, "Your headphones are in call mode, which lowers audio. Using your Mac's mic in the call app keeps full volume.")
-        XCTAssertEqual(c.dismiss, "Dismiss")
-        XCTAssertEqual(c.dismissAccessibilityLabel, "Dismiss call mode tip")
+        XCTAssertFalse(c.isDraft, "approved")
+        XCTAssertEqual(c.title, "Headphones sound quiet?")
+        XCTAssertEqual(c.body, "Your headphones may be in call mode, which lowers sound quality and volume. To keep full volume, choose your Mac's mic in your call app.")
+        XCTAssertEqual(c.dismiss, "Got it")
+        XCTAssertEqual(c.accessibilityLabel, "Tip: your headphones may be in call mode, which lowers volume. Choose your Mac's mic in your call app to keep full volume.")
         for app in ["Zoom", "Meet", "Teams", "Slack", "Webex", "FaceTime"] {
-            XCTAssertFalse(c.text.contains(app), "the tip names \(app)")
+            for s in [c.title, c.body, c.accessibilityLabel] { XCTAssertFalse(s.contains(app), "the tip names \(app)") }
         }
     }
 
@@ -56,11 +57,12 @@ final class CoachCardTests: XCTestCase {
         let dismiss = k.tipDismissButton(labelWidth: 50), text = k.tipText
         XCTAssertEqual(dismiss.y, k.vertical, accuracy: 1e-9, "Dismiss rests on the card's bottom inset")
         XCTAssertEqual(text.y - dismiss.maxY, k.rowGap, accuracy: 1e-9)
-        XCTAssertEqual(text.maxY, k.tipExtra, accuracy: 1e-9, "the usual content starts right above the text")
+        XCTAssertEqual(k.tipTitle.y, text.maxY, accuracy: 1e-9, "the title sits right above the text")
+        XCTAssertEqual(k.tipTitle.maxY, k.tipExtra, accuracy: 1e-9, "the usual content starts right above the title")
         XCTAssertEqual(text.x, k.leading)
         XCTAssertEqual(text.maxX, k.width - k.trailing, accuracy: 1e-9)
         XCTAssertLessThanOrEqual(dismiss.maxX, k.width - k.trailing)
-        XCTAssertEqual(k.stopButton(labelWidth: 70).y + k.tipExtra - text.maxY, k.vertical, accuracy: 1e-9, "the card's usual inset sits between")
+        XCTAssertEqual(k.stopButton(labelWidth: 70).y + k.tipExtra - k.tipTitle.maxY, k.vertical, accuracy: 1e-9, "the card's usual inset sits between")
     }
 
     func testMotionAndCoachTokens() {

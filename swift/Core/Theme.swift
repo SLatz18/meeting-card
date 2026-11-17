@@ -418,10 +418,14 @@ public enum Theme {
         public static let tipButtonFont = CardStyle.Typography.caption
         public static let tipButtonTextColor = CardStyle.Text.primary
         public static var tipTextHeight: Double { Double(tipLines) * Metrics.captionHeight }
+        /// The tip's one-line title above its text.
+        public static let tipTitleFont = Theme.FontSpec(CardStyle.Typography.caption.size, .semibold)
+        public static let tipTitleColor = CardStyle.Text.primary
+        public static var tipTitleHeight: Double { Metrics.captionHeight }
         public static var tipButtonHeight: Double { Coach.pauseButtonSize }
         /// What the tip adds below the card's usual content: Dismiss on the card's bottom inset, a gap,
-        /// then the text. (The usual bottom inset stays between the button row and the text.)
-        public static var tipExtra: Double { vertical + tipButtonHeight + rowGap + tipTextHeight }
+        /// the text, then the title. (The usual bottom inset stays between the button row and the title.)
+        public static var tipExtra: Double { vertical + tipButtonHeight + rowGap + tipTextHeight + tipTitleHeight }
         /// The card's height, with the tip row when it shows.
         public static func cardHeight(callModeTip: Bool) -> Double { callModeTip ? height + tipExtra : height }
 
@@ -508,6 +512,9 @@ public enum Theme {
         }
         public static var tipText: Frame {
             Frame(x: leading, y: vertical + tipButtonHeight + rowGap, width: width - leading - trailing, height: tipTextHeight)
+        }
+        public static var tipTitle: Frame {
+            Frame(x: leading, y: tipText.maxY, width: tipText.width, height: tipTitleHeight)
         }
     }
 
