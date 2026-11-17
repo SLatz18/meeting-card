@@ -139,8 +139,7 @@ jobs:
         run: head/swift/scripts/snapshots.sh cards base/swift head/swift "$RUNNER_TEMP/shots/cards"
       - name: Render coach UI (head)
         run: head/swift/scripts/snapshots.sh coach "$RUNNER_TEMP/shots/coach"
-      # Report only: the coach shots with no reminder card in them (chip, glow and packet shots
-      # carry the card, whose clock moves between the two renders), base vs head, in the summary.
+      # Report only: coach shots base vs head, in the job summary.
       - name: Render coach UI (base)
         if: github.event_name == 'pull_request'
         run: base/swift/scripts/snapshots.sh coach "$RUNNER_TEMP/shots/coach-base" || echo "base coach render failed (report only)"
@@ -152,6 +151,7 @@ jobs:
             src="$RUNNER_TEMP/shots/coach"; [[ "$rev" == base ]] && src="$RUNNER_TEMP/shots/coach-base"
             mkdir -p "$out/$rev"
             [[ -d "$src" ]] || continue
+            # coach-chip, glow and packet shots are excluded: they contain the reminder card, whose clock changes between the base and head renders.
             find "$src" -maxdepth 1 -type f -name '*.png' ! -name 'coach-chip-*' ! -name 'glow-*' ! -name 'packet-*' \
               -exec cp {} "$out/$rev/" \;
           done
