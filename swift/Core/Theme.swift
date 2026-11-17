@@ -21,12 +21,12 @@ public struct CardStyle: Sendable {
     /// The flag amber: attention.
     public var warning: RGBA { palette.flag }
     /// AppKit system colors by meaning. The App draws the live semantic NSColor (it follows dark
-    /// mode and Increase Contrast); `srgb` is its standard-contrast value, for math and tests.
+    /// mode and Increase Contrast); `srgb` is its standard-contrast value on macOS 26, for math and tests.
     public enum SystemColor: Sendable { case red, orange }
     public static func srgb(_ c: SystemColor, dark: Bool) -> RGBA {
         switch c {
         case .red: dark ? RGBA(hex: 0xFF453A) : RGBA(hex: 0xFF3B30)
-        case .orange: dark ? RGBA(hex: 0xFF9F0A) : RGBA(hex: 0xFF9500)
+        case .orange: dark ? RGBA(hex: 0xFF9230) : RGBA(hex: 0xFF8D28)
         }
     }
     /// Alerts and errors: systemRed.

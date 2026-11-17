@@ -158,8 +158,8 @@ final class CoachController: NSObject {
     /// muted), so they follow dark mode and Increase Contrast; shape and timing from `coachStyle()`.
     static func glowStyle() -> GlowStyle {
         let g = Theme.Glow.self
-        return GlowStyle(rose: Theme.dynamic(g.roseSource) { g.rose(base: $0, dark: $1) },
-                         amber: Theme.dynamic(g.amberSource) { g.amber(base: $0, dark: $1) },
+        return GlowStyle(rose: CardStyle.dynamic(g.roseSource) { g.rose(base: $0, dark: $1) },
+                         amber: CardStyle.dynamic(g.amberSource) { g.amber(base: $0, dark: $1) },
                          profile: coachStyle().profile)
     }
 
