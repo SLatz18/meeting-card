@@ -6,8 +6,8 @@ import MeetingCardCore
 /// The call coach inside MeetingCard. Off by default: until the user turns it on (Settings or the
 /// coach status menu) there is no service, no Core Audio polling, no capture and no network. It
 /// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores seven
-/// settings in UserDefaults (never call data; one is where the coach card was dragged); the API keys
-/// live only in the Keychain. The cue judge
+/// settings in UserDefaults (never call data; one is where the coach card was dragged), plus the
+/// captions and transcript settings (`CoachTranscript`); the API keys live only in the Keychain. The cue judge
 /// (`coach.judgeProvider`, gpt unless set) applies from the next call.
 /// "Use Zoom/Meet controls" (off by default) lets Zoom's meeting controls and an open Meet tab stop
 /// the coach within seconds of a call ending and hold it while Zoom is muted; its Accessibility and
@@ -62,6 +62,8 @@ final class CoachController: NSObject {
         case .meet: .meet
         }
     }
+    /// Live captions and saved transcripts (off by default).
+    let transcript: CoachTranscript
     /// Cards on screen, newest last (the chip goes on each).
     var visibleCards: () -> [Card] = { [] }
     /// The coach status menu: always there, so the coach can be enabled from it while off.
@@ -80,17 +82,19 @@ final class CoachController: NSObject {
     private(set) var minimized = false
 
     init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
-         showsStatusItem: Bool = true) throws {
+         showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore()) throws {
         self.defaults = defaults
         self.keychain = keychain
         typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
         self.showsStatusItem = showsStatusItem
+        transcript = CoachTranscript(defaults: defaults, store: transcriptStore)
         config = try ListenMoreConfig.load(overrides: Self.configOverrides)
         callControls = .live(config: config)
         super.init()
         callControls.isEnabled = callControlsOn
         callControlsModel.onChange = { [weak self] in self?.refresh() }
+        transcript.screen = { [weak self] in self?.service?.callScreen() }
         keyStored = keychain.hasKey
         typeSafeKeyStored = typeSafeKeychain.hasKey
         if enabled {
@@ -107,6 +111,8 @@ final class CoachController: NSObject {
     var hasKey: Bool { keychain.hasKey }
     /// GPT cues can run: a key is stored and OpenAI hasn't rejected it.
     var gptAvailable: Bool { keyStored && !keyGate.rejected }
+    /// Captions and transcripts read the GPT cues' transcription: the coach is on with a usable key.
+    var transcriptKeyUsable: Bool { enabled && gptAvailable }
     /// Whether a key is in the Keychain, kept current by key actions (refresh runs every second).
     var keyStored = false
     var typeSafeKeyStored = false
@@ -240,6 +246,10 @@ final class CoachController: NSObject {
         s.hostWindowNumber = { [weak self] in self?.hostWindowNumber() }
         s.onChange = { [weak self] in self?.refresh() }
         s.onCue = { [weak self] cue in self?.showNudge(cue) }
+        s.onCallStart = { [weak self] in self?.transcript.callStarted() }
+        s.onCallEnd = { [weak self] in self?.transcript.callEnded() }
+        s.onCaption = { [weak self] in self?.transcript.receive($0) }
+        s.onMeter = { [weak self] in self?.transcript.record($0) }
         service = s
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
         RunLoop.main.add(t, forMode: .common)
@@ -354,6 +364,8 @@ final class CoachController: NSObject {
         let card = coachCardState()
         let chip = card == nil ? self.chip : nil
         for c in visibleCards() { c.setCoach(chip) }
+        transcript.sync(keyUsable: transcriptKeyUsable)
+        if let reason = service?.gptStopped { transcript.gptStopped(reason) }
         updateCoachCard(card)
         updateStatusItem()
         settingsWindow?.update()
@@ -394,13 +406,14 @@ final class CoachController: NSObject {
     }
 
     var menuItems: [CoachMenuItem] { CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable) }
-    private var shownMenu: (items: [CoachMenuItem], rejected: Bool)?
+    private var shownMenu: (items: [CoachMenuItem], rejected: Bool, transcript: [Bool])?
 
     private func updateStatusItem() {
         guard showsStatusItem else { return }
         let items = menuItems
-        if let shown = shownMenu, shown.items == items, shown.rejected == keyGate.rejected { return }
-        shownMenu = (items, keyGate.rejected)
+        let saved = [transcript.live.recorder.isSaving, transcript.canDelete]
+        if let shown = shownMenu, shown.items == items, shown.rejected == keyGate.rejected, shown.transcript == saved { return }
+        shownMenu = (items, keyGate.rejected, saved)
         let item = statusItem ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         let label = Self.statusLabel(enabled: enabled, indicator: indicator)
@@ -415,13 +428,37 @@ final class CoachController: NSObject {
         item.menu = menu(for: items)
     }
 
-    /// A native menu for these entries, each with its SF Symbol at the body size, then Send Feedback.
+    /// A native menu for these entries, each with its SF Symbol at the body size, then the saved
+    /// transcript's entries (saving now, delete) when there is one, then Send Feedback.
     func menu(for items: [CoachMenuItem]) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         for entry in items { menu.addItem(menuItem(entry)) }
+        addTranscriptItems(to: menu)
         menu.addItem(feedbackMenuItem())
         return menu
+    }
+
+    /// The saved transcript's entries: Saving transcript while one is written, Delete Transcript…
+    /// while there is one to delete; nothing otherwise.
+    private func addTranscriptItems(to menu: NSMenu) {
+        let saving = transcript.live.recorder.isSaving
+        guard saving || transcript.canDelete else { return }
+        let sym = Theme.Captions.menuSymbols
+        let size = Theme.FontSpec(Theme.Coach.menuSymbolSize)
+        menu.addItem(.separator())
+        if saving {
+            let m = NSMenuItem(title: CoachCopy.menuSaving, action: nil, keyEquivalent: "")
+            m.image = Theme.symbol(sym.saving, size, label: CoachCopy.menuSaving)
+            m.isEnabled = false
+            menu.addItem(m)
+        }
+        if transcript.canDelete {
+            let m = NSMenuItem(title: CoachCopy.menuDeleteTranscript, action: #selector(deleteTranscriptClicked(_:)), keyEquivalent: "")
+            m.image = Theme.symbol(sym.delete, size, label: CoachCopy.menuDeleteTranscript)
+            m.target = self
+            menu.addItem(m)
+        }
     }
 
     private func feedbackMenuItem() -> NSMenuItem {
@@ -430,6 +467,18 @@ final class CoachController: NSObject {
         m.image = Theme.symbol(Theme.Coach.menuSymbols.feedback, Theme.FontSpec(Theme.Coach.menuSymbolSize), label: title)
         m.target = self
         return m
+    }
+
+    @objc func deleteTranscriptClicked(_ sender: Any?) {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = CoachCopy.deleteConfirmTitle
+        alert.informativeText = CoachCopy.deleteConfirmBody
+        alert.addButton(withTitle: CoachCopy.delete).hasDestructiveAction = true
+        alert.addButton(withTitle: CoachCopy.cancel)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        transcript.deleteTranscript()
+        refresh()
     }
 
     static func statusLabel(enabled: Bool, indicator: CoachIndicator) -> String {
