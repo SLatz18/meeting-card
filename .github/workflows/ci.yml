@@ -21,6 +21,13 @@ jobs:
           sw_vers
       - name: Install xcodegen
         run: brew install xcodegen
+      # Self-consistency only: the vendored ListenMoreKit must match its recorded sync point
+      # (swift/Packages/ListenMoreKit/SYNC). The upstream comparison is a local opt-in script.
+      - name: ListenMoreKit sync point
+        working-directory: swift
+        run: |
+          scripts/test-kit-sync.sh
+          scripts/kit-sync.sh check
       # App tests, ListenMoreKit tests (swift test; live OpenAI tests skip without the opt-in), then
       # the Release build, ad-hoc signed. Nothing is installed.
       - name: Test (app + ListenMoreKit) + Release build (ad-hoc signed)

@@ -4,12 +4,25 @@ The call coach engine inside MeetingCard, as a local Swift package (wired in thr
 `swift/project.yml` `packages:`). Vendored from the listen-more prototype's Swift shell; there is
 no dependency on that repository.
 
-**Sync point: listen-more `mac/` at `9b5ea23`.** Ported from it: the Kit sources and tests
+**Sync point: listen-more `mac/` at `9b5ea23`,** recorded in [`SYNC`](SYNC) with a sha256 of every
+vendored file (`Package.swift`, `Sources/`, `Tests/`). Ported from it: the Kit sources and tests
 (adapted to MeetingCard: the trigger, runner, chip indicator, glow profile and generic defaults are
 MeetingCard's), the type-only config error message, and the Keychain error and ThisDeviceOnly
 changes. Not vendored: the standalone menu-bar app (`mac/Sources/ListenMore`) and the prototype's
-demo clips, timelines and screenshots. To sync, diff upstream `mac/` from this commit forward and
-port changes by hand, then update this line.
+demo clips, eval data, timelines and screenshots.
+
+Drift check (`swift/scripts/kit-sync.sh`):
+
+```sh
+scripts/kit-sync.sh check        # CI runs this: fails, naming the files, if the Kit changed without re-recording
+scripts/kit-sync.sh record       # after a deliberate local edit (same upstream commit)
+LISTEN_MORE_DIR=~/src/listen-more scripts/kit-sync.sh upstream   # opt-in, local: commits/files behind upstream mac/
+scripts/kit-sync.sh record --upstream <sha>                      # after porting upstream up to <sha>
+```
+
+CI can't read the private upstream, so it only checks that the files match `SYNC`. When porting,
+take code and generic numeric defaults only: no fixtures, eval data, pattern files, or comments
+about anyone's call patterns.
 
 - `ListenMoreCore` (Foundation only, builds and tests on Linux): config and generic defaults,
   voice activity detection, local rules (interrupt, talk-over, monologue, talk share, tone flags),

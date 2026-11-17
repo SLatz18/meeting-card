@@ -102,7 +102,7 @@ final class PrivacyGuardTests: XCTestCase {
             if url.pathComponents.contains(".build") || url.pathComponents.contains(".swiftpm") { e.skipDescendants(); continue }
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { continue }
-            let ok = url.pathExtension == "swift" || ["README.md", ".gitignore"].contains(url.lastPathComponent)
+            let ok = url.pathExtension == "swift" || ["README.md", ".gitignore", "SYNC"].contains(url.lastPathComponent)
             XCTAssertTrue(ok, "unexpected data file \(url.lastPathComponent)")
         }
     }
