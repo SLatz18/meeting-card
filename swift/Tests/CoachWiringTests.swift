@@ -65,6 +65,26 @@ final class CoachWiringTests: XCTestCase {
                       "a rejected key is withheld, so only GPT cues stop")
     }
 
+    /// The cue judge is a setting (gpt, the config's value, unless the user picks TypeSafe), read by
+    /// the engine at each call start; the TypeSafe key is its own account under MeetingCard's service
+    /// and is never sent anywhere to check it.
+    func testCueJudgeIsASettingWithItsOwnKeychainAccount() throws {
+        let src = try read("App/CoachController.swift")
+        XCTAssertTrue(src.contains("static let judgeProvider = \"coach.judgeProvider\""))
+        XCTAssertTrue(src.contains("Self.storedJudgeProvider(defaults) ?? config.judge.provider"), "the config value unless set")
+        XCTAssertTrue(src.contains("typeSafeKeychain = KeychainStore(service: keychain.service, account: KeychainStore.typeSafeAccount)"))
+        XCTAssertTrue(src.contains("LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,"))
+        XCTAssertTrue(src.contains("judgeProvider: { Self.storedJudgeProvider(defaults) })"))
+        XCTAssertTrue(src.contains("keys: keyGate, callState: callControls, engine: engine"))
+        let kitDefaults = try read("Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift")
+        XCTAssertTrue(kitDefaults.contains("\"provider\": \"gpt\""), "GPT stays the default judge")
+        let keys = try read("App/CoachKeyActions.swift")
+        let save = try XCTUnwrap(keys.components(separatedBy: "func saveTypeSafeKey").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(save.contains("try? typeSafeKeychain.save(key)"))
+        XCTAssertFalse(save.contains("KeyValidator") || save.contains("Task"), "nothing is sent to check the TypeSafe key")
+    }
+
     /// Local-only: turning on never waits for or requires a key; a stored key is checked afterwards.
     func testEnablingNeedsNoKey() throws {
         let src = try read("App/CoachController.swift")

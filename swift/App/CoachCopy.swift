@@ -50,6 +50,15 @@ enum CoachCopy {
     static let privacy = "When the coach is on with an API key, call audio is sent to OpenAI for analysis. Without a key, only the on-device cues run."
     static let pausedPrivacy = "No audio is sent while paused."
     static let permissionDenied = "Call coach needs mic and system audio access. You can turn these on in System Settings > Privacy & Security."
+    static let judgeLabel = "Cue judge"
+    static let judgeGpt = "OpenAI GPT"
+    static let judgeTypeSafe = "TypeSafe System One"
+    static let judgeHelpGpt = "OpenAI decides when your reply brushes past someone's point. This is the default."
+    static let judgeHelpTypeSafe = "TypeSafe decides heated replies, missed questions and brushed-past points. A short, redacted transcript window around your reply goes to TypeSafe on your TypeSafe key. Transcription stays with OpenAI."
+    static let typeSafeKeyLabel = "TypeSafe API key"
+    static let typeSafeKeyPlaceholder = "TypeSafe API key"
+    static let typeSafeKeySavedPlaceholder = "TypeSafe key saved in your Keychain"
+    static let typeSafeKeyMissing = "Nothing is judged until you add a TypeSafe API key. The transcript rules and on-device cues still run."
 
     struct Screen {
         let title: String

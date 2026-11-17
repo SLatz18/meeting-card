@@ -25,6 +25,12 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
                                                             color: CoachSettingsWindow.color(Theme.CallControls.explainerText))
     private let requestAccessButton = NSButton(title: CoachCopy.requestAccess, target: nil, action: nil)
     private var appsStack = NSStackView()
+    private let judgePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let judgeHelp = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let typeSafeKeyField = NSSecureTextField()
+    private var typeSafeKeyRow = NSStackView()
+    private let typeSafeNote = CoachSettingsWindow.text(CoachCopy.typeSafeKeyMissing, font: Theme.Settings.helperFont,
+                                                        color: CoachSettingsWindow.color(.secondary))
     private let root = NSStackView()
     private let document = NSView()
     private let scroll = NSScrollView()
@@ -334,6 +340,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let g2 = Self.group([Self.text(CoachCopy.keyLabel, font: Theme.Settings.rowFont), keyRow, keyHelp, keyStatus])
         for v in [keyRow, keyHelp, keyStatus] { pin(v, in: g2) }
 
+        let gJudge = judgeGroup()
+
         let add = NSButton(title: CoachCopy.add, target: self, action: #selector(addApp(_:)))
         add.bezelStyle = .rounded
         let header = Self.row(Self.text(CoachCopy.allowedApps, font: Theme.Settings.rowFont), add)
@@ -350,7 +358,58 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
                                 color: Self.color(.secondary), maxWidth: Self.outerWidth)
-        return [section, g1, gControls, g2, g3, privacy]
+        return [section, g1, gControls, g2, gJudge, g3, privacy]
+    }
+
+    static func judgeTitle(_ kind: JudgeProviderKind) -> String {
+        switch kind {
+        case .gpt: CoachCopy.judgeGpt
+        case .typesafe: CoachCopy.judgeTypeSafe
+        }
+    }
+
+    static func judgeHelpText(_ kind: JudgeProviderKind) -> String {
+        switch kind {
+        case .gpt: CoachCopy.judgeHelpGpt
+        case .typesafe: CoachCopy.judgeHelpTypeSafe
+        }
+    }
+
+    /// Cue judge: the provider picker, what it sends where, and (TypeSafe only) its key.
+    private func judgeGroup() -> Group {
+        judgePopup.removeAllItems()
+        judgePopup.addItems(withTitles: JudgeProviderKind.allCases.map { Self.judgeTitle($0) })
+        judgePopup.font = Theme.font(Theme.Settings.itemFont)
+        judgePopup.target = self
+        judgePopup.action = #selector(judgePicked(_:))
+        judgePopup.setAccessibilityLabel(CoachCopy.judgeLabel)
+        let judgeRow = Self.row(Self.text(CoachCopy.judgeLabel, font: Theme.Settings.rowFont), judgePopup)
+
+        typeSafeKeyField.font = Theme.font(Theme.Settings.itemFont)
+        typeSafeKeyField.target = self
+        typeSafeKeyField.action = #selector(typeSafeKeyEntered(_:))
+        typeSafeKeyField.setAccessibilityLabel(CoachCopy.typeSafeKeyLabel)
+        let lock = NSImageView(image: Theme.symbol("lock", Theme.Settings.itemFont) ?? NSImage())
+        lock.contentTintColor = Self.color(.secondary)
+        typeSafeKeyRow = NSStackView(views: [typeSafeKeyField, lock])
+        typeSafeKeyRow.orientation = .horizontal
+        let g = Self.group([judgeRow, judgeHelp, typeSafeKeyRow, typeSafeNote])
+        for v in [judgeRow, judgeHelp, typeSafeKeyRow, typeSafeNote] { pin(v, in: g) }
+        return g
+    }
+
+    private func updateJudge() {
+        let kind = coach.judgeProvider
+        judgePopup.selectItem(at: JudgeProviderKind.allCases.firstIndex(of: kind) ?? 0)
+        judgeHelp.stringValue = Self.judgeHelpText(kind)
+        let typeSafe: Bool
+        switch kind {
+        case .gpt: typeSafe = false
+        case .typesafe: typeSafe = true
+        }
+        typeSafeKeyRow.isHidden = !typeSafe
+        typeSafeKeyField.placeholderString = coach.typeSafeKeyStored ? CoachCopy.typeSafeKeySavedPlaceholder : CoachCopy.typeSafeKeyPlaceholder
+        typeSafeNote.isHidden = !(typeSafe && !coach.typeSafeKeyStored)
     }
 
     private func appName(_ bundleId: String) -> String {
@@ -395,6 +454,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         toggleError.isHidden = toggleError.stringValue.isEmpty
         keyStatus.isHidden = keyStatus.stringValue.isEmpty
         updateCallControls()
+        updateJudge()
     }
 
     /// The toggle, and while it's on, what it still needs (checked, never asked; the Request access
@@ -455,6 +515,20 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     }
 
     @objc private func anyAppToggled(_ sender: NSButton) { coach.setAnyApp(sender.state == .on) }
+
+    @objc private func judgePicked(_ sender: NSPopUpButton) {
+        let all = JudgeProviderKind.allCases
+        guard all.indices.contains(sender.indexOfSelectedItem) else { return }
+        coach.setJudgeProvider(all[sender.indexOfSelectedItem])
+        update()
+    }
+
+    @objc private func typeSafeKeyEntered(_ sender: NSSecureTextField) {
+        let text = sender.stringValue
+        sender.stringValue = ""
+        coach.saveTypeSafeKey(text)
+        update()
+    }
 
     @objc private func addApp(_ sender: Any?) {
         let panel = NSOpenPanel()
