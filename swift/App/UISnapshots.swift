@@ -207,6 +207,7 @@ enum UISnapshots {
                         }
                         settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                             transcriptShots(dir: dir, tag: tag, controller: controller, packet: packet) {
+                                startToggleCheck(tag: tag, controller: controller)
                                 menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
                                 noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
                             }
@@ -413,6 +414,46 @@ enum UISnapshots {
         let margin = CGFloat(Theme.Metrics.cardMargin) * scale
         ctx.draw(cardImg, in: CGRect(x: full.width - cw - margin, y: margin, width: cw, height: ch))
         return ctx.makeImage()
+    }
+
+    /// Start Coach while the coach is off must show in Settings at once: with Settings already open
+    /// (and still after reopening it), and with Settings opened after Start. Writes one fixture log
+    /// line that snapshots.sh gates on; the coach is switched off again and nothing is kept.
+    @MainActor
+    static func startToggleCheck(tag: String, controller: Controller) {
+        let suite = AppIdentity.current.scoped("start-check")
+        guard let defaults = UserDefaults(suiteName: suite) else { return }
+        let keychain = KeychainStore(service: suite, account: "none")
+        func coach() -> CoachController? {
+            defaults.removePersistentDomain(forName: suite)
+            defaults.set(true, forKey: CoachController.Keys.onboarded)
+            return try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false,
+                                        transcriptStore: MemoryTranscriptStore())
+        }
+        func state(_ c: CoachController) -> String { c.settingsWindow?.coachSwitchOn == true ? "on" : "off" }
+        func done(_ c: CoachController) {
+            c.settingsWindow?.window.orderOut(nil)
+            c.setEnabled(false) { _ in }
+        }
+        var result = "unavailable"
+        if let open = coach() {
+            open.showSettings()
+            let before = state(open)
+            open.startClicked(nil)
+            let after = state(open)
+            open.settingsWindow?.window.orderOut(nil)
+            open.showSettings()
+            let reopened = state(open)
+            done(open)
+            if let fresh = coach() {
+                fresh.startClicked(nil)
+                fresh.showSettings()
+                result = "before=\(before) open=\(after) reopened=\(reopened) fresh=\(state(fresh))"
+                done(fresh)
+            }
+        }
+        defaults.removePersistentDomain(forName: suite)
+        controller.log("coach check start-toggle-\(tag) \(result)")
     }
 
     /// The coach status menu, off, waiting for a call (Start Coach), while listening (no key, so the

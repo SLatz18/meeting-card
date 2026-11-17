@@ -130,6 +130,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     /// Snapshots: the groups' stack (layer render can't draw the scroll view upright) and the
     /// height of it the window shows, from the top.
     var snapshotContent: (view: NSView, visibleHeight: CGFloat) { (root, scroll.contentView.bounds.height) }
+    /// The Call coach switch reads on (CI's Start Coach check, `UISnapshots.startToggleCheck`).
+    var coachSwitchOn: Bool { toggle.state == .on }
 
     func present() {
         window.center()

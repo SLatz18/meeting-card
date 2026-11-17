@@ -61,7 +61,7 @@ case "${1:-}" in
     for a in light dark; do
       (cd "$HERE" && MEETING_CARD_COACH_CHIP=listening MEETING_CARD_COACH_SHOTS="$OUT" \
         scripts/show-fixture.sh meet "$a" 30 >/dev/null 2>&1) || true
-      grep -hE "coach (shot|packet|menu|notice)" "$LOG" >> "$OUT/coach-shots.log" 2>/dev/null || true
+      grep -hE "coach (shot|packet|menu|notice|check)" "$LOG" >> "$OUT/coach-shots.log" 2>/dev/null || true
     done
     # The coach card and pill in each state, and the morph and collapse end states (coach-<name>-<appearance>.png;
     # names from UISnapshots.coachCardStates).
@@ -86,6 +86,11 @@ case "${1:-}" in
       for a in light dark; do
         [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
       done
+    done
+    # Start Coach while off shows in Settings at once (UISnapshots.startToggleCheck), light and dark.
+    for a in light dark; do
+      grep -q "coach check start-toggle-$a before=off open=on reopened=on fresh=on" "$OUT/coach-shots.log" \
+        || { echo "Start Coach didn't show in Settings ($a)" >&2; missing=1; }
     done
     [[ $missing == 0 ]]
     ;;

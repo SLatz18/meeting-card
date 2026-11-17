@@ -72,7 +72,7 @@ final class CoachController: NSObject {
     private(set) var service: CoachService?
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
-    private var settingsWindow: CoachSettingsWindow?
+    private(set) var settingsWindow: CoachSettingsWindow?
     /// Last key problem shown in Settings.
     var keyProblem: KeyCheck?
     /// The coach card, made the first time it shows.
