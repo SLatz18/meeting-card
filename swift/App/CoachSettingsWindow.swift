@@ -64,6 +64,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         init(_ views: [NSView]) {
             stack = NSStackView(views: views)
             super.init(frame: .zero)
+            wantsLayer = true
             stack.orientation = .vertical
             stack.alignment = .leading
             stack.spacing = 10
@@ -81,10 +82,12 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-        override func draw(_ dirtyRect: NSRect) {
-            NSColor.controlBackgroundColor.setFill()
-            let r = CGFloat(Theme.Settings.groupRadius)
-            NSBezierPath(roundedRect: bounds, xRadius: r, yRadius: r).fill()
+        override var wantsUpdateLayer: Bool { true }
+
+        override func updateLayer() {
+            layer?.cornerRadius = CGFloat(Theme.Settings.groupRadius)
+            layer?.cornerCurve = .continuous
+            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
         }
     }
 
@@ -118,6 +121,11 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             v.widthAnchor.constraint(equalToConstant: width).isActive = true
         }
         window.contentView = root
+        update()
+    }
+
+    private func fitWindow() {
+        guard let root = window.contentView else { return }
         root.layoutSubtreeIfNeeded()
         window.setContentSize(NSSize(width: CGFloat(Theme.Settings.width), height: root.fittingSize.height))
     }
@@ -238,6 +246,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     // MARK: state
 
     func update() {
+        defer { fitWindow() }
         guard !showingOnboarding else { return }
         toggle.state = coach.enabled ? .on : .off
         startButton.isHidden = !(coach.enabled && (coach.indicator == .hidden || coach.indicator == .on))
@@ -245,6 +254,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         anyAppBox.state = coach.anyApp ? .on : .off
         toggleError.stringValue = message(coach.keyProblem) ?? ""
         toggleError.isHidden = toggleError.stringValue.isEmpty
+        keyStatus.isHidden = keyStatus.stringValue.isEmpty
     }
 
     private func message(_ k: KeyCheck?) -> String? {

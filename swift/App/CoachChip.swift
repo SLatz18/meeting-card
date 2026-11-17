@@ -60,8 +60,10 @@ final class CoachChipView: NSView {
     }
 
     static func makeLabel(_ chip: CoachChip, color: NSColor = .labelColor) -> NSTextField {
-        NSTextField(labelWithAttributedString: NSAttributedString(
-            string: chip.label, attributes: [.font: Theme.font(Theme.Coach.labelFont), .foregroundColor: color]))
+        let f = NSTextField(labelWithString: chip.label)
+        f.font = Theme.font(Theme.Coach.labelFont)
+        f.textColor = color
+        return f
     }
 
     /// Includes the text field's cell padding, so the label never clips.
