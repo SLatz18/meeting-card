@@ -39,8 +39,8 @@ Captions and transcripts (opt-in, host-driven): the realtime sessions' partial a
 the host as `CaptionEvent`s (with a `CostReading` after each billed segment). `LiveTranscript` keeps
 a three-line `CaptionBuffer` in memory, labels the streams You and Them (`SpeakerLabels`, per-call
 tags), and hands finished lines to `TranscriptRecorder`, which writes nothing unless saving is on.
-When the GPT layer stops (cost cap or error) captions stop; local cues continue. `CaptionPanel`
-(ListenMoreMac) draws the strip from a host-supplied `CaptionStyle` and is left out of screen shares.
+When the GPT layer stops (cost cap or error) captions stop; local cues continue. The Kit draws no
+caption UI: the host renders the lines (MeetingCard: `CaptionFeedView` in its card).
 
 A host can pass an optional `CallStateProvider` (to `CoachService`, `CoachSession` or `CoachMonitor`)
 reporting each call app's state as started, ended or muted. An ended call stops the session after

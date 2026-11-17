@@ -77,7 +77,7 @@ final class PrivacyGuardTests: XCTestCase {
     /// Caption and transcript code never logs: transcript text and keys stay out of every log.
     func testCaptionAndTranscriptSourcesNeverLog() throws {
         let names: Set<String> = ["Captions.swift", "Transcript.swift", Self.transcriptWriter, "LiveTranscript.swift",
-                                  "CaptionPanel.swift", "CoachTranscript.swift"]
+                                  "CoachTranscript.swift", "CoachNotice.swift"]
         let sources = try allSources().filter { names.contains($0.0) }
         XCTAssertGreaterThanOrEqual(sources.count, 4)
         for (name, text) in sources {

@@ -86,11 +86,6 @@ public final class CoachService: CoachSessionDelegate {
     }
 
     /// On (pre-warmed), Listening or Paused; hidden ~`trigger.stop_after_s` after call audio stops.
-    /// The display the call app is on (CallDisplayLocator), else the host's fallback display.
-    public func callScreen() -> NSRect? {
-        locateScreen(session.session?.appKey, fallbackScreen())
-    }
-
     public var indicator: CoachIndicator { session.indicator }
     public var isCapturing: Bool { session.isCapturing }
     /// The GPT layer stopped itself this session (local cues continue).

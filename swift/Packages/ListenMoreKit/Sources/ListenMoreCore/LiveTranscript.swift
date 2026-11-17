@@ -55,7 +55,7 @@ public final class LiveTranscript {
         return callStart == nil ? .waiting : .live
     }
 
-    /// Lines the caption strip shows now (none unless captions are live).
+    /// Lines the caption feed shows now (none unless captions are live).
     public var visibleLines: [CaptionLine] { captionState == .live ? captions.lines : [] }
 
     public var inCall: Bool { callStart != nil }

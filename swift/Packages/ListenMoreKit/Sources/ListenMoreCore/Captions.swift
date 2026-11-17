@@ -66,7 +66,7 @@ public struct CaptionLine: Equatable, Sendable {
     }
 }
 
-/// The caption strip's lines. Bounded: at most `maxLines` lines are kept (oldest dropped) and a line
+/// The caption feed's lines. Bounded: at most `maxLines` lines are kept (oldest dropped) and a line
 /// stops taking merges once it reaches `maxLineChars`. Consecutive turns by the same speaker within
 /// `mergeGapS` share a line. RAM only.
 public struct CaptionBuffer: Equatable, Sendable {
