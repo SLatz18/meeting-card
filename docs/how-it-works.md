@@ -4,7 +4,7 @@ The listen-more coach watches the shape of your conversation during a call and g
 
 ## Who is talking
 
-The coach listens to two separate audio streams. Your microphone is "you", and the call app's output is "everyone else". Because the streams are separate, the coach knows who is speaking without any voice recognition.
+The coach listens to two separate audio streams. Your microphone is "you", and the call app's output is "everyone else". Because the streams are separate, the coach knows who is speaking without any voice recognition. Captions and saved transcripts use the same split: lines are labelled **You** (mic) and **Them** (call audio). "Them" is not split further into individual speakers (see [Speakers](#speakers)).
 
 ## Two layers of detection
 
@@ -48,9 +48,22 @@ An ended call is reported for up to `stop_after_s` (30 s) after it ends; after t
 
 The coach turns on without a key. It then runs the local layer only (interruptions, talk-over, monologue and talk share), and nothing is sent anywhere. The transcript rules and the GPT layer need the transcription and judge calls, so they stay off until a key OpenAI accepts is saved. A saved key that OpenAI rejects is flagged in Settings and the coach menu, and the coach keeps running local-only.
 
+## Live captions and saved transcripts (opt-in)
+
+Both are off by default, in Settings under **Captions and transcript**, and both need a key OpenAI accepts: they show the text of the same live transcription the GPT cues already use, so they add no API calls and no cost. The first time either one is turned on, a notice explains that the other people on the call are being transcribed and that you are responsible for telling them and for following the law and any policies that apply to you. "Not Now" leaves the feature off.
+
+- **Live captions.** A small strip near the bottom of the display with the call app (found the same way as the glow's display), styled like a reminder card. It shows the last three lines as they are transcribed, each labelled with its speaker; consecutive turns by the same speaker within 4 s share a line, and long lines keep their newest words. Captions are in memory only (at most three lines) and are dropped when the call ends. Like the glow, the strip asks to be left out of screen shares (`sharingType = .none`).
+- **Saved transcripts.** One Markdown file per call, `Call <date> <time>.md`, in `~/Library/Application Support/MeetingCard/Transcripts` unless you choose another folder. Each finished line has its time since the call started and its speaker label. While a file is being written, a "Saving transcript" indicator shows above the caption strip (or alone, if captions are off), in Settings, and in the coach menu. Settings and the coach menu can delete the current or last transcript; deleting during a call stops saving for the rest of it. The file is readable by your user only (mode 600).
+- **Speaker names.** During a call you can rename "You" or "Them" in Settings. Names last for that call only; they are kept only inside that call's saved transcript, if saving is on.
+- **Cost cap.** When a call reaches its cost cap, the transcription stops: captions show that they stopped, the transcript file is finished, and the on-device cues continue. The Settings cost line shows the call's spend so far, with captions and transcript at $0.00 extra.
+
+### Speakers
+
+Only "You" and "Them" are labelled. OpenAI's live transcription model (`gpt-live-transcribe`) returns no speaker labels. Its one diarizing model, `gpt-4o-transcribe-diarize`, works only on uploaded files (`POST /v1/audio/transcriptions`, 25 MB per request, about $0.006 per minute), not on live streams, and it is deprecated with a shutdown date of February 26, 2027. Telling "Them" apart would mean holding call audio in memory, uploading it in chunks for a second paid transcription, and matching speakers across chunks, with labels arriving minutes late, on a model that is about to be retired. MeetingCard doesn't do that.
+
 ## Privacy
 
-Everything stays in memory. Nothing is written to disk, no transcripts or stats are kept, and logs contain no call content.
+Audio stays in memory in every mode and is never written to disk. With saving off (the default) nothing is written to disk at all: captions and transcript text stay in memory and are gone when the call ends. With saving on, the only write is that call's one transcript file in the folder you chose. No stats are kept, and logs contain no call content, transcript text or keys.
 
 ```mermaid
 flowchart LR
@@ -62,4 +75,6 @@ flowchart LR
     VAD -->|tone flags| Judge
     VAD -->|interrupt, talk-over,<br/>monologue, talk share| Glow["Screen-edge glow<br/>red or amber, 20 s cooldown"]
     Judge -->|confidence ≥ 0.7| Glow
+    STT -.->|opt-in| Captions["Caption strip<br/>You / Them, memory only"]
+    STT -.->|opt-in| File["Transcript file<br/>one .md per call"]
 ```

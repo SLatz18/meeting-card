@@ -29,9 +29,18 @@ judging stopped after `max_consecutive_errors`. `KeychainStore.sibling(account:)
 key beside the host's OpenAI key.
 
 The call trigger reads Core Audio "is running" flags only (the default input device plus a call
-app's output); it never reads window titles. `PrivacyGuardTests` checks this, along with no disk
-writes, no printing, the key only through `KeychainStore`, and public log arguments limited to
-counters and enums.
+app's output); it never reads window titles. `PrivacyGuardTests` checks this, along with no
+printing, the key only through `KeychainStore`, public log arguments limited to counters and
+enums, and disk writes: audio never, and text only through `TranscriptFile.swift` (the opt-in saved
+transcript, one file per call in the user's folder). Its runtime tests show that with saving off
+nothing reaches disk and with saving on the one transcript file is the only write.
+
+Captions and transcripts (opt-in, host-driven): the realtime sessions' partial and final text reach
+the host as `CaptionEvent`s (with a `CostReading` after each billed segment). `LiveTranscript` keeps
+a three-line `CaptionBuffer` in memory, labels the streams You and Them (`SpeakerLabels`, per-call
+tags), and hands finished lines to `TranscriptRecorder`, which writes nothing unless saving is on.
+When the GPT layer stops (cost cap or error) captions stop; local cues continue. `CaptionPanel`
+(ListenMoreMac) draws the strip from a host-supplied `CaptionStyle` and is left out of screen shares.
 
 A host can pass an optional `CallStateProvider` (to `CoachService`, `CoachSession` or `CoachMonitor`)
 reporting each call app's state as started, ended or muted. An ended call stops the session after
@@ -55,7 +64,8 @@ Every tunable number and word list is in one place: [`DefaultConfig.swift`](Sour
 They are generic defaults (for example cooldown 20 s, fade 3 s, GPT confidence 0.7, start after
 3 s, stop after 30 s, or 3 s after an ended call). Change them there, with a test, and nowhere else. No recordings, eval
 fixtures or example transcripts: tests generate their audio (`Synthetic.swift`) and use
-content-free text. Nothing is stored: no history, no summaries.
+content-free text. Nothing is stored unless the user turns on saved transcripts: no history, no
+summaries.
 
 ```sh
 swift test                      # Core tests (Linux or macOS); Mac tests too on macOS
