@@ -459,6 +459,7 @@ enum UISnapshots {
             w.update()
             return w
         }), ("settings-judge-stopped", {
+            defaults.set(JudgeProviderKind.typesafe.rawValue, forKey: CoachController.Keys.judgeProvider)
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
             coach.typeSafeKeyStored = true
             coach.previewJudgeStop = .http(401)
@@ -472,6 +473,10 @@ enum UISnapshots {
                 return done()
             }
             let (name, make) = shots[i]
+            // Each shot starts from the defaults (Use Zoom/Meet controls off, the GPT cue judge); a shot
+            // about either sets it itself, so no shot depends on the one before it.
+            defaults.set(false, forKey: CoachController.Keys.callControls)
+            defaults.set(JudgeProviderKind.gpt.rawValue, forKey: CoachController.Keys.judgeProvider)
             guard let w = make() else { return next(i + 1) }
             w.window.appearance = NSApp.effectiveAppearance
             w.window.center()
