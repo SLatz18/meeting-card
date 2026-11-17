@@ -30,8 +30,10 @@ final class LocalLayerTests: XCTestCase {
         let x = S.noise(3, dbfs: -25)
         let v = StreamVAD(config: config)
         var onsets = 0
-        for i in 0..<(x.count / 480) where v.process(tEnd: Double(i + 1) * 0.02, frame: x[(i * 480)..<((i + 1) * 480)]).onset != nil {
-            onsets += 1
+        for i in 0..<(x.count / 480) {
+            let frame = x[(i * 480)..<((i + 1) * 480)]
+            let tEnd = Double(i + 1) * 0.02
+            if v.process(tEnd: tEnd, frame: frame).onset != nil { onsets += 1 }
         }
         XCTAssertEqual(onsets, 0)
     }
@@ -39,7 +41,13 @@ final class LocalLayerTests: XCTestCase {
     func testVadRejectsQuietSpeech() {
         let x = S.speechish(2).map { $0 * 0.001 }
         let v = StreamVAD(config: config)
-        XCTAssertFalse((0..<(x.count / 480)).contains { v.process(tEnd: Double($0 + 1) * 0.02, frame: x[($0 * 480)..<(($0 + 1) * 480)]).raw })
+        var anyVoice = false
+        for i in 0..<(x.count / 480) {
+            let frame = x[(i * 480)..<((i + 1) * 480)]
+            let tEnd = Double(i + 1) * 0.02
+            if v.process(tEnd: tEnd, frame: frame).raw { anyVoice = true }
+        }
+        XCTAssertFalse(anyVoice)
     }
 
     func testInterruptFiresUnder500ms() {
