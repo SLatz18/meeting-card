@@ -6,7 +6,8 @@
 #       between the two renders and the card shows absolute times)
 #   scripts/snapshots.sh coach <out-dir>
 #       coach chip states (incl. the multi-link card, full and collapsed), glow, Settings, onboarding, status menu and the design packet
-#       (packet-<surface>-<appearance>.png) from this checkout's build
+#       (packet-<surface>-<appearance>.png, listed in packet-list.txt) from this checkout's build;
+#       fails if a Use Zoom/Meet controls packet is missing
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 # Start 10 min out: the "in 10 min" title is stable across a pair.
@@ -37,7 +38,7 @@ case "${1:-}" in
     ;;
   coach)
     OUT="$(mkdir -p "$2" && cd "$2" && pwd)"
-    for chip in on listening paused; do
+    for chip in on listening paused muted; do
       for a in light dark; do
         shot "$HERE" meet "$a" "$OUT/coach-chip-$chip-$a.png" MEETING_CARD_COACH_CHIP="$chip"
       done
@@ -58,6 +59,16 @@ case "${1:-}" in
       grep -hE "coach (shot|packet|menu)" "$LOG" >> "$OUT/coach-shots.log" 2>/dev/null || true
     done
     ls "$OUT"
+    # Use Zoom/Meet controls review: the card beside each surface it adds or changes (the Muted chip,
+    # Settings with the new group off and on, the Muted status menu), light and dark, or fail.
+    (cd "$OUT" && ls packet-*.png) > "$OUT/packet-list.txt" 2>/dev/null || true
+    missing=0
+    for s in chip-muted settings settings-call-controls menu-muted; do
+      for a in light dark; do
+        [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
+      done
+    done
+    [[ $missing == 0 ]]
     ;;
   *) echo "usage: $0 cards <base-swift> <head-swift> <out> | coach <out>" >&2; exit 2 ;;
 esac

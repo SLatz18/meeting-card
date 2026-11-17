@@ -3,7 +3,7 @@ import XCTest
 
 final class CoachMenuTests: XCTestCase {
     func testOffAlwaysOffersEnable() {
-        for indicator in [CoachIndicator.hidden, .on, .listening, .paused] {
+        for indicator in [CoachIndicator.hidden, .on, .listening, .paused, .muted] {
             XCTAssertEqual(CoachMenu.items(enabled: false, indicator: indicator, gptAvailable: false),
                            [.status(.off), .enable, .separator, .settings])
         }
@@ -15,6 +15,7 @@ final class CoachMenuTests: XCTestCase {
         XCTAssertEqual(items(.on), [.status(.on), .skipThisCall, .turnOff, .separator, .settings])
         XCTAssertEqual(items(.listening), [.status(.listening), .pause, .turnOff, .separator, .settings])
         XCTAssertEqual(items(.paused), [.status(.paused), .resume, .turnOff, .separator, .settings])
+        XCTAssertEqual(items(.muted), [.status(.muted), .pause, .turnOff, .separator, .settings])
     }
 
     func testLocalOnlyShowsGptOffUnderTheStatus() {

@@ -247,6 +247,10 @@ public enum Theme {
         public static func pauseButtonFill(style: CardStyle) -> RGBA { style.controlFill(.normal) }
         /// Live tint = the card's accent (Next up blue).
         public static func live(style: CardStyle) -> RGBA { style.accent }
+        /// Chip text and control tint: primary while on or listening, secondary while held (paused
+        /// by the user, or muted in the call app).
+        public static let text = CardStyle.Text.primary
+        public static let heldText = CardStyle.Text.secondary
 
         /// Fixed collapse rule. The full chip (glyph, label, Pause) shows only if it keeps at least
         /// `clearance` to Ignore and to the primary button (Join / Open in Calendar); otherwise it is
@@ -308,5 +312,23 @@ public enum Theme {
             (min(max(origin.x, visible.x), visible.x + max(0, visible.w - size.w)),
              min(max(origin.y, visible.y), visible.y + max(0, visible.h - size.h)))
         }
+
+        /// Helper lines under a row (the card's Next up line role).
+        public static let helperText = CardStyle.Text.secondary
+    }
+
+    /// "Use Zoom/Meet controls": a card-shaped Settings group like the others (toggle row, help,
+    /// permission explainer, Request access), and the Muted state of the chip and status menu.
+    public enum CallControls {
+        public static let rowFont = Settings.rowFont
+        public static let helperFont = Settings.helperFont
+        public static let helperText = Settings.helperText
+        /// What is still missing (Accessibility, Automation, an unsupported Dia): informational, so the
+        /// helper role, not `critical`.
+        public static let explainerFont = Settings.helperFont
+        public static let explainerText = Settings.helperText
+        /// Muted reads like Paused: the held text role, the coach glyph on its status line.
+        public static let mutedText = Coach.heldText
+        public static let mutedSymbol = Coach.symbol
     }
 }

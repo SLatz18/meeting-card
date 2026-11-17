@@ -17,6 +17,21 @@ enum CoachCopy {
     static let coachOn = "Coach on"
     static let coachPaused = "Coach paused"
     static let coachListening = "Coach on, listening"
+    static let coachMuted = "Coach paused while you're muted"
+    static let chipMuted = "Muted"
+    static let callControlsToggle = "Use Zoom/Meet controls"
+    static let callControlsHelp = "Stops the coach a few seconds after you leave a Zoom call or close a Meet tab, and pauses it while you're muted in Zoom. Reads only Zoom's meeting controls and whether a Meet tab is open: never titles, names, chat or other tabs. With Accessibility it can also press Zoom's own Mute button when you ask. Off by default."
+    static let requestAccess = "Request access"
+    static let callControlsDiaUnsupported = "This version of Dia can't share its tabs, so for Dia the coach goes by audio activity."
+
+    /// The permission explainer under the toggle, naming only what is still missing.
+    static func callControlsNeeds(accessibility: Bool, automation: [String]) -> String? {
+        var parts: [String] = []
+        if accessibility { parts.append("Accessibility (for Zoom)") }
+        if !automation.isEmpty { parts.append("Automation (for \(automation.joined(separator: " and ")))") }
+        guard !parts.isEmpty else { return nil }
+        return "Allow MeetingCard under \(parts.joined(separator: " and ")) in System Settings > Privacy & Security. Until then the coach goes by audio activity."
+    }
     static let menuOff = "Call coach: off"
     static let menuWaiting = "Coach on, waiting for a call"
     static let menuEnable = "Turn On Call Coach"

@@ -5,12 +5,13 @@ import MeetingCardCore
 
 /// Fixture-run seams for the CI screenshots of the call coach UI (never active on a live run, and
 /// they render UI only: no audio, no service, no network).
-///   MEETING_CARD_COACH_CHIP=on|listening|paused  put that chip on the fixture card
+///   MEETING_CARD_COACH_CHIP=on|listening|paused|muted  put that chip on the fixture card
 ///   MEETING_CARD_COACH_CHIP_LABEL=<text>         a longer chip label (shows the icon-only collapse)
 ///   MEETING_CARD_COACH_SHOTS=<dir>               write glow, Settings, onboarding and menu PNGs,
 ///                                                 plus the design packet, then quit
 /// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
-/// surface (chip, glow, Settings, onboarding, status menu) for a side-by-side design review.
+/// surface (chip, the Muted chip, glow, Settings, Settings with Use Zoom/Meet controls on, onboarding,
+/// status menu off / listening / muted) for a side-by-side design review.
 enum UISnapshots {
     static func demoChip(_ env: [String: String]) -> CoachChip? {
         let label = env["MEETING_CARD_COACH_CHIP_LABEL"]
@@ -18,6 +19,7 @@ enum UISnapshots {
         case "on": return CoachChip(mode: .on, labelOverride: label)
         case "listening": return CoachChip(mode: .listening, labelOverride: label)
         case "paused": return CoachChip(mode: .paused, labelOverride: label)
+        case "muted": return CoachChip(mode: .muted, labelOverride: label)
         default: return nil
         }
     }
@@ -60,15 +62,30 @@ enum UISnapshots {
             controller.log("coach packet \(name)-\(tag) ok=\(ok)")
         }
         if withChip != nil { packet("chip", withChip) }
-        for (name, color) in [("rose", CueColor.red), ("amber", CueColor.amber)] {
-            let img = glowImage(color, card: card)
-            let ok = img.map { Card.writePNG($0, "\(dir)/glow-\(name)-\(tag).png") } ?? false
-            controller.log("coach shot glow-\(name)-\(tag) ok=\(ok)")
-            packet("glow-\(name)", img)
-        }
-        settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
-            menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
-            NSApp.terminate(nil)
+        // The Muted chip, each step after a redraw like the plain card.
+        let chip = card.coach
+        card.setCoach(CoachChip(mode: .muted))
+        controller.schedule(0.5, repeats: false) { [weak card] in
+            MainActor.assumeIsolated {
+                guard let card else { return }
+                packet("chip-muted", card.snapshotImage())
+                card.setCoach(chip)
+                controller.schedule(0.5, repeats: false) { [weak card] in
+                    MainActor.assumeIsolated {
+                        guard let card else { return }
+                        for (name, color) in [("rose", CueColor.red), ("amber", CueColor.amber)] {
+                            let img = glowImage(color, card: card)
+                            let ok = img.map { Card.writePNG($0, "\(dir)/glow-\(name)-\(tag).png") } ?? false
+                            controller.log("coach shot glow-\(name)-\(tag) ok=\(ok)")
+                            packet("glow-\(name)", img)
+                        }
+                        settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
+                            menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
+                            NSApp.terminate(nil)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -142,6 +159,7 @@ enum UISnapshots {
         let states: [(String, [CoachMenuItem])] = [
             ("menu-off", CoachMenu.items(enabled: false, indicator: .hidden, gptAvailable: false)),
             ("menu-listening", CoachMenu.items(enabled: true, indicator: .listening, gptAvailable: false)),
+            ("menu-muted", CoachMenu.items(enabled: true, indicator: .muted, gptAvailable: false)),
         ]
         NSApp.activate()
         for (name, items) in states {
@@ -249,7 +267,9 @@ enum UISnapshots {
         return ctx.makeImage()
     }
 
-    /// Settings (toggle off, the default) and the three onboarding screens, from scratch defaults.
+    /// Settings (toggles off, the default), Settings local-only, Settings with "Use Zoom/Meet controls"
+    /// on (its permission explainer: CI grants nothing) and the three onboarding screens, from
+    /// scratch defaults.
     /// Each window is shown briefly so AppKit draws it, captured, then closed.
     @MainActor
     static func settingsShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
@@ -282,6 +302,13 @@ enum UISnapshots {
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
+        }), ("settings-call-controls", {
+            defaults.set(false, forKey: CoachController.Keys.enabled)
+            defaults.set(true, forKey: CoachController.Keys.callControls)
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            let w = CoachSettingsWindow(coach: coach)
+            w.update()
+            return w
         })]
         func next(_ i: Int) {
             guard i < shots.count else {
@@ -294,6 +321,7 @@ enum UISnapshots {
             w.window.center()
             w.update()
             w.window.orderFrontRegardless()
+            w.update()
             controller.schedule(0.5, repeats: false) {
                 MainActor.assumeIsolated {
                     let img = settingsImage(w)

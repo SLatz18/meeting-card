@@ -5,7 +5,7 @@ import MeetingCardCore
 /// The coach chip on the live card's button row. Shown only while the coach is pre-warmed or
 /// running; the card without a chip is the unchanged reminder card.
 struct CoachChip: Equatable {
-    enum Mode: Equatable { case on, listening, paused }
+    enum Mode: Equatable { case on, listening, paused, muted }
     var mode: Mode
     /// Fixture runs only: a longer label, to show the collapse rule (`Theme.Coach.layout`).
     var labelOverride: String?
@@ -18,6 +18,7 @@ struct CoachChip: Equatable {
         case .on: mode = .on
         case .listening: mode = .listening
         case .paused: mode = .paused
+        case .muted: mode = .muted
         }
     }
 
@@ -27,6 +28,7 @@ struct CoachChip: Equatable {
         case .on: "On"
         case .listening: "Listening"
         case .paused: "Paused"
+        case .muted: CoachCopy.chipMuted
         }
     }
 
@@ -35,6 +37,7 @@ struct CoachChip: Equatable {
         case .on: CoachCopy.coachOn
         case .listening: CoachCopy.coachListening
         case .paused: CoachCopy.coachPaused
+        case .muted: CoachCopy.coachMuted
         }
     }
 
@@ -44,6 +47,9 @@ struct CoachChip: Equatable {
     var controlLabel: String { mode == .paused ? "Resume" : "Pause" }
 
     var live: Bool { mode == .listening }
+
+    /// Not capturing (the user's pause, or muted in the call app): drawn like the paused chip.
+    var held: Bool { mode == .paused || mode == .muted }
 }
 
 /// The chip's inner Start/Pause/Resume control (first click works on the non-activating card).
@@ -87,7 +93,7 @@ final class CoachChipView: NSView {
         self.showsLabel = showsLabel
         super.init(frame: frame)
         let c = Theme.Coach.self
-        let paused = chip.mode == .paused
+        let paused = chip.held
         let weight = Theme.weight(c.glyphFont)
         wantsLayer = true
         layer?.cornerRadius = Theme.cg(c.radius)
@@ -100,7 +106,7 @@ final class CoachChipView: NSView {
         setAccessibilityLabel(showsLabel ? chip.accessibilityLabel : "\(chip.accessibilityLabel): \(chip.label)")
         if !showsLabel { toolTip = chip.label }
 
-        let fg = Theme.text(paused ? .secondary : .primary, style)
+        let fg = Theme.text(paused ? c.heldText : c.text, style)
         var x = c.paddingLeading
         let midY = frame.height / 2
         let glyph = NSImageView(image: Self.symbol(c.symbol, size: c.glyphSize, weight: weight, label: chip.accessibilityLabel) ?? NSImage())

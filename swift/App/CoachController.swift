@@ -5,8 +5,11 @@ import MeetingCardCore
 
 /// The call coach inside MeetingCard. Off by default: until the user turns it on (Settings or the
 /// coach status menu) there is no service, no Core Audio polling, no capture and no network. It
-/// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores four
+/// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores five
 /// settings in UserDefaults (never call data); the API key lives only in the Keychain.
+/// "Use Zoom/Meet controls" (off by default) lets Zoom's meeting controls and an open Meet tab stop
+/// the coach within seconds of a call ending and hold it while Zoom is muted; its Accessibility and
+/// Automation prompts appear only when the user turns it on (or asks again from Settings).
 @MainActor
 final class CoachController: NSObject {
     enum Keys {
@@ -14,6 +17,7 @@ final class CoachController: NSObject {
         static let anyApp = "coach.anyApp"
         static let allowlist = "coach.allowlist"
         static let onboarded = "coach.onboarded"
+        static let callControls = "coach.callControls"
     }
 
     /// MeetingCard's Keychain item for the OpenAI key, `<bundle id>.openai` (the Kit's default service is not ours).
@@ -24,6 +28,29 @@ final class CoachController: NSObject {
     let keychain: KeychainStore
     /// What the service reads the key through: nil while the stored key is known to be rejected.
     let keyGate: CoachKeyGate
+    /// App-level call state for the service; reads nothing while the setting is off.
+    let callControls: CallControlsProvider
+    /// The coach's Mute control for a host surface to show (Zoom only: one press on Zoom's own
+    /// Mute/Unmute item; Meet: unavailable, mute from Meet). No surface hosts it yet.
+    private(set) lazy var callControlsModel = CallControlsModel(provider: callControls, sessionAppKey: { [weak self] in
+        MainActor.assumeIsolated { self?.service?.session.session?.appKey }
+    })
+
+    /// What a host shows for Mute: enabled with "Mute your mic" / "Unmute your mic", disabled with
+    /// the approved reason text, or hidden with no Zoom call (CoachMuteCopy).
+    var muteControl: MuteControlPresentation {
+        let m = callControlsModel
+        return CoachMuteCopy.presentation(reason: m.muteUnavailableReason.map(Self.muteDisabledReason), isMuted: m.isMuted)
+    }
+
+    static func muteDisabledReason(_ r: MuteUnavailableReason) -> MuteDisabledReason {
+        switch r {
+        case .toggleOff: .toggleOff
+        case .permissionDenied: .permissionDenied
+        case .noZoomCall: .noZoomCall
+        case .meet: .meet
+        }
+    }
     /// Cards on screen, newest last (the chip goes on each).
     var visibleCards: () -> [Card] = { [] }
     /// The coach status menu: always there, so the coach can be enabled from it while off.
@@ -42,7 +69,9 @@ final class CoachController: NSObject {
         keyGate = CoachKeyGate(keychain)
         self.showsStatusItem = showsStatusItem
         config = try ListenMoreConfig.builtIn()
+        callControls = .live(config: config)
         super.init()
+        callControls.isEnabled = callControlsOn
         keyStored = keychain.hasKey
         if enabled {
             makeService()
@@ -54,6 +83,7 @@ final class CoachController: NSObject {
     var enabled: Bool { defaults.bool(forKey: Keys.enabled) }
     var anyApp: Bool { defaults.bool(forKey: Keys.anyApp) }
     var onboarded: Bool { defaults.bool(forKey: Keys.onboarded) }
+    var callControlsOn: Bool { defaults.bool(forKey: Keys.callControls) }
     var hasKey: Bool { keychain.hasKey }
     /// GPT cues can run: a key is stored and OpenAI hasn't rejected it.
     var gptAvailable: Bool { keyStored && !keyGate.rejected }
@@ -115,11 +145,56 @@ final class CoachController: NSObject {
 
     func markOnboarded() { defaults.set(true, forKey: Keys.onboarded) }
 
+    /// "Use Zoom/Meet controls". Turning it on asks for the permissions it uses, in context; denied
+    /// or later revoked, each app silently goes back to Core Audio.
+    func setCallControls(_ on: Bool) {
+        defaults.set(on, forKey: Keys.callControls)
+        callControls.isEnabled = on
+        if on { requestCallControlsAccess() }
+        refresh()
+    }
+
+    /// Accessibility for Zoom, Automation for whichever of Chrome and Dia is running. Only from the
+    /// Settings toggle and its Request access button.
+    func requestCallControlsAccess() {
+        CallControlsPermissions.requestAccessibility()
+        CallControlsPermissions.requestAutomation { [weak self] in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+    }
+
+    /// What "Use Zoom/Meet controls" still needs, for the Settings explainer (checks only, never asks).
+    struct CallControlsNeeds: Equatable {
+        var accessibility = false
+        var automation: [String] = []
+        var diaUnsupported = false
+    }
+
+    /// Browsers seen granted this run (macOS can only tell while the browser is running).
+    private var automationGranted: Set<String> = []
+
+    func callControlsNeeds() -> CallControlsNeeds {
+        guard callControlsOn else { return CallControlsNeeds() }
+        var n = CallControlsNeeds()
+        n.accessibility = !CallControlsPermissions.accessibilityTrusted
+        for (id, name) in [("com.google.Chrome", "Chrome"), ("company.thebrowser.dia", "Dia")]
+        where NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) != nil {
+            switch CallControlsPermissions.automation(bundleId: id, ask: false) {
+            case .granted: automationGranted.insert(id)
+            case .denied, .notAsked: automationGranted.remove(id)
+            case .notRunning: break
+            }
+            if !automationGranted.contains(id) { n.automation.append(name) }
+        }
+        n.diaUnsupported = callControls.issues["company.thebrowser.dia"] == .unsupported
+        return n
+    }
+
     // MARK: service
 
     private func makeService() {
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
-                             allowlist: allowlist, keys: keyGate)
+                             allowlist: allowlist, keys: keyGate, callState: callControls)
         s.fallbackScreen = { [weak self] in self?.cardScreen() }
         s.hostWindowNumber = { [weak self] in self?.visibleCards().last?.panel.windowNumber }
         s.onChange = { [weak self] in self?.refresh() }
@@ -213,7 +288,7 @@ final class CoachController: NSObject {
             let image = Theme.symbol(Theme.Coach.symbol, Theme.Coach.statusSymbolFont, label: label)
             image?.isTemplate = true
             button.image = image
-            button.appearsDisabled = !enabled || indicator == .paused
+            button.appearsDisabled = !enabled || indicator == .paused || indicator == .muted
             button.toolTip = label
             button.setAccessibilityLabel(label)
         }
@@ -235,6 +310,7 @@ final class CoachController: NSObject {
         case .on: return CoachCopy.coachOn
         case .listening: return CoachCopy.coachListening
         case .paused: return CoachCopy.coachPaused
+        case .muted: return CoachCopy.coachMuted
         }
     }
 
@@ -264,6 +340,7 @@ final class CoachController: NSObject {
             case .on: m = note(CoachCopy.coachOn, Theme.Coach.symbol)
             case .listening: m = note(CoachCopy.coachListening, Theme.Coach.symbol)
             case .paused: m = note(CoachCopy.coachPaused, Theme.Coach.symbol)
+            case .muted: m = note(CoachCopy.coachMuted, Theme.CallControls.mutedSymbol)
             }
             return m
         case .gptOff:

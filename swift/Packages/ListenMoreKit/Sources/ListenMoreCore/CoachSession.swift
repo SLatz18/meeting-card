@@ -170,12 +170,13 @@ public final class CoachSession {
         changed()
     }
 
-    /// One control for the indicator: skip while pre-warmed, Pause while listening, Resume while paused.
+    /// One control for the indicator: skip while pre-warmed, Pause while listening or muted, Resume
+    /// while paused (still held if the call app is muted).
     public func toggleFromIndicator() {
         switch indicator {
         case .hidden: break
         case .on: skipThisCall()
-        case .listening: setPaused(true)
+        case .listening, .muted: setPaused(true)
         case .paused: setPaused(false)
         }
     }
@@ -251,9 +252,9 @@ public final class CoachSession {
     }
 
     /// What to capture: the session's app, or every configured call app for a manual start with no
-    /// call yet. Nothing while paused or without a session.
+    /// call yet. Nothing while paused, muted in the call app, or without a session.
     func wantedBundleIds() -> [String] {
-        guard let s = trigger.session, !s.paused else { return [] }
+        guard let s = trigger.session, !s.held else { return [] }
         return s.appKey.map { [$0] } ?? config.captureTargets.map(\.bundleId)
     }
 
