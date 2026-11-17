@@ -214,6 +214,8 @@ final class LiveTranscriptTests: XCTestCase {
         let text = store.files.values.first ?? ""
         XCTAssertTrue(text.contains("**[00:00:03] You:** kept"))
         XCTAssertFalse(text.contains("dropped"))
+        live.callEnded()
+        XCTAssertEqual(live.captionState, .waiting, "the stop lasts one call")
         live.callStarted()
         XCTAssertEqual(live.captionState, .live, "the next call starts fresh")
     }

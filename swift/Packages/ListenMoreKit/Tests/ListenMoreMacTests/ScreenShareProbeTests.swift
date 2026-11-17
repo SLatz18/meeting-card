@@ -6,7 +6,8 @@ import ListenMoreCore
 
 /// Screen-share probe (opt-in: LISTEN_MORE_SCK_PROBE=1, needs a GUI session and Screen Recording
 /// permission). Puts on screen: the glow panel (sharingType .none), a stand-in for the coach chip's
-/// panel (the card panel's window settings, sharingType .none), and a normal control window. Then
+/// panel (the card panel's window settings, sharingType .none), the real caption panel (sharingType
+/// .none) and a normal control window. Then
 /// it captures the display with ScreenCaptureKit and checks whether our windows are in
 /// SCShareableContent's window list and in the captured pixels. The control window must show up,
 /// or the result is inconclusive. Prints one `SCK_PROBE_RESULT {json}` line and, if
@@ -17,6 +18,7 @@ final class ScreenShareProbeTests: XCTestCase {
     static let glowRGB = (r: 0.0, g: 1.0, b: 0.0)
     static let chipRGB = (r: 1.0, g: 0.0, b: 1.0)
     static let controlRGB = (r: 0.0, g: 0.0, b: 1.0)
+    static let captionRGB = (r: 1.0, g: 1.0, b: 0.0)
 
     final class SolidView: NSView {
         let color: NSColor
@@ -58,6 +60,9 @@ final class ScreenShareProbeTests: XCTestCase {
         var chipInPixels: Bool?
         var glowInPixelsWithExplicitExclusion: Bool?
         var chipInPixelsWithExplicitExclusion: Bool?
+        var captionInList: Bool?
+        var captionInPixels: Bool?
+        var captionInPixelsWithExplicitExclusion: Bool?
         var note: String
     }
 
@@ -89,12 +94,24 @@ final class ScreenShareProbeTests: XCTestCase {
         let chip = solidPanel(chipFrame, Self.chipRGB, hidden: true)
         let controlFrame = NSRect(x: sf.midX - 150, y: sf.midY - 100, width: 300, height: 200)
         let control = solidPanel(controlFrame, Self.controlRGB, hidden: false)
+        // The real caption panel (CaptionPanel sets sharingType .none itself), in a flat probe color.
+        var captionStyle = testCaptionStyle
+        let probeYellow = NSColor(srgbRed: Self.captionRGB.r, green: Self.captionRGB.g, blue: Self.captionRGB.b, alpha: 1)
+        captionStyle.surface = probeYellow
+        captionStyle.textColor = probeYellow
+        captionStyle.speakerColor = probeYellow
+        captionStyle.ownSpeakerColor = probeYellow
+        captionStyle.width = 600
+        let captions = CaptionPanelController(style: captionStyle, visibleFrames: { [(sf, screen.visibleFrame)] })
+        captions.screen = { sf }
+        captions.show(CaptionContent(lines: (1...3).map { .init(speaker: "Them", text: "probe line \($0)", own: false) }))
         chip.orderFrontRegardless()
         control.orderFrontRegardless()
         defer {
             glow.hideAll()
             chip.orderOut(nil)
             control.orderOut(nil)
+            captions.hide()
         }
         try await Task.sleep(nanoseconds: 1_500_000_000)
 
@@ -112,6 +129,8 @@ final class ScreenShareProbeTests: XCTestCase {
         result.glowInList = glowIDs.contains { ids.contains($0) }
         result.chipInList = ids.contains(CGWindowID(chip.windowNumber))
         result.controlInList = ids.contains(CGWindowID(control.windowNumber))
+        let captionID = CGWindowID(captions.panel.windowNumber)
+        result.captionInList = ids.contains(captionID)
 
         guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) ?? content.displays.first else {
             result.note = "no SCDisplay"
@@ -119,7 +138,9 @@ final class ScreenShareProbeTests: XCTestCase {
             throw XCTSkip(result.note)
         }
         let plain = try await capture(SCContentFilter(display: display, excludingWindows: []), display: display)
-        let ours = content.windows.filter { glowIDs.contains($0.windowID) || $0.windowID == CGWindowID(chip.windowNumber) }
+        let ours = content.windows.filter {
+            glowIDs.contains($0.windowID) || $0.windowID == CGWindowID(chip.windowNumber) || $0.windowID == captionID
+        }
         let excluded = try await capture(SCContentFilter(display: display, excludingWindows: ours), display: display)
 
         // Each window has its own pure color, so presence is a whole-image pixel count. The capture's
@@ -132,9 +153,11 @@ final class ScreenShareProbeTests: XCTestCase {
         result.chipInPixels = present(plain, Self.chipRGB)
         result.glowInPixelsWithExplicitExclusion = present(excluded, Self.glowRGB)
         result.chipInPixelsWithExplicitExclusion = present(excluded, Self.chipRGB)
+        result.captionInPixels = present(plain, Self.captionRGB)
+        result.captionInPixelsWithExplicitExclusion = present(excluded, Self.captionRGB)
         if result.controlInPixels != true {
             result.note = "inconclusive: the control window is not in the capture"
-        } else if result.glowInPixels == true || result.chipInPixels == true {
+        } else if result.glowInPixels == true || result.chipInPixels == true || result.captionInPixels == true {
             result.note = "sharingType .none NOT honored by ScreenCaptureKit on this OS"
         } else {
             result.note = "sharingType .none honored: our windows are absent from the capture"

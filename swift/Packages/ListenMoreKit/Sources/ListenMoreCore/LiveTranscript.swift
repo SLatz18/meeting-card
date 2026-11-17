@@ -73,6 +73,7 @@ public final class LiveTranscript {
     /// Drops the captions and the speaker tags, and finishes the transcript file.
     public func callEnded() {
         callStart = nil
+        gptStop = nil
         captions.clear()
         labels.reset()
         recorder.end()

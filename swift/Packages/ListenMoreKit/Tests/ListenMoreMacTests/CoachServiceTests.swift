@@ -93,6 +93,22 @@ final class CoachServiceTests: XCTestCase {
         XCTAssertEqual(mic.starts, 0)
     }
 
+    func testCallStartAndEndReachTheHostOncePerSession() {
+        let s = service(enabled: true)
+        var events: [String] = []
+        s.onCallStart = { events.append("start") }
+        s.onCallEnd = { events.append("end") }
+        s.start()
+        s.pause()
+        s.resume()
+        XCTAssertEqual(events, ["start"], "pause and resume stay in the same call")
+        s.stop()
+        XCTAssertEqual(events, ["start", "end"])
+        s.start()
+        s.setEnabled(false)
+        XCTAssertEqual(events, ["start", "end", "start", "end"])
+    }
+
     func testDisablingStopsCapture() {
         let s = service(enabled: true)
         s.start()
