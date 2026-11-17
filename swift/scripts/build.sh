@@ -8,7 +8,8 @@
 #     Settings), so its UserDefaults domain, Keychain item (com.slatz.meetingcard.swift.test.openai),
 #     privacy grants, log and Application Support dir (MeetingCardSwift-Test) are its own. Release
 #     build in build/dd-test; installs to ~/Applications/MeetingCardSwift-Test.app, which is never
-#     registered as a login item.
+#     registered as a login item. It alone compiles the coach's audio debug readout
+#     (MEETINGCARD_TEST_ID; App/CoachDebugReadout.swift).
 #     Mac hand checks use it (docs/MAC_DEMO_CHECKS.md).
 # Tests include the ListenMoreKit package (swift test); SKIP_KIT_TESTS=1 skips them.
 # Never launches the app.
@@ -38,7 +39,8 @@ RELEASE_DD="$DD"; IDENTITY=()
 if (( TEST_ID )); then
   DEST="$HOME/Applications/MeetingCardSwift-Test.app"
   RELEASE_DD="build/dd-test"
-  IDENTITY=(MEETINGCARD_APP_ID=com.slatz.meetingcard.swift.test "MEETINGCARD_APP_NAME=MeetingCard (Test)")
+  IDENTITY=(MEETINGCARD_APP_ID=com.slatz.meetingcard.swift.test "MEETINGCARD_APP_NAME=MeetingCard (Test)"
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) MEETINGCARD_TEST_ID')
 fi
 XCODEGEN="${XCODEGEN:-$(command -v xcodegen || echo "$HOME/.local/bin/xcodegen")}"
 [[ -x "$XCODEGEN" ]] || { echo "xcodegen not found: brew install xcodegen (or set XCODEGEN)" >&2; exit 1; }

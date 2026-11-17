@@ -54,6 +54,19 @@ jobs:
           test "$(plutil -extract CFBundleDisplayName raw "$app/Contents/Info.plist")" = "MeetingCard (Test)"
           test "$(plutil -extract CFBundleName raw "$app/Contents/Info.plist")" = "MeetingCard (Test)"
           codesign -d --verbose=2 "$app" 2>&1 | grep -x "Identifier=com.slatz.meetingcard.swift.test"
+      # The coach's audio debug readout (App/CoachDebugReadout.swift) is compiled into the test build only.
+      - name: Debug readout only in the test build
+        working-directory: swift
+        run: |
+          shipping=build/dd/Build/Products/Release/MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift
+          testbuild=build/dd-test/Build/Products/Release/MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift
+          for marker in "MeetingCard audio debug readout" "CoachDebugReadout"; do
+            in_shipping=$(strings -a "$shipping" | grep -c "$marker" || true)
+            in_test=$(strings -a "$testbuild" | grep -c "$marker" || true)
+            echo "$marker: shipping $in_shipping, test build $in_test"
+            test "$in_shipping" -eq 0
+            test "$in_test" -gt 0
+          done
       - name: Kit test summary
         working-directory: swift
         run: grep -E "Executed [0-9]+ tests" build/kit-test.log | tail -1
