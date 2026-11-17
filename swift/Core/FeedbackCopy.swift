@@ -10,7 +10,8 @@ public enum FeedbackCopy {
     public static let settingsHelp = "Opens a new issue on GitHub in your browser."
     public static let settingsButton = "Send Feedback\u{2026}"
 
-    public static let notice = "Issues on this GitHub repo are public."
+    /// One line in the alert: at its fixed width that's about 25 characters.
+    public static let notice = "GitHub issues are public."
     public static let noticeContinue = "Continue"
     public static let noticeCancel = "Cancel"
     public static let dontShowAgain = "Don't show again"
