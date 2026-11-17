@@ -218,9 +218,10 @@ final class Controller: NSObject, NSApplicationDelegate {
     func makeCard(_ ev: Event, _ slot: CardSlot, _ now: Date) -> Card {
         let l = logger
         let env = ProcessInfo.processInfo.environment
+        let chip = MainActor.assumeIsolated { coach?.chip } ?? demoChip
         let c = Card(ev: ev, rk: Rechecker(now: ProcessInfo.processInfo.systemUptime, log: { l.log($0) }), now: now,
                      target: self, ignoreAction: #selector(ignoreClicked(_:)), joinAction: #selector(joinClicked(_:)),
-                     coachAction: #selector(coachClicked(_:)), coach: coach?.chip ?? demoChip,
+                     coachAction: #selector(coachClicked(_:)), coach: chip,
                      fixtureRun: args.fixture != nil, log: { l.log($0) })
         c.show(slot)
         // Test seam: flip the app appearance after show to exercise the live refresh path.
@@ -258,7 +259,7 @@ final class Controller: NSObject, NSApplicationDelegate {
                 } catch { self.log("ERROR border swap \(swap): \(type(of: error))") }
             }
         }
-        if args.fixture != nil { UISnapshots.schedule(env, card: c, controller: self) }
+        if args.fixture != nil { MainActor.assumeIsolated { UISnapshots.schedule(env, card: c, controller: self) } }
         if let snap = args.snapshot {
             schedule(0.8, repeats: false) { [unowned self] in
                 guard let last = self.coord.cards.last else { return }
@@ -280,11 +281,12 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc func coachClicked(_ sender: Any?) { coach?.chipClicked(sender) }
+    @objc func coachClicked(_ sender: Any?) { MainActor.assumeIsolated { coach?.chipClicked(sender) } }
 
     @objc func joinClicked(_ sender: Any?) {
         guard let c = card(for: sender), let url = coord.join(c) else { return }
-        coach?.joinHint(endsAt: Timing.times(c.ev)?.end)
+        let end = Timing.times(c.ev)?.end
+        MainActor.assumeIsolated { coach?.joinHint(endsAt: end) }
         if dryJoin {
             log("DRY_JOIN would open \(url)")
         } else if let u = URL(string: url) {
