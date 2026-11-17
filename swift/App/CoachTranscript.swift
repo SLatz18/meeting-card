@@ -1,13 +1,13 @@
 import AppKit
 import ListenMoreCore
-import ListenMoreMac
 import MeetingCardCore
 
 /// Live captions and saved transcripts (both off by default; both need a key OpenAI accepts, since
 /// they read the GPT cues' transcription). Takes the coach service's call and caption events into
-/// `LiveTranscript`, shows the caption strip and the saving indicator on the call's display, and
-/// stores four settings in UserDefaults (never call data). Caption text lives in memory; with saving
-/// on, the Kit's `FileTranscriptStore` writes the call's one Markdown file in the chosen folder.
+/// `LiveTranscript` and publishes what the card shows in `feed` (a `CaptionFeedModel` for
+/// `CaptionFeedView`; no window of its own), and stores four settings in UserDefaults (never call
+/// data). Caption text lives in memory; with saving on, the Kit's `FileTranscriptStore` writes the
+/// call's one Markdown file in the chosen folder.
 @MainActor
 final class CoachTranscript {
     enum Keys {
@@ -19,11 +19,10 @@ final class CoachTranscript {
 
     let defaults: UserDefaults
     let live: LiveTranscript
-    /// The call's display (CoachService.callScreen, via CallDisplayLocator).
-    var screen: () -> NSRect? = { nil }
+    /// What the card's caption feed shows; the coach card hosts `CaptionFeedView(model: feed)`.
+    let feed = CaptionFeedModel()
     /// The per-call cost meter's latest reading (nil until the first billed segment).
     private(set) var meter: CostReading?
-    private var panel: CaptionPanelController?
 
     init(defaults: UserDefaults, store: TranscriptStore = FileTranscriptStore()) {
         self.defaults = defaults
@@ -111,38 +110,32 @@ final class CoachTranscript {
 
     var canDelete: Bool { live.recorder.lastURL != nil }
 
-    // MARK: strip
+    // MARK: feed
 
-    var content: CaptionContent { Self.content(live) }
-
-    static func content(_ live: LiveTranscript) -> CaptionContent {
-        var c = CaptionContent()
+    /// The feed's lines, note and saving label for the current state.
+    static func update(_ feed: CaptionFeedModel, from live: LiveTranscript) {
+        var lines: [CaptionFeedModel.Line] = []
+        var note: String?
         switch live.captionState {
-        case .live: c.lines = CaptionContent.rows(live.captions.lines, labels: live.labels)
+        case .live:
+            lines = live.captions.lines.compactMap { c in
+                let text = c.text
+                return text.isEmpty ? nil : .init(speaker: live.labels.label(c.speaker), text: text, own: c.speaker == .me)
+            }
         case .stopped(let reason):
             switch reason {
-            case .budgetCap: c.note = CoachCopy.captionsStopped
-            case .error: c.note = CoachCopy.captionsStoppedError
+            case .budgetCap: note = CoachCopy.captionsStopped
+            case .error: note = CoachCopy.captionsStoppedError
             }
         case .off, .unavailable, .waiting: break
         }
-        if live.recorder.isSaving { c.saving = CoachCopy.savingNow }
-        return c
+        let saving = live.recorder.isSaving ? CoachCopy.savingNow : nil
+        if feed.lines != lines { feed.lines = lines }
+        if feed.note != note { feed.note = note }
+        if feed.savingLabel != saving { feed.savingLabel = saving }
     }
 
-    func render() {
-        let c = content
-        guard !c.isEmpty else {
-            panel?.hide()
-            return
-        }
-        let p = panel ?? CaptionPanelController(style: Self.captionStyle())
-        panel = p
-        p.screen = screen
-        p.show(c)
-    }
-
-    var stripVisible: Bool { panel?.isVisible ?? false }
+    func render() { Self.update(feed, from: live) }
 
     // MARK: style
 
@@ -161,23 +154,6 @@ final class CoachTranscript {
     }
 
     nonisolated static func isDark(_ a: NSAppearance) -> Bool { a.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
-
-    /// The Kit's caption style from MeetingCard's card tokens (Theme.Captions).
-    static func captionStyle() -> CaptionStyle {
-        let c = Theme.Captions.self
-        return CaptionStyle(
-            width: Theme.cg(c.width), radius: Theme.cg(c.radius), padding: NSSize(width: c.padding.h, height: c.padding.v),
-            lineGap: Theme.cg(c.lineGap), speakerGap: Theme.cg(c.speakerGap),
-            surface: color(c.surface(style:)), textColor: color(c.text), speakerColor: color(c.speaker),
-            ownSpeakerColor: color(c.ownSpeaker), noteColor: color(c.note),
-            textFont: Theme.font(c.textFont), speakerFont: Theme.font(c.speakerFont), noteFont: Theme.font(c.noteFont),
-            indicatorHeight: Theme.cg(c.indicatorHeight), indicatorRadius: Theme.cg(c.indicatorRadius),
-            indicatorPadding: Theme.cg(c.indicatorPadding), indicatorGap: Theme.cg(c.indicatorGap),
-            indicatorFont: Theme.font(c.indicatorFont),
-            hairline: color(c.hairline(style:)), hairlineWidth: Theme.cg(c.hairlineWidth),
-            dot: CardStyle.dynamic(c.dotColor) { base, _ in base }, dotDiameter: Theme.cg(c.dotDiameter),
-            stackGap: Theme.cg(c.stackGap), margin: Theme.cg(c.margin), trailingReserve: Theme.cg(c.trailingReserve))
-    }
 
     /// The cost meter's line for Settings.
     func costLine() -> String {

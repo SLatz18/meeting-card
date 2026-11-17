@@ -1,6 +1,5 @@
 import AppKit
 import ListenMoreCore
-import ListenMoreMac
 import MeetingCardCore
 
 /// Call coach Settings: a standard titled window with grouped rows (the approved mock). Opened by
@@ -46,9 +45,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let folderPath = NSTextField(labelWithString: "")
     private let chooseFolderButton = NSButton(title: CoachCopy.chooseFolder, target: nil, action: nil)
     /// The same saving indicator as on screen during the call (the Kit's caption view).
-    private let savingIndicator = CaptionView(style: CoachTranscript.captionStyle())
-    private let savingHolder = NSView()
-    private var savingSize: [NSLayoutConstraint] = []
+    /// The saving indicator, as the card shows it (Theme.Captions; the card's secondary control).
+    private let savingHolder = SavingPill(label: CoachCopy.savingNow)
     private let transcriptStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
     private let deleteButton = NSButton(title: CoachCopy.deleteTranscript, target: nil, action: nil)
     private let youField = NSTextField()
@@ -196,6 +194,63 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             layer?.cornerCurve = .continuous
             let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             layer?.backgroundColor = Theme.ns(Theme.Settings.groupFill(style: Theme.style(dark: dark))).cgColor
+        }
+    }
+
+    /// The saving indicator in AppKit: Ignore fill, hairline and control radius and height, a
+    /// critical-red dot and the label, all from Theme.Captions (the card's CaptionSavingIndicator).
+    final class SavingPill: NSView {
+        private let dot = NSView()
+        init(label: String) {
+            super.init(frame: .zero)
+            let c = Theme.Captions.self
+            wantsLayer = true
+            dot.wantsLayer = true
+            let text = NSTextField(labelWithString: label)
+            text.font = Theme.font(c.indicatorFont)
+            text.textColor = CoachTranscript.color(c.savingLabel)
+            let stack = NSStackView(views: [dot, text])
+            stack.orientation = .horizontal
+            stack.alignment = .centerY
+            stack.spacing = Theme.cg(c.indicatorGap)
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(stack)
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: Theme.cg(c.dotDiameter)),
+                dot.heightAnchor.constraint(equalToConstant: Theme.cg(c.dotDiameter)),
+                heightAnchor.constraint(equalToConstant: Theme.cg(c.indicatorHeight)),
+                stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.cg(c.indicatorPadding)),
+                stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.cg(c.indicatorPadding)),
+                stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            setAccessibilityElement(true)
+            setAccessibilityRole(.staticText)
+            setAccessibilityLabel(label)
+            applyChrome()
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyChrome()
+        }
+
+        private func applyChrome() {
+            let c = Theme.Captions.self
+            let style = Theme.style(dark: CoachTranscript.isDark(effectiveAppearance))
+            layer?.cornerRadius = Theme.cg(c.indicatorRadius)
+            layer?.cornerCurve = .continuous
+            layer?.backgroundColor = Theme.ns(c.indicatorFill(style: style).over(style.surface)).cgColor
+            layer?.borderWidth = Theme.cg(c.hairlineWidth)
+            layer?.borderColor = Theme.ns(c.hairline(style: style)).cgColor
+            dot.layer?.cornerRadius = Theme.cg(c.dotDiameter / 2)
+            var red = Theme.ns(c.dot(style: style)).cgColor
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                red = CardStyle.dynamic(c.dotColor) { base, _ in base }.cgColor
+            }
+            dot.layer?.backgroundColor = red
         }
     }
 
@@ -476,13 +531,6 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             field.action = #selector(speakerNamed(_:))
             field.setAccessibilityLabel("\(CoachCopy.speakerNames): \(SpeakerLabels().label(speaker))")
         }
-        savingIndicator.show(CaptionContent(saving: CoachCopy.savingNow))
-        savingHolder.subviews.forEach { $0.removeFromSuperview() }
-        savingHolder.addSubview(savingIndicator)
-        NSLayoutConstraint.deactivate(savingSize)
-        savingSize = [savingHolder.widthAnchor.constraint(equalToConstant: savingIndicator.frame.width),
-                      savingHolder.heightAnchor.constraint(equalToConstant: savingIndicator.frame.height)]
-        NSLayoutConstraint.activate(savingSize)
 
         let heading = Self.text(CoachCopy.transcriptSection, font: Theme.Settings.rowFont)
         let captionsRow = Self.row(Self.text(CoachCopy.captionsToggle, font: Theme.Settings.itemFont), captionsToggle)

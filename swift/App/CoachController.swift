@@ -94,7 +94,6 @@ final class CoachController: NSObject {
         super.init()
         callControls.isEnabled = callControlsOn
         callControlsModel.onChange = { [weak self] in self?.refresh() }
-        transcript.screen = { [weak self] in self?.service?.callScreen() }
         keyStored = keychain.hasKey
         typeSafeKeyStored = typeSafeKeychain.hasKey
         if enabled {

@@ -15,9 +15,9 @@ import MeetingCardCore
 ///                                                 end states, then quit
 /// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
 /// surface (chip, the Muted chip, glow, Settings, Settings with Use Zoom/Meet controls on, onboarding,
-/// status menu off / listening / muted, feedback notice, caption strip, saving indicator, transcript
-/// notice, transcript settings) for a side-by-side design review. Caption text is synthetic and
-/// nothing is saved (an in-memory transcript store).
+/// status menu off / listening / muted, feedback notice, the caption feed as it sits in a card, the
+/// saving indicator, the transcript notice and transcript settings) for a side-by-side design review.
+/// Caption text is synthetic and nothing is saved (an in-memory transcript store).
 enum UISnapshots {
     /// Synthetic caption lines for the screenshots.
     static let demoCaptions: [CaptionEvent] = [
@@ -35,7 +35,7 @@ enum UISnapshots {
         func remove(_ url: URL) throws { files[url] = nil }
     }
 
-    /// A view's layer tree over a transparent background (the caption panel, the notice).
+    /// A view's layer tree over a transparent background (the notice).
     @MainActor
     static func layerImage(_ view: NSView, scale: CGFloat) -> CGImage? {
         view.layoutSubtreeIfNeeded()
@@ -49,9 +49,10 @@ enum UISnapshots {
         return ctx.makeImage()
     }
 
-    /// The caption strip (synthetic lines), the saving indicator alone, the one-time notice and the
-    /// Settings group with captions and saving on during a call. Each shown briefly on screen so
-    /// AppKit draws it, captured, then hidden.
+    /// The caption feed (CaptionFeedView at the card's width on the card surface: lines, lines with
+    /// the saving indicator, the cost-cap note, the indicator alone), then the one-time notice and
+    /// the Settings group with captions and saving on during a call. The feed has no window and
+    /// renders directly; the notice and Settings are shown briefly so AppKit draws them.
     @MainActor
     static func transcriptShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
                                 done: @escaping () -> Void) {
@@ -62,15 +63,21 @@ enum UISnapshots {
                                   store: MemoryTranscriptStore(), captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines))
         live.callStarted()
         demoCaptions.forEach { live.receive($0) }
-        var strip = CoachTranscript.content(live)
-        strip.saving = nil
-        let panels: [(String, CaptionContent)] = [
-            ("captions", strip),
-            ("saving", CaptionContent(saving: CoachCopy.savingNow)),
-            ("captions-saving", CoachTranscript.content(live)),
+        let feed = CaptionFeedModel()
+        CoachTranscript.update(feed, from: live)
+        live.callEnded()
+        let feeds: [(String, CaptionFeedModel)] = [
+            ("caption-feed", CaptionFeedModel(lines: feed.lines)),
+            ("caption-feed-saving", CaptionFeedModel(lines: feed.lines, savingLabel: feed.savingLabel)),
+            ("caption-feed-stopped", CaptionFeedModel(note: CoachCopy.captionsStopped)),
+            ("saving-indicator", CaptionFeedModel(savingLabel: CoachCopy.savingNow)),
         ]
-        let captions = CaptionPanelController(style: CoachTranscript.captionStyle())
-        captions.panel.appearance = NSApp.effectiveAppearance
+        for (name, model) in feeds {
+            let img = CaptionFeedSnapshot.image(model, dark: tag == "dark", scale: NSScreen.main?.backingScaleFactor ?? 2)
+            let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
+            controller.log("coach shot \(name)-\(tag) ok=\(ok)")
+            packet(name, img)
+        }
         func finish() {
             defaults.removePersistentDomain(forName: suite)
             done()
@@ -120,26 +127,7 @@ enum UISnapshots {
                 }
             }
         }
-        func shoot(_ i: Int) {
-            guard i < panels.count else {
-                captions.hide()
-                live.callEnded()
-                return noticeShot()
-            }
-            captions.show(panels[i].1)
-            controller.schedule(0.4, repeats: false) {
-                MainActor.assumeIsolated {
-                    let scale = captions.panel.backingScaleFactor > 0 ? captions.panel.backingScaleFactor : 2
-                    let img = layerImage(captions.panel.captionView, scale: scale)
-                    let name = panels[i].0
-                    let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
-                    controller.log("coach shot \(name)-\(tag) ok=\(ok)")
-                    packet(name, img)
-                    shoot(i + 1)
-                }
-            }
-        }
-        shoot(0)
+        noticeShot()
     }
 
     static func demoChip(_ env: [String: String]) -> CoachChip? {

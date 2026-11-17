@@ -95,9 +95,8 @@ Call Coach while off).
 | K1 | All | Keychain and logs | Inspect the Keychain and `log show --predicate 'subsystem == "com.listenmore.kit"'` | Key only in the Keychain; no transcript text or key in logs; no files written (saving off) |
 | K2 | All | Keychain caveat | Keychain Access → login → the `com.slatz.meetingcard.swift.test.openai` item | Item is in the **login** keychain. Expected until the app is properly signed (see below), not a failure |
 | N1 | All | Notice, once | Settings → Captions and transcript: turn on Live captions, choose Not Now; turn it on again, choose I Understand; then turn on Save transcripts | Notice sheet shows on the first two attempts (Not Now leaves the switch off), not after it was accepted |
-| X1 | Zoom desktop | Captions | Captions on, join a call, both sides talk | Strip near the bottom of the call's display, styled like a reminder card; lines labelled You and Them; disappears when the call ends |
-| X2 | Zoom desktop | Captions hidden in share | Share the full screen while captions show | Far side sees no caption strip; the user sees it |
-| X3 | All | Captions need a key | Remove the key | Both switches are disabled with the needs-a-key note; no strip appears in a call |
+| X1 | Zoom desktop | Captions (needs the coach card) | Captions on, join a call, both sides talk | Lines labelled You and Them inside the coach card; gone when the call ends; no separate caption window appears |
+| X3 | All | Captions need a key | Remove the key | Both switches are disabled with the needs-a-key note; no captions appear in a call |
 | X4 | All | Speaker names | During a call, type a name for Them in Settings and press Return | Caption lines and the saved file use the name; next call is back to Them |
 | T2 | All | Saving off writes nothing | Captions on, saving off, run a call; then `ls ~/Library/Application\ Support/MeetingCard/Transcripts` | Folder absent or unchanged; no other new files from the app |
 | T3 | All | Saving on | Saving on (default folder, then a chosen folder), run a call | Saving indicator shows during the call; exactly one `Call <date> <time>.md` per call in the folder, mode `-rw-------`, with times and speaker labels; no audio files anywhere |

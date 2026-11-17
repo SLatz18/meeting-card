@@ -52,8 +52,8 @@ The coach turns on without a key. It then runs the local layer only (interruptio
 
 Both are off by default, in Settings under **Captions and transcript**, and both need a key OpenAI accepts: they show the text of the same live transcription the GPT cues already use, so they add no API calls and no cost. The first time either one is turned on, a notice explains that the other people on the call are being transcribed and that you are responsible for telling them and for following the law and any policies that apply to you. "Not Now" leaves the feature off.
 
-- **Live captions.** A small strip near the bottom of the display with the call app (found the same way as the glow's display), styled like a reminder card. It shows the last three lines as they are transcribed, each labelled with its speaker; consecutive turns by the same speaker within 4 s share a line, and long lines keep their newest words. Captions are in memory only (at most three lines) and are dropped when the call ends. Like the glow, the strip asks to be left out of screen shares (`sharingType = .none`).
-- **Saved transcripts.** One Markdown file per call, `Call <date> <time>.md`, in `~/Library/Application Support/MeetingCard/Transcripts` unless you choose another folder. Each finished line has its time since the call started and its speaker label. While a file is being written, a "Saving transcript" indicator shows above the caption strip (or alone, if captions are off), in Settings, and in the coach menu. Settings and the coach menu can delete the current or last transcript; deleting during a call stops saving for the rest of it. The file is readable by your user only (mode 600).
+- **Live captions.** Shown inside the reminder card while it acts as the coach during a call (the card itself is a separate change); captions have no window of their own. The card hosts `CaptionFeedView`, which shows the last three lines as they are transcribed, each labelled with its speaker; consecutive turns by the same speaker within 4 s share a line, and long lines keep their newest words. Captions are in memory only (at most three lines) and are dropped when the call ends.
+- **Saved transcripts.** One Markdown file per call, `Call <date> <time>.md`, in `~/Library/Application Support/MeetingCard/Transcripts` unless you choose another folder. Each finished line has its time since the call started and its speaker label. While a file is being written, a "Saving transcript" indicator shows in the card's caption feed (even with captions off), in Settings, and in the coach menu. Settings and the coach menu can delete the current or last transcript; deleting during a call stops saving for the rest of it. The file is readable by your user only (mode 600).
 - **Speaker names.** During a call you can rename "You" or "Them" in Settings. Names last for that call only; they are kept only inside that call's saved transcript, if saving is on.
 - **Cost cap.** When a call reaches its cost cap, the transcription stops: captions show that they stopped, the transcript file is finished, and the on-device cues continue. The Settings cost line shows the call's spend so far, with captions and transcript at $0.00 extra.
 
@@ -75,6 +75,6 @@ flowchart LR
     VAD -->|tone flags| Judge
     VAD -->|interrupt, talk-over,<br/>monologue, talk share| Glow["Screen-edge glow<br/>red or amber, 20 s cooldown"]
     Judge -->|confidence ≥ 0.7| Glow
-    STT -.->|opt-in| Captions["Caption strip<br/>You / Them, memory only"]
+    STT -.->|opt-in| Captions["Captions in the card<br/>You / Them, memory only"]
     STT -.->|opt-in| File["Transcript file<br/>one .md per call"]
 ```
