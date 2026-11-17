@@ -252,12 +252,10 @@ final class CoachFullCardView: CoachSurfaceView {
     static func dismissLabelWidth() -> Double {
         let f = CoachSurfaceView.label()
         f.font = Theme.font(Theme.CoachCard.tipButtonFont)
-        var widest = 0.0
-        for label in [CoachCardCopy.CallModeTip.dismiss, CoachCardCopy.NoMicNotice.dismiss] {
+        return [CoachCardCopy.CallModeTip.dismiss, CoachCardCopy.NoMicNotice.dismiss].map { label in
             f.stringValue = label
-            widest = max(widest, Double(f.intrinsicContentSize.width.rounded(.up)))
-        }
-        return widest
+            return Double(f.intrinsicContentSize.width.rounded(.up))
+        }.max() ?? 0
     }
 
     init(state: CoachCardState, actions: CoachCardActions, captions: NSView) {
