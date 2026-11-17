@@ -190,9 +190,12 @@ final class CoachDebugReadout: NSObject, NSWindowDelegate, NSMenuDelegate {
             let current = mic.plan
             let plan = current ?? mic.currentPlan()
             let would = current == nil ? " (would open)" : ""
-            out.append("Route: \(plan.route.rawValue), mic source: \(plan.micSource.rawValue), voice processing \(plan.processing.voiceProcessing ? "on" : "off")\(would)")
+            out.append("Route: \(plan.route.rawValue) (output connection \(mic.outputTransport?.rawValue ?? "none")), mic source: \(plan.micSource.rawValue), voice processing \(plan.processing.voiceProcessing ? "on" : "off")\(would)")
             out.append("Voice processing (applied): \(mic.applied.map(Self.describe) ?? "off (no engine)")")
-            out.append("Mic device: planned \(Self.deviceName(plan.device)), engine reports \(Self.deviceName(mic.deviceID))")
+            out.append("Mic device: requested \(Self.deviceName(plan.device)), engine reports \(Self.deviceName(mic.deviceID)), in use (Core Audio) \(Self.inUse(mic))")
+            if !mic.unavailableInputs.isEmpty {
+                out.append("Set aside (delivered no sound): \(mic.unavailableInputs.sorted().map { Self.deviceName($0) }.joined(separator: ", ")), so call audio only")
+            }
             let d = mic.diagnostics
             let vp = d.speakerVoiceProcessing.map { $0 ? "on" : "off" } ?? "standard"
             out.append("Diagnostics: speakers voice processing \(vp), mic source \(d.speakerMicSource.rawValue)")
@@ -204,7 +207,7 @@ final class CoachDebugReadout: NSObject, NSWindowDelegate, NSMenuDelegate {
         let call = CoreAudioRoutes.outputCallState()
         let callRate = call.sampleRate.map { "\(Int($0)) Hz" } ?? "?"
         let callMode = mic.map { Self.yesNo($0.headphonesInCallMode()) } ?? "n/a"
-        out.append("Output call state: transport \(call.transport?.rawValue ?? "none"), input stream active \(Self.yesNo(call.inputStreamActive)), sample rate \(callRate), call mode \(callMode)")
+        out.append("Output call state: transport \(call.transport?.rawValue ?? "none"), input stream active \(call.inputStreamActive.map(Self.yesNo) ?? "unknown"), sample rate \(callRate), call mode \(callMode)")
         let owners = Set(audioState.snapshot().processes.filter(\.isRunningInput)
             .map { $0.bundleId ?? $0.owningBundleId ?? "pid \($0.pid)" }).sorted()
         out.append("Mic in use by: \(owners.isEmpty ? "nobody" : owners.joined(separator: ", "))")
@@ -224,18 +227,30 @@ final class CoachDebugReadout: NSObject, NSWindowDelegate, NSMenuDelegate {
         return string(AudioObjectID(id), kAudioObjectPropertyName) ?? "id \(id)"
     }
 
-    /// e.g. "Mic: built-in · voice processing off · bluetooth".
+    /// The input devices actually in use, read back from Core Audio, and whether that's the request.
+    static func inUse(_ mic: MicCapture) -> String {
+        guard let devices = mic.inputDevicesInUse() else { return "unreadable" }
+        guard !devices.isEmpty else { return "none" }
+        let names = devices.map { deviceName($0) }.joined(separator: " + ")
+        guard let requested = mic.plan?.device else { return names }
+        return names + (devices.contains(requested) ? " (matches the request)" : " (not the requested mic)")
+    }
+
+    /// e.g. "Mic: MacBook Pro Microphone (built-in) · voice processing off · bluetooth". The device
+    /// named is the one in use, read back from Core Audio, not the one asked for.
     static func statusLine(for mic: MicCapture?) -> String {
         guard let mic else { return "Mic: closed" }
         if mic.isMuted { return "Mic: muted" }
         guard let plan = mic.plan else { return "Mic: closed" }
-        let route = routeName(plan.route)
+        var route = routeName(plan.route)
+        if let connection = mic.outputTransport { route += " (\(connection.rawValue))" }
         let source: String
         switch plan.micSource {
         case .systemDefault: source = "system default"
         case .builtIn: source = "built-in"
-        case .none: return "Mic: none, call audio only · \(route)"
+        case .none: return "Mic: none, call audio only\(mic.unavailableInputs.isEmpty ? "" : " (built-in mic gave no sound)") · \(route)"
         }
+        let inUse = mic.inputDevicesInUse().flatMap { $0.first }.map { deviceName($0) } ?? "unknown device"
         let processing = mic.applied ?? plan.processing
         let voice: String
         if !processing.voiceProcessing {
@@ -245,7 +260,7 @@ final class CoachDebugReadout: NSObject, NSWindowDelegate, NSMenuDelegate {
         } else {
             voice = "on"
         }
-        return "Mic: \(source) · voice processing \(voice) · \(route)"
+        return "Mic: \(inUse) (\(source)) · voice processing \(voice) · \(route)"
     }
 
     static func routeName(_ r: OutputRoute) -> String {

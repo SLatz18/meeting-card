@@ -87,22 +87,51 @@ public final class CoreAudioRoutes: AudioRouteSource {
         watchedOutput = AudioObjectID(kAudioObjectUnknown)
     }
 
-    /// What the call-mode hint reads about the default output: its transport, whether any of its
-    /// input streams is doing IO, and its nominal sample rate.
+    /// What the call-mode hint reads about the default output: its transport, whether any of its own
+    /// input streams is doing IO (nil when it has none, or one can't be read), and its nominal rate.
     public struct OutputCallState: Equatable, Sendable {
         public var device: UInt32?
         public var transport: AudioDeviceInfo.Transport?
-        public var inputStreamActive: Bool
+        public var inputStreamActive: Bool?
         public var sampleRate: Double?
     }
 
     public static func outputCallState() -> OutputCallState {
         guard let output = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) else {
-            return OutputCallState(device: nil, transport: nil, inputStreamActive: false, sampleRate: nil)
+            return OutputCallState(device: nil, transport: nil, inputStreamActive: nil, sampleRate: nil)
         }
-        return OutputCallState(device: output, transport: info(output).transport,
-                               inputStreamActive: inputStreams(of: output).contains { (uint32($0, kAudioStreamPropertyIsActive) ?? 0) != 0 },
+        let transport = uint32(output, kAudioDevicePropertyTransportType).map(Self.transport)
+        let states = inputStreams(of: output).map { uint32($0, kAudioStreamPropertyIsActive) }
+        let active: Bool? = states.isEmpty || states.contains(where: { $0 == nil }) ? nil : states.contains { $0 != 0 }
+        return OutputCallState(device: output, transport: transport, inputStreamActive: active,
                                sampleRate: float64(output, kAudioDevicePropertyNominalSampleRate))
+    }
+
+    /// The input devices this process is doing IO on right now, read back from Core Audio (an
+    /// aggregate, such as voice processing's, is listed as its active input sub-devices).
+    public static func inputDevicesInUse(pid: pid_t = getpid()) -> [UInt32]? {
+        guard #available(macOS 14.2, *), let process = CoreAudioStateProvider.objectID(forPid: pid) else { return nil }
+        var address = Self.address(kAudioProcessPropertyDevices, scope: kAudioObjectPropertyScopeInput)
+        guard let devices = objectList(process, &address) else { return nil }
+        var out: [UInt32] = []
+        for d in devices {
+            if uint32(d, kAudioDevicePropertyTransportType) == kAudioDeviceTransportTypeAggregate {
+                var sub = Self.address(kAudioAggregateDevicePropertyActiveSubDeviceList)
+                out += (objectList(d, &sub) ?? []).filter { !inputStreams(of: $0).isEmpty }
+            } else if !inputStreams(of: d).isEmpty {
+                out.append(d)
+            }
+        }
+        return out
+    }
+
+    static func objectList(_ id: AudioObjectID, _ address: inout AudioObjectPropertyAddress) -> [AudioObjectID]? {
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size) == noErr else { return nil }
+        guard size > 0 else { return [] }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &ids) == noErr else { return nil }
+        return Array(ids.prefix(Int(size) / MemoryLayout<AudioObjectID>.size))
     }
 
     static func inputStreams(of device: AudioObjectID) -> [AudioStreamID] {
@@ -168,7 +197,9 @@ public final class CoreAudioRoutes: AudioRouteSource {
         return .unknown
     }
 
-    /// The first built-in device with input streams.
+    /// The first built-in device with input streams that is alive and can be an input (a closed
+    /// lid can leave it listed but unusable; one that still delivers only silence is caught by
+    /// `RoutedMic`).
     static func builtInInput() -> AudioObjectID? {
         var address = Self.address(kAudioHardwarePropertyDevices)
         let system = AudioObjectID(kAudioObjectSystemObject)
@@ -177,10 +208,13 @@ public final class CoreAudioRoutes: AudioRouteSource {
         var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
         guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return nil }
         return ids.first { id in
-            guard uint32(id, kAudioDevicePropertyTransportType) == kAudioDeviceTransportTypeBuiltIn else { return false }
-            var streams = Self.address(kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput)
-            var streamsSize: UInt32 = 0
-            return AudioObjectGetPropertyDataSize(id, &streams, 0, nil, &streamsSize) == noErr && streamsSize > 0
+            guard uint32(id, kAudioDevicePropertyTransportType) == kAudioDeviceTransportTypeBuiltIn,
+                  !inputStreams(of: id).isEmpty, uint32(id, kAudioDevicePropertyDeviceIsAlive) != 0 else { return false }
+            var canBeDefault = Self.address(kAudioDevicePropertyDeviceCanBeDefaultDevice, scope: kAudioObjectPropertyScopeInput)
+            var value: UInt32 = 1
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            if AudioObjectGetPropertyData(id, &canBeDefault, 0, nil, &size, &value) == noErr, value == 0 { return false }
+            return true
         }
     }
 

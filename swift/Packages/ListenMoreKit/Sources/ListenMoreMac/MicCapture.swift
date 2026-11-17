@@ -38,11 +38,18 @@ public final class MicCapture: MicSource {
     public var applied: MicProcessing? { mic.applied }
     public var deviceID: UInt32? { mic.deviceID }
     public var restartCount: Int { mic.restartCount }
+    /// Inputs set aside for delivering no sound (a closed lid), until the routes change or the call ends.
+    public var unavailableInputs: Set<UInt32> { mic.unavailableInputs }
+    /// How the default output is connected (USB headsets count as speakers; this tells them apart).
+    public var outputTransport: AudioDeviceInfo.Transport? { mic.routes.snapshot().output?.transport }
+    /// The input devices this app is actually doing IO on, read back from Core Audio (not the request).
+    public func inputDevicesInUse() -> [UInt32]? { CoreAudioRoutes.inputDevicesInUse() }
     public func currentPlan() -> MicPlan { mic.currentPlan() }
 
     /// The default output is a Bluetooth headset in its hands-free (call) mode, and not because of
     /// the coach's mic. Core Audio properties only.
     public func headphonesInCallMode() -> Bool {
+        guard mic.isStarted else { return false }
         let s = CoreAudioRoutes.outputCallState()
         return CallModeHint.isCallMode(outputTransport: s.transport, outputInputStreamActive: s.inputStreamActive,
                                        outputSampleRate: s.sampleRate, outputDevice: s.device,
@@ -68,6 +75,8 @@ public final class MicCapture: MicSource {
             Log.capture.info("mic route restart, count \(count, privacy: .public)")
         case let .openFailed(plan):
             Log.capture.error("mic open failed: route \(plan.route.rawValue, privacy: .public), micSource \(plan.micSource.rawValue, privacy: .public)")
+        case .inputSilent:
+            Log.capture.info("mic delivered no sound: built-in mic set aside, call audio only")
         }
     }
 }

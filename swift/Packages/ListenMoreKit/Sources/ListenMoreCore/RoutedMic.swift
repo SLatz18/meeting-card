@@ -36,7 +36,10 @@ public protocol MicScheduler: AnyObject {
 
 /// The coach's mic: opens the input `MicPlan` picks for the current routes, reopens it when the
 /// routes change (debounced by `MicRestartPolicy`), and closes it completely (input stopped and
-/// released) on `stop()` or `setMuted(true)`. Use from the main thread.
+/// released) on `stop()` or `setMuted(true)`. A built-in mic that delivers nothing, or only digital
+/// silence, for `silenceTimeout` (a closed lid) is set aside and the plan falls back without it,
+/// to call audio only rather than capturing silence; it's tried again when the routes really
+/// change or the session ends. Use from the main thread.
 public final class RoutedMic: MicSource {
     public enum Event: Equatable, Sendable {
         /// `applied` is nil when the plan opens no mic.
@@ -44,6 +47,8 @@ public final class RoutedMic: MicSource {
         case closed
         case restarted(count: Int)
         case openFailed(MicPlan)
+        /// The built-in mic delivered no sound and was set aside.
+        case inputSilent(device: UInt32)
     }
 
     public private(set) var isStarted = false
@@ -53,6 +58,10 @@ public final class RoutedMic: MicSource {
     public private(set) var restartCount = 0
     public private(set) var diagnostics: MicDiagnostics
     public var events: ((Event) -> Void)?
+    /// How long a built-in mic may deliver nothing or only digital zeros before it's set aside.
+    public var silenceTimeout: TimeInterval = 3
+    /// Inputs set aside for delivering no sound, until the routes change or the session ends.
+    public private(set) var unavailableInputs: Set<UInt32> = []
 
     public var isRunning: Bool { input?.isRunning ?? false }
     public var applied: MicProcessing? { input?.applied }
@@ -67,6 +76,8 @@ public final class RoutedMic: MicSource {
     private var handler: (@Sendable ([Float]) -> Void)?
     private var policy = MicRestartPolicy()
     private var timerGeneration = 0
+    private var probeGeneration = 0
+    private var unavailableSince: AudioRoutes?
 
     public init(routes: AudioRouteSource, opener: MicInputOpening, scheduler: MicScheduler,
                 macOS: OperatingSystemVersion, diagnostics: MicDiagnostics = .standard) {
@@ -77,9 +88,9 @@ public final class RoutedMic: MicSource {
         self.diagnostics = diagnostics
     }
 
-    /// The plan for the routes right now.
+    /// The plan for the routes right now, without inputs set aside.
     public func currentPlan() -> MicPlan {
-        MicPlan.plan(routes: routes.snapshot(), macOS: macOS, diagnostics: diagnostics)
+        MicPlan.plan(routes: routes.snapshot().excludingInputs(unavailableInputs), macOS: macOS, diagnostics: diagnostics)
     }
 
     public func start(sampleRate: Int, handler: @escaping @Sendable ([Float]) -> Void) throws {
@@ -107,6 +118,8 @@ public final class RoutedMic: MicSource {
         routes.stopObserving()
         close()
         handler = nil
+        unavailableInputs = []
+        unavailableSince = nil
     }
 
     /// Muted closes the input completely and keeps the session's handler; unmuting reopens it on the
@@ -127,6 +140,10 @@ public final class RoutedMic: MicSource {
 
     func routesChanged() {
         guard isStarted else { return }
+        if let since = unavailableSince, routes.snapshot() != since {
+            unavailableInputs = []
+            unavailableSince = nil
+        }
         schedule(at: policy.changed(at: scheduler.now))
     }
 
@@ -165,21 +182,75 @@ public final class RoutedMic: MicSource {
     private func open() throws {
         guard let handler else { return }
         let p = currentPlan()
-        if p.device != nil {
+        var probe: SoundProbe?
+        if let device = p.device {
             let scheduler = scheduler
-            input = try opener.open(p, sampleRate: sampleRate, handler: handler, onStopped: { [weak self] in
+            let watched = device == routes.snapshot().builtInInput?.id ? SoundProbe() : nil
+            probe = watched
+            var delivered = handler
+            if let watched {
+                delivered = { samples in
+                    watched.note(samples)
+                    handler(samples)
+                }
+            }
+            input = try opener.open(p, sampleRate: sampleRate, handler: delivered, onStopped: { [weak self] in
                 scheduler.schedule(after: 0) { self?.routesChanged() }
             })
         }
         plan = p
         events?(.opened(p, applied: input?.applied, deviceID: input?.deviceID))
+        if let probe, let device = p.device { watch(probe, device: device, heard: 0) }
+    }
+
+    /// Every `silenceTimeout`, the open built-in mic must have delivered some sound since the last look.
+    private func watch(_ probe: SoundProbe, device: UInt32, heard: Int) {
+        probeGeneration += 1
+        let generation = probeGeneration
+        scheduler.schedule(after: silenceTimeout) { [weak self] in
+            guard let self, generation == self.probeGeneration, self.plan?.device == device else { return }
+            let now = probe.soundBuffers
+            if now > heard {
+                self.watch(probe, device: device, heard: now)
+            } else {
+                self.setAside(device)
+            }
+        }
+    }
+
+    private func setAside(_ device: UInt32) {
+        unavailableInputs.insert(device)
+        unavailableSince = routes.snapshot()
+        events?(.inputSilent(device: device))
+        close()
+        openReporting()
     }
 
     private func close() {
         let wasOpen = plan != nil
+        probeGeneration += 1
         input?.stop()
         input = nil
         plan = nil
         if wasOpen { events?(.closed) }
+    }
+}
+
+/// Counts buffers with any non-zero sample, written from the audio thread.
+final class SoundProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func note(_ samples: [Float]) {
+        guard samples.contains(where: { $0 != 0 }) else { return }
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
+
+    var soundBuffers: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
     }
 }

@@ -115,11 +115,30 @@ final class MicCaptureTests: XCTestCase {
 
     func testCallModeReadsCoreAudioStateAndOurOwnMicOnly() throws {
         let state = CoreAudioRoutes.outputCallState()
-        if state.device == nil { XCTAssertFalse(state.inputStreamActive) }
+        if state.device == nil { XCTAssertNil(state.inputStreamActive, "nothing to read: undecided") }
         XCTAssertFalse(MicCapture(routes: StaticRoutes(Self.desktopBluetooth)).headphonesInCallMode() && state.transport != .bluetooth)
         let body = try block(after: "public func headphonesInCallMode() -> Bool {", in: try text())
         XCTAssertTrue(body.contains("CoreAudioRoutes.outputCallState()"))
         XCTAssertTrue(body.contains("ourMicDevice: mic.deviceID ?? mic.plan?.device"))
+    }
+
+    /// The device in use is read back from Core Audio (this process's input devices), not the request.
+    func testInputInUseIsReadBackFromCoreAudio() throws {
+        let t = try text()
+        let routes = try String(contentsOf: Self.source.deletingLastPathComponent().appendingPathComponent("AudioRoutes.swift"), encoding: .utf8)
+        let readBack = try block(after: "public static func inputDevicesInUse(pid: pid_t = getpid()) -> [UInt32]? {", in: routes)
+        XCTAssertTrue(readBack.contains("kAudioProcessPropertyDevices, scope: kAudioObjectPropertyScopeInput"))
+        XCTAssertTrue(readBack.contains("kAudioAggregateDevicePropertyActiveSubDeviceList"), "voice processing's aggregate is expanded")
+        XCTAssertTrue(t.contains("public func inputDevicesInUse() -> [UInt32]? { CoreAudioRoutes.inputDevicesInUse() }"))
+        _ = CoreAudioRoutes.inputDevicesInUse()
+    }
+
+    /// A built-in mic must be alive and allowed as an input (a closed lid can leave it listed).
+    func testBuiltInMicMustBeAliveAndSelectable() throws {
+        let routes = try String(contentsOf: Self.source.deletingLastPathComponent().appendingPathComponent("AudioRoutes.swift"), encoding: .utf8)
+        let pick = try block(after: "static func builtInInput() -> AudioObjectID? {", in: routes)
+        XCTAssertTrue(pick.contains("kAudioDevicePropertyDeviceIsAlive"))
+        XCTAssertTrue(pick.contains("kAudioDevicePropertyDeviceCanBeDefaultDevice"))
     }
 
     func testRoutesSnapshotAndObservationRunOnThisMac() {

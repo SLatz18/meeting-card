@@ -35,6 +35,15 @@ public struct AudioRoutes: Equatable, Sendable {
         self.defaultInput = defaultInput
         self.builtInInput = builtInInput
     }
+
+    /// The same routes with these inputs gone (a mic that delivers nothing).
+    public func excludingInputs(_ ids: Set<UInt32>) -> AudioRoutes {
+        guard !ids.isEmpty else { return self }
+        var r = self
+        if let d = r.defaultInput, ids.contains(d.id) { r.defaultInput = nil }
+        if let b = r.builtInInput, ids.contains(b.id) { r.builtInInput = nil }
+        return r
+    }
 }
 
 /// Where other audio is heard.

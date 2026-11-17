@@ -23,13 +23,20 @@ final class FakeInput: MicInput {
     let plan: MicPlan
     var isRunning = true
     var stopped = false
+    let handler: @Sendable ([Float]) -> Void
     let onStopped: @Sendable () -> Void
     var applied: MicProcessing { plan.processing }
     var deviceID: UInt32? { plan.device }
 
-    init(plan: MicPlan, onStopped: @escaping @Sendable () -> Void) {
+    init(plan: MicPlan, handler: @escaping @Sendable ([Float]) -> Void, onStopped: @escaping @Sendable () -> Void) {
         self.plan = plan
+        self.handler = handler
         self.onStopped = onStopped
+    }
+
+    func deliver(_ samples: [Float]) {
+        guard !stopped else { return }
+        handler(samples)
     }
 
     func stop() {
@@ -56,7 +63,7 @@ final class FakeOpener: MicInputOpening {
             failNext = false
             throw NSError(domain: "FakeOpener", code: 1)
         }
-        let i = FakeInput(plan: plan, onStopped: onStopped)
+        let i = FakeInput(plan: plan, handler: handler, onStopped: onStopped)
         opened.append(i)
         return i
     }
@@ -104,6 +111,8 @@ final class RoutedMicTests: XCTestCase {
         clock = ManualScheduler()
         let mic = RoutedMic(routes: routes, opener: opener, scheduler: clock, macOS: mac15)
         mic.events = { [weak self] in self?.events.append($0) }
+        // Fakes deliver audio only when a test says so; the silence tests set a real timeout.
+        mic.silenceTimeout = 1e9
         return mic
     }
 
@@ -261,6 +270,87 @@ final class RoutedMicTests: XCTestCase {
         pendingChange?()
         clock.advance(5)
         XCTAssertEqual(opener.opened.count, 1)
+    }
+
+    // MARK: a built-in mic that delivers nothing (closed lid)
+
+    let speech = [Float](repeating: 0.1, count: 480)
+    let zeros = [Float](repeating: 0, count: 480)
+
+    func testABuiltInMicDeliveringOnlyZerosFallsBackToCallAudioOnly() throws {
+        let mic = make(bluetooth)
+        mic.silenceTimeout = 3
+        try mic.start(sampleRate: 24000) { _ in }
+        for _ in 0..<5 {
+            opener.open?.deliver(zeros)
+            clock.advance(1)
+        }
+        XCTAssertEqual(mic.plan?.micSource, MicSourceKind.none, "call audio only, not silence")
+        XCTAssertEqual(mic.unavailableInputs, [builtInMic.id])
+        XCTAssertTrue(opener.opened[0].stopped)
+        XCTAssertEqual(opener.opened.count, 1, "nothing else is opened (never the headset)")
+        XCTAssertTrue(events.contains(.inputSilent(device: builtInMic.id)))
+    }
+
+    func testABuiltInMicThatDropsMidCallFallsBack() throws {
+        let mic = make(speakers)
+        mic.silenceTimeout = 3
+        try mic.start(sampleRate: 24000) { _ in }
+        for _ in 0..<10 {
+            opener.open?.deliver(speech)
+            clock.advance(1)
+        }
+        XCTAssertEqual(mic.plan?.device, builtInMic.id, "a working mic stays")
+        clock.advance(7)
+        XCTAssertEqual(mic.plan?.micSource, MicSourceKind.none, "the device stopped delivering")
+        XCTAssertFalse(mic.isRunning)
+    }
+
+    func testAQuietButLiveMicStays() throws {
+        let mic = make(speakers)
+        mic.silenceTimeout = 3
+        try mic.start(sampleRate: 24000) { _ in }
+        let quiet = [Float](repeating: 0.000_01, count: 480)
+        for _ in 0..<30 {
+            opener.open?.deliver(quiet)
+            clock.advance(1)
+        }
+        XCTAssertEqual(mic.plan?.device, builtInMic.id)
+        XCTAssertTrue(mic.unavailableInputs.isEmpty)
+    }
+
+    func testASetAsideMicIsTriedAgainWhenTheRoutesChange() throws {
+        let mic = make(speakers)
+        mic.silenceTimeout = 3
+        try mic.start(sampleRate: 24000) { _ in }
+        clock.advance(4)
+        XCTAssertEqual(mic.plan?.micSource, MicSourceKind.none)
+        routes.set(speakers)
+        clock.advance(1)
+        XCTAssertEqual(mic.plan?.micSource, MicSourceKind.none, "its own device changes don't bring it back")
+        routes.set(AudioRoutes(output: speakersOut, outputSource: .headphones, defaultInput: builtInMic, builtInInput: builtInMic))
+        clock.advance(1)
+        XCTAssertEqual(mic.plan?.device, builtInMic.id, "a real route change tries it again")
+        XCTAssertTrue(mic.unavailableInputs.isEmpty)
+    }
+
+    func testOnlyTheBuiltInMicIsWatched() throws {
+        let mic = make(AudioRoutes(output: speakersOut, outputSource: .speakers, defaultInput: usbMic, builtInInput: builtInMic))
+        mic.silenceTimeout = 3
+        try mic.start(sampleRate: 24000) { _ in }
+        clock.advance(10)
+        XCTAssertEqual(mic.plan?.device, usbMic.id)
+    }
+
+    func testStopForgetsASetAsideMic() throws {
+        let mic = make(speakers)
+        mic.silenceTimeout = 3
+        try mic.start(sampleRate: 24000) { _ in }
+        clock.advance(4)
+        mic.stop()
+        XCTAssertTrue(mic.unavailableInputs.isEmpty)
+        try mic.start(sampleRate: 24000) { _ in }
+        XCTAssertEqual(mic.plan?.device, builtInMic.id, "the next call tries it again")
     }
 
     // MARK: diagnostics

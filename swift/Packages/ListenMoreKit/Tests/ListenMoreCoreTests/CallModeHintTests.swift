@@ -3,24 +3,28 @@ import XCTest
 @testable import ListenMoreCore
 
 final class CallModeHintTests: XCTestCase {
-    func callMode(_ transport: AudioDeviceInfo.Transport?, active: Bool = false, rate: Double? = 48000,
+    func callMode(_ transport: AudioDeviceInfo.Transport?, active: Bool? = false, rate: Double? = 48000,
                   output: UInt32? = 2, ourMic: UInt32? = 3) -> Bool {
         CallModeHint.isCallMode(outputTransport: transport, outputInputStreamActive: active, outputSampleRate: rate,
                                 outputDevice: output, ourMicDevice: ourMic)
     }
 
-    func testBluetoothWithItsInputActiveIsCallMode() {
-        XCTAssertTrue(callMode(.bluetooth, active: true))
-    }
-
-    func testBluetoothAtAHandsFreeRateIsCallMode() {
-        for rate in [8000.0, 16000, 24000] { XCTAssertTrue(callMode(.bluetooth, rate: rate), "\(rate)") }
+    func testBluetoothWithItsInputActiveAtAHandsFreeRateIsCallMode() {
+        for rate in [8000.0, 16000, 24000] { XCTAssertTrue(callMode(.bluetooth, active: true, rate: rate), "\(rate)") }
     }
 
     func testBluetoothAtFullRateWithItsInputIdleIsNot() {
-        for rate in [44100.0, 48000, 96000] { XCTAssertFalse(callMode(.bluetooth, rate: rate), "\(rate)") }
-        XCTAssertFalse(callMode(.bluetooth, rate: nil))
-        XCTAssertFalse(callMode(.bluetooth, rate: 0))
+        for rate in [44100.0, 48000, 96000] { XCTAssertFalse(callMode(.bluetooth, active: false, rate: rate), "\(rate)") }
+    }
+
+    /// Undecidable or disagreeing state stays silent: no false tips.
+    func testSilentWhenItCannotDecide() {
+        XCTAssertFalse(callMode(.bluetooth, active: nil, rate: 16000), "the headset's mic is another device it can't attribute, or unreadable")
+        XCTAssertFalse(callMode(.bluetooth, active: true, rate: nil), "sample rate unreadable")
+        XCTAssertFalse(callMode(.bluetooth, active: true, rate: 0))
+        XCTAssertFalse(callMode(.bluetooth, active: true, rate: 48000), "input active at full rate: volume not known to drop")
+        XCTAssertFalse(callMode(.bluetooth, active: false, rate: 16000), "low rate with its input idle: in transition")
+        XCTAssertFalse(callMode(nil, active: true, rate: 16000), "transport unreadable")
     }
 
     func testOnlyBluetoothOutputs() {
@@ -34,6 +38,7 @@ final class CallModeHintTests: XCTestCase {
         XCTAssertFalse(callMode(.bluetooth, active: true, rate: 16000, output: 2, ourMic: 2))
         XCTAssertTrue(callMode(.bluetooth, active: true, rate: 16000, output: 2, ourMic: nil), "coach mic closed or none")
     }
+
 
     // MARK: once per call, dismissible
 
