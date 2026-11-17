@@ -55,6 +55,10 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         build()
     }
 
+    /// Snapshots: the groups' stack (layer render can't draw the scroll view upright) and the
+    /// height of it the window shows, from the top.
+    var snapshotContent: (view: NSView, visibleHeight: CGFloat) { (root, scroll.contentView.bounds.height) }
+
     func present() {
         window.center()
         update()

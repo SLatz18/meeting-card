@@ -216,6 +216,20 @@ enum UISnapshots {
     @MainActor
     static func windowImage(_ window: NSWindow) -> CGImage? {
         guard let view = window.contentView else { return nil }
+        return viewImage(view, in: window)
+    }
+
+    /// Settings / onboarding as on screen: the groups, cropped to the scrolled-to-top window height.
+    @MainActor
+    static func settingsImage(_ w: CoachSettingsWindow) -> CGImage? {
+        let (view, visible) = w.snapshotContent
+        guard let full = viewImage(view, in: w.window) else { return nil }
+        let scale = CGFloat(full.width) / max(view.bounds.width, 1)
+        return full.cropping(to: CGRect(x: 0, y: 0, width: CGFloat(full.width), height: min(CGFloat(full.height), visible * scale)))
+    }
+
+    @MainActor
+    static func viewImage(_ view: NSView, in window: NSWindow) -> CGImage? {
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()
         let scale = window.backingScaleFactor > 0 ? window.backingScaleFactor : 2
@@ -279,7 +293,7 @@ enum UISnapshots {
             w.window.orderFrontRegardless()
             controller.schedule(0.5, repeats: false) {
                 MainActor.assumeIsolated {
-                    let img = windowImage(w.window)
+                    let img = settingsImage(w)
                     let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
                     controller.log("coach shot \(name)-\(tag) ok=\(ok)")
                     packet(name, img)
