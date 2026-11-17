@@ -46,7 +46,11 @@ A host can pass an optional `CallStateProvider` (to `CoachService`, `CoachSessio
 reporting each call app's state as started, ended or muted. An ended call stops the session after
 `ended_stop_after_s` (3 s) instead of waiting for Core Audio's 30 s stop; a muted app holds the
 session's capture (the pause path) until unmute; without a provider, Core Audio alone decides.
-`CoachMenu` lists what a host's coach menu offers in each state.
+`CoachSession.setMicMuted` (`CoachService.setMicMuted` / `micMuted`) is the coach's own Mute: it stops the
+user's mic engine only, so call audio keeps being captured, captioned as Them and coached, and the
+indicator reads `CoachIndicator.micOff`. It lasts until unmuted or the session ends, survives Pause and the
+call app's mute, and never touches the call app. `CoachMenu` lists what a host's coach menu offers in each
+state, including `CoachMenuItem.muteMic` and `.unmuteMic`.
 
 `CallControlsProvider` (Core, with fakeable `ZoomAccessibility` / `AppleScriptRunner` backends;
 `CallControlsProvider.live(config:)` in ListenMoreMac) is that provider for Zoom (Accessibility:

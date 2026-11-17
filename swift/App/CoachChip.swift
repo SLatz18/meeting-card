@@ -5,7 +5,7 @@ import MeetingCardCore
 /// The coach chip on the live card's button row. Shown only while the coach is pre-warmed or
 /// running; the card without a chip is the unchanged reminder card.
 struct CoachChip: Equatable {
-    enum Mode: Equatable { case on, listening, paused, muted }
+    enum Mode: Equatable { case on, listening, paused, muted, micOff }
     var mode: Mode
     /// Fixture runs only: a longer label, to show the collapse rule (`Theme.Coach.layout`).
     var labelOverride: String?
@@ -19,6 +19,7 @@ struct CoachChip: Equatable {
         case .listening: mode = .listening
         case .paused: mode = .paused
         case .muted: mode = .muted
+        case .micOff: mode = .micOff
         }
     }
 
@@ -29,6 +30,7 @@ struct CoachChip: Equatable {
         case .listening: "Listening"
         case .paused: "Paused"
         case .muted: CoachCopy.chipMuted
+        case .micOff: CoachCopy.chipMicOff
         }
     }
 
@@ -38,6 +40,7 @@ struct CoachChip: Equatable {
         case .listening: CoachCopy.coachListening
         case .paused: CoachCopy.coachPaused
         case .muted: CoachCopy.coachMuted
+        case .micOff: CoachCopy.coachMicOff
         }
     }
 
@@ -48,8 +51,12 @@ struct CoachChip: Equatable {
 
     var live: Bool { mode == .listening }
 
-    /// Not capturing (the user's pause, or muted in the call app): drawn like the paused chip.
-    var held: Bool { mode == .paused || mode == .muted }
+    /// Not capturing (the user's pause, or muted in the call app), or not hearing the user (the coach's
+    /// own Mute): drawn like the paused chip.
+    var held: Bool { mode == .paused || mode == .muted || mode == .micOff }
+
+    /// The coach glyph, or the mic-off glyph while the coach's own Mute is on.
+    var symbol: String { mode == .micOff ? Theme.Coach.micOffSymbol : Theme.Coach.symbol }
 }
 
 /// The chip's inner Start/Pause/Resume control (first click works on the non-activating card).
@@ -109,7 +116,7 @@ final class CoachChipView: NSView {
         let fg = Theme.text(paused ? c.heldText : c.text, style)
         var x = c.paddingLeading
         let midY = frame.height / 2
-        let glyph = NSImageView(image: Self.symbol(c.symbol, size: c.glyphSize, weight: weight, label: chip.accessibilityLabel) ?? NSImage())
+        let glyph = NSImageView(image: Self.symbol(chip.symbol, size: c.glyphSize, weight: weight, label: chip.accessibilityLabel) ?? NSImage())
         glyph.contentTintColor = chip.live ? Theme.ns(c.live(style: style)) : fg
         glyph.frame = NSRect(x: x, y: Double(midY) - c.glyphSize / 2, width: c.glyphSize, height: c.glyphSize)
         addSubview(glyph)

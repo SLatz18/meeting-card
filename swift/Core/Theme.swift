@@ -279,11 +279,14 @@ public enum Theme {
         public static let symbol = "ear.badge.waveform"
         public static let pauseSymbol = "pause.fill"
         public static let resumeSymbol = "play.fill"
+        /// The coach's own Mute: the glyph on the chip, the card's status line and the menu.
+        public static let micOffSymbol = "mic.slash"
         /// SF Symbols for the coach status menu, drawn at the body font size like a native menu.
         public static let menuSymbols = (enable: "power", start: resumeSymbol, stop: CoachCard.Symbols.stop,
                                          pause: pauseSymbol, resume: resumeSymbol, turnOff: "power",
                                          gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
-                                         settings: "gearshape", feedback: "bubble.left")
+                                         settings: "gearshape", feedback: "bubble.left",
+                                         mute: micOffSymbol, unmute: "mic")
         public static let menuSymbolSize = CardStyle.Typography.body.size
         /// The status bar glyph, at the button font size and weight.
         public static let statusSymbolFont = CardStyle.Typography.button
@@ -435,6 +438,7 @@ public enum Theme {
             public static let status = Coach.symbol
             public static let mute = "mic.fill"
             public static let unmute = "mic.slash.fill"
+            public static let micOff = Coach.micOffSymbol
             public static let pause = Coach.pauseSymbol
             public static let resume = Coach.resumeSymbol
             public static let stop = "stop.fill"

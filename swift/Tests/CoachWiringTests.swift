@@ -151,8 +151,9 @@ final class CoachWiringTests: XCTestCase {
     func testStatusMenuIsAlwaysThere() throws {
         let src = try read("App/CoachController.swift")
         XCTAssertTrue(src.contains("showsStatusItem: Bool = true"))
-        XCTAssertTrue(src.contains("CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable)"))
-        for action in ["enableClicked", "stopClicked", "pauseClicked", "resumeClicked", "startClicked", "turnOffClicked"] {
+        XCTAssertTrue(src.contains("CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable, micMuted: micMuted)"))
+        for action in ["enableClicked", "stopClicked", "pauseClicked", "resumeClicked", "startClicked", "turnOffClicked",
+                       "muteMicClicked", "unmuteMicClicked"] {
             XCTAssertTrue(src.contains("#selector(\(action)(_:))"), action)
         }
         XCTAssertFalse(try read("App/Controller.swift").contains("showsStatusItem"), "the app keeps the default")

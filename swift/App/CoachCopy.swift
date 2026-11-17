@@ -125,6 +125,17 @@ enum CoachCopy {
     static let noticeConfirm = "I Understand, Turn On"
     static let noticeCancel = "Not Now"
 
+    // MARK: DRAFT: the coach's Mute, mic only (not yet copy-reviewed; edit before release)
+
+    static let menuMute = "Mute"
+    static let menuUnmute = "Unmute"
+    static let menuMuteHelp = "The coach stops listening to your mic. It still hears the call. Zoom and Meet aren't muted."
+    static let menuUnmuteHelp = "The coach listens to your mic again."
+    static let coachMicOff = "Coach muted, hearing others only"
+    static let chipMicOff = "Mic off"
+    static let micMutedAnnouncement = "Call coach muted. It hears the call, not your mic."
+    static let micUnmutedAnnouncement = "Call coach unmuted. It hears your mic again."
+
     struct Screen {
         let title: String
         let body: String

@@ -5,8 +5,9 @@
 #       <out>/head; a pair is re-rendered once if they differ (the clock minute can roll over
 #       between the two renders and the card shows absolute times)
 #   scripts/snapshots.sh coach <out-dir>
-#       coach chip states (incl. the multi-link card, full and collapsed), glow, Settings (incl. the
-#       TypeSafe cue judge, and its feedback row), onboarding, status menu, the feedback notice, caption
+#       coach chip states (incl. the multi-link card, full and collapsed, and the mic-off chip), glow,
+#       Settings (incl. the TypeSafe cue judge, and its feedback row), onboarding, status menu (incl.
+#       its Mute and Unmute entries), the feedback notice, caption
 #       strip, saving indicator, transcript notice, transcript settings and the design packet
 #       (packet-<surface>-<appearance>.png, listed in packet-list.txt), and the coach card and pill
 #       states with the morph and collapse end states (coach-<state>-<appearance>.png) from this
@@ -41,7 +42,7 @@ case "${1:-}" in
     ;;
   coach)
     OUT="$(mkdir -p "$2" && cd "$2" && pwd)"
-    for chip in on listening paused muted; do
+    for chip in on listening paused muted mic-off; do
       for a in light dark; do
         shot "$HERE" meet "$a" "$OUT/coach-chip-$chip-$a.png" MEETING_CARD_COACH_CHIP="$chip"
       done
@@ -74,14 +75,14 @@ case "${1:-}" in
     (cd "$OUT" && ls packet-*.png) > "$OUT/packet-list.txt" 2>/dev/null || true
     missing=0
     for s in card-idle card-listening card-paused card-muted card-nudge-amber card-nudge-rose card-increased-contrast \
-             card-saving card-saving-nudge \
+             card-saving card-saving-nudge card-mic-off pill-mic-off \
              pill-idle pill-muted pill-paused pill-nudge-amber pill-nudge-rose \
              pill-mute-disabled-meet pill-mute-disabled-off pill-mute-disabled-permission morph-end collapse-end; do
       for a in light dark; do
         [[ -s "$OUT/coach-$s-$a.png" ]] || { echo "missing coach-$s-$a.png" >&2; missing=1; }
       done
     done
-    for s in chip-muted settings settings-call-controls menu-muted caption-feed-card caption-feed-card-empty; do
+    for s in chip-muted settings settings-call-controls menu-muted menu-mute menu-unmute caption-feed-card caption-feed-card-empty; do
       for a in light dark; do
         [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
       done

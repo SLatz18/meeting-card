@@ -13,7 +13,8 @@ import MeetingCardCore
 /// the coach within seconds of a call ending and hold it while Zoom is muted; its Accessibility and
 /// Automation prompts appear only when the user turns it on (or asks again from Settings).
 /// While the coach is on for a call, the reminder card morphs into the coach card near the camera
-/// (minimizable to a pill), which also mutes Zoom through that setting.
+/// (minimizable to a pill), which also mutes Zoom through that setting. The coach menu's own Mute is
+/// separate: it only stops the coach listening to the user's mic.
 @MainActor
 final class CoachController: NSObject {
     enum Keys {
@@ -138,6 +139,8 @@ final class CoachController: NSObject {
     var effectiveAllowlist: [String] { allowlist ?? config.captureTargets.map(\.bundleId) }
 
     var indicator: CoachIndicator { enabled ? service?.indicator ?? .hidden : .hidden }
+    /// The coach's own Mute is on (the user's mic is off for the coach; the call is still heard).
+    var micMuted: Bool { enabled ? service?.micMuted ?? false : false }
     var chip: CoachChip? { CoachChip(indicator) }
 
     // MARK: settings
@@ -308,6 +311,8 @@ final class CoachController: NSObject {
     @objc func startClicked(_ sender: Any?) { service?.start() }
     @objc func pauseClicked(_ sender: Any?) { service?.pause() }
     @objc func resumeClicked(_ sender: Any?) { service?.resume() }
+    @objc func muteMicClicked(_ sender: Any?) { setMicMuted(true) }
+    @objc func unmuteMicClicked(_ sender: Any?) { setMicMuted(false) }
     @objc func stopClicked(_ sender: Any?) { stopForThisCall() }
     @objc func enableClicked(_ sender: Any?) {
         setEnabled(true) { _ in }
@@ -327,6 +332,16 @@ final class CoachController: NSObject {
     /// One press of Zoom's own Mute/Unmute item (on the provider's queue); the card follows the read-back.
     func toggleMute() {
         callControlsModel.toggleMute()
+    }
+
+    /// The coach's own Mute, from the coach menu: it stops listening to the user's mic only (never the
+    /// call app's mute, no Accessibility). Lasts until Unmute or the session ends.
+    func setMicMuted(_ muted: Bool) {
+        guard let service, service.micMuted != muted else { return }
+        service.setMicMuted(muted)
+        guard service.micMuted == muted else { return }
+        CoachCardPresenter.announce(muted ? CoachCopy.micMutedAnnouncement : CoachCopy.micUnmutedAnnouncement)
+        refresh()
     }
 
     func pauseOrResume() {
@@ -405,7 +420,7 @@ final class CoachController: NSObject {
         return p
     }
 
-    var menuItems: [CoachMenuItem] { CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable) }
+    var menuItems: [CoachMenuItem] { CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable, micMuted: micMuted) }
     private var shownMenu: (items: [CoachMenuItem], rejected: Bool, transcript: [Bool])?
 
     private func updateStatusItem() {
@@ -421,7 +436,7 @@ final class CoachController: NSObject {
             let image = Theme.symbol(Theme.Coach.symbol, Theme.Coach.statusSymbolFont, label: label)
             image?.isTemplate = true
             button.image = image
-            button.appearsDisabled = !enabled || indicator == .paused || indicator == .muted
+            button.appearsDisabled = !enabled || indicator == .paused || indicator == .muted || indicator == .micOff
             button.toolTip = label
             button.setAccessibilityLabel(label)
         }
@@ -489,6 +504,7 @@ final class CoachController: NSObject {
         case .listening: return CoachCopy.coachListening
         case .paused: return CoachCopy.coachPaused
         case .muted: return CoachCopy.coachMuted
+        case .micOff: return CoachCopy.coachMicOff
         }
     }
 
@@ -497,10 +513,11 @@ final class CoachController: NSObject {
         func image(_ name: String, _ title: String) -> NSImage? {
             Theme.symbol(name, Theme.FontSpec(Theme.Coach.menuSymbolSize), label: title)
         }
-        func action(_ title: String, _ symbol: String, _ selector: Selector, key: String = "") -> NSMenuItem {
+        func action(_ title: String, _ symbol: String, _ selector: Selector, key: String = "", tooltip: String? = nil) -> NSMenuItem {
             let m = NSMenuItem(title: title, action: selector, keyEquivalent: key)
             m.image = image(symbol, title)
             m.target = self
+            m.toolTip = tooltip
             return m
         }
         func note(_ title: String, _ symbol: String) -> NSMenuItem {
@@ -519,6 +536,7 @@ final class CoachController: NSObject {
             case .listening: m = note(CoachCopy.coachListening, Theme.Coach.symbol)
             case .paused: m = note(CoachCopy.coachPaused, Theme.Coach.symbol)
             case .muted: m = note(CoachCopy.coachMuted, Theme.CallControls.mutedSymbol)
+            case .micOff: m = note(CoachCopy.coachMicOff, Theme.Coach.micOffSymbol)
             }
             return m
         case .gptOff:
@@ -529,6 +547,8 @@ final class CoachController: NSObject {
         case .stopForCall: return action(CoachCardCopy.Button.stop, sym.stop, #selector(stopClicked(_:)))
         case .pause: return action(CoachCopy.pause, sym.pause, #selector(pauseClicked(_:)))
         case .resume: return action(CoachCopy.resume, sym.resume, #selector(resumeClicked(_:)))
+        case .muteMic: return action(CoachCopy.menuMute, sym.mute, #selector(muteMicClicked(_:)), tooltip: CoachCopy.menuMuteHelp)
+        case .unmuteMic: return action(CoachCopy.menuUnmute, sym.unmute, #selector(unmuteMicClicked(_:)), tooltip: CoachCopy.menuUnmuteHelp)
         case .turnOff: return action(CoachCopy.menuTurnOff, sym.turnOff, #selector(turnOffClicked(_:)))
         case .separator: return .separator()
         case .settings: return action(CoachCopy.settings, sym.settings, #selector(settingsClicked(_:)), key: ",")

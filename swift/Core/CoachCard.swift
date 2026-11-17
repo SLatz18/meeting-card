@@ -163,6 +163,8 @@ public struct CoachCardState: Equatable, Sendable {
         case paused
         /// Held while the call app reports the mic muted.
         case muted
+        /// Listening to the call with the user's mic off (the coach's own Mute): the other side is still coached.
+        case micOff
     }
 
     public enum Mode: Equatable, Sendable { case card, pill }
@@ -226,7 +228,7 @@ public extension CoachCardState {
                             enabled: mute.visibility == .enabled)
     }
 
-    /// Pause while listening or muted, Resume while paused; nothing to pause before a session starts.
+    /// Pause while listening, muted or mic off, Resume while paused; nothing to pause before a session starts.
     var pauseControl: CoachControl {
         let s = Theme.CoachCard.Symbols.self
         switch status {
@@ -235,7 +237,7 @@ public extension CoachCardState {
         case .idle:
             return CoachControl(symbol: s.pause, tooltip: CoachCardCopy.Tooltip.pause, accessibilityLabel: CoachCardCopy.A11y.pause,
                                 enabled: false)
-        case .listening, .muted:
+        case .listening, .muted, .micOff:
             return CoachControl(symbol: s.pause, tooltip: CoachCardCopy.Tooltip.pause, accessibilityLabel: CoachCardCopy.A11y.pause)
         }
     }
