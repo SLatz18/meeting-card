@@ -57,7 +57,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         return f
     }
 
-    /// Rounded `controlBackgroundColor` group whose height follows its stack (constraints, unlike an
+    /// Rounded grouped-form row (`quaternarySystemFill`; on macOS 26 `controlBackgroundColor` equals the
+    /// window background) whose height follows its stack (constraints, unlike an
     /// NSBox content view).
     final class Group: NSView {
         let stack: NSStackView
@@ -92,7 +93,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             layer?.cornerRadius = CGFloat(Theme.Settings.groupRadius)
             layer?.cornerCurve = .continuous
             effectiveAppearance.performAsCurrentDrawingAppearance {
-                layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+                layer?.backgroundColor = NSColor.quaternarySystemFill.cgColor
             }
         }
     }
