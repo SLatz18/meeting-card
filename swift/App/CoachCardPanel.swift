@@ -151,6 +151,8 @@ final class CoachCardPresenter {
         } else if s.mode == .pill, CoachPillView.width(for: s) != Double(current.frame.width)
                     || (current as? CoachPillView)?.buttons != s.pillButtons {
             swap(current, for: s, transition: .widen)
+        } else if s.mode == .card, CoachFullCardView.frameSize(for: s) != current.frame.size {
+            swap(current, for: s, transition: .widen)
         } else {
             current.apply(s)
             followCallDisplay()

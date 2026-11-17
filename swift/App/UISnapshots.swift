@@ -247,9 +247,9 @@ enum UISnapshots {
     static let roseNudge = CoachNudge(kind: .interrupt, tone: .rose)
 
     static func shotState(_ st: CoachCardState.Status, _ m: MuteControlPresentation, _ n: CoachNudge?, _ mode: CoachCardState.Mode,
-                          ic: Bool = false, saving: Bool = false) -> CoachCardState {
+                          ic: Bool = false, saving: Bool = false, callModeTip: Bool = false) -> CoachCardState {
         CoachCardState(status: st, mute: m, micMuted: m == mutedMute, coachMicMuted: st == .micOff, nudge: n, mode: mode,
-                       increasedContrast: ic, savingBadge: saving ? CoachCopy.savingNow : nil)
+                       increasedContrast: ic, savingBadge: saving ? CoachCopy.savingNow : nil, callModeTip: callModeTip)
     }
 
     /// Each coach card and pill state as `coach-<name>-<appearance>.png`, with Use Zoom/Meet controls
@@ -268,6 +268,8 @@ enum UISnapshots {
         // Save transcripts on (#13c): the saving badge on the status line, and still there under a nudge.
         ("card-saving", shotState(.listening, noZoomMute, nil, .card, saving: true), nil),
         ("card-saving-nudge", shotState(.listening, noZoomMute, amberNudge, .card, saving: true), nil),
+        // Headphones in call mode: the tip row under the buttons, with its Dismiss.
+        ("card-call-mode-tip", shotState(.listening, noZoomMute, nil, .card, callModeTip: true), nil),
         ("pill-idle", shotState(.idle, noZoomMute, nil, .pill), nil),
         ("pill-listening", shotState(.listening, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.muteMic),
         ("pill-muted", shotState(.muted, mutedMute, nil, .pill), nil),

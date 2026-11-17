@@ -79,6 +79,8 @@ final class CoachController: NSObject {
     private(set) var coachCard: CoachCardPresenter?
     private var nudges = CoachNudgeHold()
     private var nudgeTimer: Timer?
+    /// Shows the headphones-in-call-mode tip on the card at most once per call.
+    private var callModeTracker = CallModeHintTracker()
     /// The coach card is the pill (for the rest of this showing).
     private(set) var minimized = false
 
@@ -398,14 +400,24 @@ final class CoachController: NSObject {
 
     /// What the coach card shows now, or nil while the coach isn't on for a call.
     func coachCardState() -> CoachCardState? {
+        let listening = enabled && indicator == .listening
+        callModeTracker.update(call: service?.session.session?.startedAt,
+                               callMode: listening && ((service?.mic as? MicCapture)?.headphonesInCallMode() ?? false))
         guard enabled, let status = CoachCardState.Status(indicator) else { return nil }
         let now = ProcessInfo.processInfo.systemUptime
         nudges.expire(now: now)
-        return CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
-                              nudge: nudges.active(now: now),
-                              mode: minimized ? .pill : .card,
-                              increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
-                              savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
+        var state = CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
+                                   nudge: nudges.active(now: now),
+                                   mode: minimized ? .pill : .card,
+                                   increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
+                                   savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
+        state.callModeTip = callModeTracker.visible
+        return state
+    }
+
+    func dismissCallModeTip() {
+        callModeTracker.dismiss()
+        refresh()
     }
 
     private func updateCoachCard(_ s: CoachCardState?) {
@@ -428,7 +440,8 @@ final class CoachController: NSObject {
                                      mute: { [weak self] in self?.toggleMute() },
                                      muteMic: { [weak self] in self?.toggleMicMuted() },
                                      pause: { [weak self] in self?.pauseOrResume() },
-                                     resize: { [weak self] in self?.toggleMinimized() })
+                                     resize: { [weak self] in self?.toggleMinimized() },
+                                     dismissCallModeTip: { [weak self] in self?.dismissCallModeTip() })
         p.callScreen = { [weak self] in self?.service?.glowScreen }
         return p
     }

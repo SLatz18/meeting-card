@@ -149,12 +149,46 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(panel.contains("self?.run(.glide, to: target, outgoing: nil, incoming: incoming)"), "morph in place, then glide")
     }
 
+    /// The headphones-in-call-mode tip: the controller feeds the Kit's tracker from Core Audio state (through the mic)
+    /// and the call's start, only while listening; the card shows it on the full card only, and Dismiss ends it.
+    func testCallModeTipIsFedFromTheMicAndTheSessionStart() throws {
+        let controller = try read("App/CoachController.swift")
+        XCTAssertTrue(controller.contains("private var callModeTracker = CallModeHintTracker()"))
+        XCTAssertTrue(controller.contains("let listening = enabled && indicator == .listening"))
+        XCTAssertTrue(controller.contains("callModeTracker.update(call: service?.session.session?.startedAt,"), "the call is its start time")
+        XCTAssertTrue(controller.contains("callMode: listening && ((service?.mic as? MicCapture)?.headphonesInCallMode() ?? false))"),
+                      "call mode only while listening, from the mic's Core Audio state")
+        XCTAssertTrue(controller.contains("state.callModeTip = callModeTracker.visible"))
+        let body = try XCTUnwrap(controller.components(separatedBy: "func dismissCallModeTip() {").dropFirst().first?
+            .components(separatedBy: "\n    }").first)
+        XCTAssertEqual(body.trimmingCharacters(in: .whitespacesAndNewlines), "callModeTracker.dismiss()\n        refresh()")
+        XCTAssertTrue(controller.contains("dismissCallModeTip: { [weak self] in self?.dismissCallModeTip() }"))
+
+        let view = try read("App/CoachCardView.swift")
+        XCTAssertTrue(view.contains("var dismissCallModeTip: () -> Void = {}"))
+        XCTAssertTrue(view.contains("@objc func dismissCallModeTipPressed(_ sender: Any?) { actions.dismissCallModeTip() }"))
+        XCTAssertTrue(view.contains("tipLabel.stringValue = CoachCardCopy.CallModeTip.text"))
+        XCTAssertTrue(view.contains("tipLabel.isHidden = !s.callModeTip"))
+        XCTAssertTrue(view.contains("dismissTip.isHidden = !s.callModeTip"))
+        XCTAssertTrue(view.contains("dismissTip.setAccessibilityLabel(CoachCardCopy.CallModeTip.dismissAccessibilityLabel)"))
+        XCTAssertTrue(view.contains("height: Theme.CoachCard.cardHeight(callModeTip: s.callModeTip)"), "the card's size counts the row")
+        let pill = try XCTUnwrap(view.components(separatedBy: "final class CoachPillView").dropFirst().first)
+        XCTAssertFalse(pill.contains("callModeTip") || pill.contains("CallModeTip"), "the pill never shows the tip")
+        let panel = try read("App/CoachCardPanel.swift")
+        XCTAssertTrue(panel.contains("CoachFullCardView.frameSize(for: s) != current.frame.size"), "the panel resizes when the row comes or goes")
+        for f in Self.cardFiles + ["App/CoachController.swift"] {
+            let c = code(try read(f))
+            XCTAssertFalse(c.contains("outputCallState"), "\(f) reads Core Audio itself")
+        }
+    }
+
     /// The CI gate checks for every coach card shot the App writes.
     func testSnapshotGateCoversEveryState() throws {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
         let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
-        XCTAssertEqual(found.count, 19, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act)")
+        XCTAssertEqual(found.count, 20, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), and the call-mode tip")
+        XCTAssertTrue(found.contains("card-call-mode-tip"), "the call-mode tip card has a shot")
         for n in found + ["morph-end", "collapse-end"] {
             XCTAssertNotNil(script.range(of: #"(\s|\\\n)\#(n)(\s|;)"#, options: .regularExpression), "snapshots.sh doesn't check \(n)")
         }

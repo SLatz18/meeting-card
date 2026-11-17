@@ -307,6 +307,15 @@ final class ThemeTests: XCTestCase {
         XCTAssertLessThanOrEqual(k.statusRow.maxX + k.rowGap, k.minimizeButton.x + 1e-9, "inside the card, clear of Minimize")
     }
 
+    /// The call-mode tip's words wrap within the lines its row has, at the card's text width.
+    func testCallModeTipTextFitsItsLines() {
+        let k = Theme.CoachCard.self
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: CGFloat(k.tipFont.size))]
+        let bound = NSSize(width: CGFloat(k.tipText.width), height: CGFloat.greatestFiniteMagnitude)
+        let rect = (CoachCardCopy.CallModeTip.text as NSString).boundingRect(with: bound, options: [.usesLineFragmentOrigin], attributes: attrs)
+        XCTAssertLessThanOrEqual(Double(rect.height.rounded(.up)), k.tipTextHeight, "the tip text needs more lines than its row has")
+    }
+
     /// The coach UI files carry no literal sizes, radii or colors of their own.
     func testCoachUIHasNoOneOffValues() throws {
         let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")

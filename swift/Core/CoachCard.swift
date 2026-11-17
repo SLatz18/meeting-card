@@ -37,6 +37,18 @@ public enum CoachCardCopy {
     public enum Captions {
         public static let empty = "Captions will show here once someone talks."
     }
+
+    // MARK: DRAFT: call-mode tip (not yet copy-reviewed; edit before release)
+
+    /// The tip under the card when the user's headphones are in call mode. Generic on purpose: it
+    /// never names the call app or claims to know its settings.
+    public enum CallModeTip {
+        /// Set while any string below is still a draft.
+        public static let isDraft = true
+        public static let text = "Your headphones are in call mode, which lowers audio. Using your Mac's mic in the call app keeps full volume."
+        public static let dismiss = "Dismiss"
+        public static let dismissAccessibilityLabel = "Dismiss call mode tip"
+    }
 }
 
 // MARK: nudges
@@ -186,9 +198,12 @@ public struct CoachCardState: Equatable, Sendable {
     /// The saving badge's label on the card's status line while a transcript is being written
     /// (Save transcripts on, #13c); nil shows nothing.
     public var savingBadge: String?
+    /// The full card shows the call-mode tip row (headphones in call mode); the pill never does.
+    public var callModeTip: Bool
 
     public init(status: Status, mute: MuteControlPresentation, micMuted: Bool = false, coachMicMuted: Bool = false,
-                nudge: CoachNudge? = nil, mode: Mode = .card, increasedContrast: Bool = false, savingBadge: String? = nil) {
+                nudge: CoachNudge? = nil, mode: Mode = .card, increasedContrast: Bool = false, savingBadge: String? = nil,
+                callModeTip: Bool = false) {
         self.status = status
         self.mute = mute
         self.micMuted = micMuted
@@ -197,6 +212,7 @@ public struct CoachCardState: Equatable, Sendable {
         self.mode = mode
         self.increasedContrast = increasedContrast
         self.savingBadge = savingBadge
+        self.callModeTip = callModeTip
     }
 
     /// The coach glyph takes the live tint only while listening.
