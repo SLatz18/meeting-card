@@ -28,6 +28,12 @@ public final class CoachService: CoachSessionDelegate {
     /// Display for a session's app; injectable for tests.
     var locateScreen: (String?, NSRect?) -> NSRect? = { CallDisplayLocator.screen(appKey: $0, fallback: $1) }
     public var onChange: (() -> Void)?
+    /// A cue was shown (after the glow started).
+    public var onCue: ((Cue) -> Void)?
+    /// The display the last cue's glow went to: the call's display as far as the coach knows it (the
+    /// fallback display when the call's window wasn't found). nil until a cue and after the session
+    /// ends. Reading it reads nothing; only the glow's own placement does.
+    public private(set) var glowScreen: NSRect?
 
     /// - Parameters:
     ///   - keys: where the OpenAI key comes from, e.g. `KeychainStore(service: "<host's service>")`.
@@ -58,8 +64,9 @@ public final class CoachService: CoachSessionDelegate {
         session.delegate = self
         glow.placement = { [weak self] in
             guard let self else { return .init(screen: nil) }
-            return .init(screen: self.locateScreen(self.session.session?.appKey, self.fallbackScreen()),
-                         belowWindow: self.hostWindowNumber())
+            let screen = self.locateScreen(self.session.session?.appKey, self.fallbackScreen())
+            self.glowScreen = screen
+            return .init(screen: screen, belowWindow: self.hostWindowNumber())
         }
         if enabled { session.startPolling() }
     }
@@ -112,6 +119,10 @@ public final class CoachService: CoachSessionDelegate {
     public func stop() { session.stopManual() }
     /// Pause while pre-warmed: skip this call.
     public func skipThisCall() { session.skipThisCall() }
+    /// Off for the rest of this call, pre-warmed or in a session.
+    public func stopForThisCall() { session.stopForThisCall() }
+    /// The coached call's app (lowercased bundle ID), once known.
+    public var appKey: String? { session.session?.appKey }
 
     /// The indicator's one control: skip this call while pre-warmed, Pause while listening, Resume while paused.
     public func chipControl() { session.toggleFromIndicator() }
@@ -123,7 +134,12 @@ public final class CoachService: CoachSessionDelegate {
 
     // MARK: CoachSessionDelegate
 
-    public func coachSessionDidChange(_ session: CoachSession) { onChange?() }
+    public func coachSessionDidChange(_ session: CoachSession) {
+        if session.session == nil { glowScreen = nil }
+        onChange?()
+    }
+
+    public func coachSession(_ session: CoachSession, didShow cue: Cue) { onCue?(cue) }
 
     public func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) {
         switch problem {

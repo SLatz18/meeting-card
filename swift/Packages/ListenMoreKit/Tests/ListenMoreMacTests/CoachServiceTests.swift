@@ -151,12 +151,20 @@ final class CoachServiceTests: XCTestCase {
         provider.snap = zoom
         RunLoop.main.run(until: Date().addingTimeInterval(4.2))
         XCTAssertEqual(s.state, .active(paused: false))
+        var cues: [CueType] = []
+        s.onCue = { cues.append($0.type) }
+        XCTAssertNil(s.glowScreen, "no cue yet: the call's display isn't known")
         s.session.deliverForTesting(CueSuggestion(type: .interrupt, t: 10, onset: 9.7, source: .local))
         XCTAssertEqual(asked?.0, "us.zoom.xos")
         XCTAssertEqual(asked?.1, cardScreen)
         XCTAssertEqual(s.cuesShown, 1)
+        XCTAssertEqual(cues, [.interrupt], "the host hears about each cue shown")
+        XCTAssertEqual(s.glowScreen, callScreen, "the coach card can follow the glow's display without reading windows")
+        XCTAssertEqual(s.appKey, "us.zoom.xos")
         s.glow.hideAll()
-        s.stop()
+        s.stopForThisCall()
+        XCTAssertNil(s.glowScreen, "forgotten with the session")
+        XCTAssertEqual(s.indicator, .hidden)
     }
 
     func testEditedAllowlistReplacesDefaults() {
