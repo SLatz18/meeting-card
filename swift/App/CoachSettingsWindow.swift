@@ -21,15 +21,10 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let anyAppBox = NSButton(checkboxWithTitle: CoachCopy.anyApp, target: nil, action: nil)
     private var appsStack = NSStackView()
     private let root = NSStackView()
-    private let document = FlippedView()
+    private let document = NSView()
     private let scroll = NSScrollView()
     /// CI screenshots only: a shorter visible frame, to show the groups scrolling.
     private let visibleHeightOverride: Double?
-
-    /// Scroll-view document with its origin at the top, so the groups start at the top.
-    final class FlippedView: NSView {
-        override var isFlipped: Bool { true }
-    }
 
     /// `onboardingScreen` forces that onboarding screen (CI screenshots).
     init(coach: CoachController, onboardingScreen: Int? = nil, visibleHeightOverride: Double? = nil) {
@@ -191,11 +186,12 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let h = Theme.Settings.contentHeight(fitting: fitting, visibleHeight: visibleHeightOverride ?? Double(visible.height),
                                              chrome: chrome).height
         window.setContentSize(NSSize(width: w, height: h))
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, fitting - h)))
+        scroll.reflectScrolledClipView(scroll.contentView)
         let f = window.frame
         let o = Theme.Settings.clamp(origin: (Double(f.minX), Double(f.minY)), size: (Double(f.width), Double(f.height)),
                                      visible: (Double(visible.minX), Double(visible.minY), Double(visible.width), Double(visible.height)))
         if !visible.isEmpty { window.setFrameOrigin(NSPoint(x: o.x, y: o.y)) }
-        document.scroll(.zero)
     }
 
     private func onboardingViews() -> [NSView] {
