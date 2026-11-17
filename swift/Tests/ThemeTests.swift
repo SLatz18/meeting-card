@@ -155,6 +155,10 @@ final class ThemeTests: XCTestCase {
         let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
         let copy = try String(contentsOf: app.appendingPathComponent("CoachCopy.swift"), encoding: .utf8)
         XCTAssertTrue(copy.contains("\"Meet Call Coach\""))
+        // Approved copy: the toggle help and onboarding screen 1 describe the card nudge, not the glow.
+        XCTAssertTrue(copy.contains("static let toggleHelp = \"A small card turns red when you interrupt or talk over someone, and amber when you miss a question. Only you see it. Off by default.\""))
+        XCTAssertTrue(copy.contains("body: \"A quiet nudge on your calls. A small card shows a short tip. It turns red if you interrupt or talk over someone, and amber if you miss a question. Only you see it.\""))
+        XCTAssertFalse(copy.contains("screen-edge glow") || copy.contains("edge of your screen glows"))
         XCTAssertFalse(copy.contains("\"Meet Call coach\""))
         let window = try String(contentsOf: app.appendingPathComponent("CoachSettingsWindow.swift"), encoding: .utf8)
         XCTAssertTrue(window.contains("let primary = Self.cardButton(s.primary"))
@@ -248,12 +252,35 @@ final class ThemeTests: XCTestCase {
     /// The coach UI files carry no literal sizes, radii or colors of their own.
     func testCoachUIHasNoOneOffValues() throws {
         let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
-        for file in ["CoachChip.swift", "CoachSettingsWindow.swift", "CoachController.swift"] {
+        for file in ["CoachChip.swift", "CoachSettingsWindow.swift", "CoachController.swift", "CoachCardView.swift",
+                     "CoachCardPanel.swift", "CoachCaptions.swift"] {
             let src = try String(contentsOf: app.appendingPathComponent(file), encoding: .utf8)
             for bad in ["pointSize: 1", "pointSize: 2", "cornerRadius = 1", "spacing = 1", "spacing = 8", "constant: 1",
                         "srgbRed:", "white: 0.", ".systemRed", ".secondaryLabelColor", ".tertiaryLabelColor",
                         "quaternarySystemFill", "NSSize(width: 1"] {
                 XCTAssertFalse(src.contains(bad), "\(file): \(bad)")
+            }
+        }
+    }
+
+    /// The coach card and pill take every size, radius, inset, alpha and duration from a token: no
+    /// number in their code but 0, 1 and 2 (halves, and the backing-scale fallback), and no color.
+    func testCoachCardHasNoLiteralValues() throws {
+        let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
+        let number = try NSRegularExpression(pattern: #"(?<![A-Za-z0-9_.])\d+(\.\d+)?(?![A-Za-z0-9_])"#)
+        for file in ["CoachCardView.swift", "CoachCardPanel.swift", "CoachCaptions.swift"] {
+            let src = try String(contentsOf: app.appendingPathComponent(file), encoding: .utf8)
+            let code = src.components(separatedBy: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                .map { $0.replacingOccurrences(of: #""(?:[^"\\]|\\.)*""#, with: "\"\"", options: .regularExpression) }
+                .joined(separator: "\n")
+            for m in number.matches(in: code, range: NSRange(code.startIndex..., in: code)) {
+                let n = (code as NSString).substring(with: m.range)
+                XCTAssertTrue(["0", "1", "2"].contains(n), "\(file): literal \(n)")
+            }
+            for bad in ["NSColor(", "CGColor(", "srgbRed", "white:", ".systemOrange", ".systemRed", ".labelColor", "LabelColor",
+                        "systemFont("] {
+                XCTAssertFalse(code.contains(bad), "\(file): \(bad)")
             }
         }
     }

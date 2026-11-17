@@ -77,6 +77,17 @@ final class CuePolicyTests: XCTestCase {
         XCTAssertNotNil(p.offer(.notListening, t: 0, onset: 0, source: .gpt, confidence: 0.7))
     }
 
+    /// A host can switch cue types off (MeetingCard: not_listening); the generic config switches none off.
+    func testDisabledCueTypesNeverShow() {
+        XCTAssertTrue(CuePolicy(config: config.cues).disabled.isEmpty)
+        var cues = config.cues
+        cues.disabled = ["not_listening"]
+        let p = CuePolicy(config: cues)
+        XCTAssertNil(p.offer(.notListening, t: 0, onset: 0, source: .gpt, confidence: 0.99))
+        XCTAssertEqual(p.suppressed, 0, "not held: never offered")
+        XCTAssertNotNil(p.offer(.interrupt, t: 1, onset: 1, source: .local), "other cues are unaffected and no cooldown was used")
+    }
+
     func testJudgeOnlyDecidesNotListening() {
         XCTAssertEqual(CueType(gptLabel: "not_listening"), .notListening)
         for label in ["none", "interrupting", "aggressive", "missed_question"] {

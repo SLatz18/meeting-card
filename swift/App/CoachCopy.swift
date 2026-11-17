@@ -5,7 +5,7 @@ import ListenMoreCore
 enum CoachCopy {
     static let section = "Call Coach"
     static let toggle = "Call coach"
-    static let toggleHelp = "A quiet screen-edge glow when you interrupt, talk over someone, or miss a question. Off by default."
+    static let toggleHelp = "A small card turns red when you interrupt or talk over someone, and amber when you miss a question. Only you see it. Off by default."
     static let keyLabel = "OpenAI API key"
     static let keyPlaceholder = "sk-\u{2026}"
     static let keySavedPlaceholder = "Saved in your Keychain"
@@ -39,7 +39,6 @@ enum CoachCopy {
     static let menuTurnOff = "Turn Off Call Coach"
     static let menuGptOffNoKey = "GPT cues off: no API key"
     static let menuGptOffRejected = "GPT cues off: key not accepted"
-    static let skipThisCall = "Skip This Call"
     static let pause = "Pause"
     static let resume = "Resume"
     static let startNow = "Start now"
@@ -88,7 +87,7 @@ enum CoachCopy {
 
     static let onboarding: [Screen] = [
         Screen(title: "Meet Call Coach",
-               body: "A quiet nudge on your calls. The edge of your screen glows red if you interrupt or talk over someone, and amber if you miss a question. Only you see it.",
+               body: "A quiet nudge on your calls. A small card shows a short tip. It turns red if you interrupt or talk over someone, and amber if you miss a question. Only you see it.",
                primary: "Next", secondary: nil),
         Screen(title: "Your audio stays yours",
                body: "While the coach is on, call audio goes to OpenAI on your own API key. Nothing is saved: no transcripts, no stats, no recaps. Your key stays in the Keychain.",

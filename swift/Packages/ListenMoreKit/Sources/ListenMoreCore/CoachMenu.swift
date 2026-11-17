@@ -1,8 +1,8 @@
 import Foundation
 
 /// What a host's coach menu offers in each state, so there is always a visible way in: Enable while
-/// off, Skip this call while pre-warmed, Pause or Resume during a session (Pause while held by the
-/// call app's mute), Start now while waiting.
+/// off, Pause or Resume during a session (Pause while held by the call app's mute), Stop for this
+/// call while pre-warmed or in a session, Start now while waiting.
 /// The host maps items to its own copy and actions.
 public enum CoachMenuItem: Equatable, Sendable {
     /// A disabled header line.
@@ -11,7 +11,8 @@ public enum CoachMenuItem: Equatable, Sendable {
     case gptOff
     case enable
     case startNow
-    case skipThisCall
+    /// Off for the rest of this call (`CoachSession.stopForThisCall`).
+    case stopForCall
     case pause
     case resume
     case turnOff
@@ -37,10 +38,10 @@ public enum CoachMenu {
         var out: [CoachMenuItem]
         switch indicator {
         case .hidden: out = [.status(.waiting), .startNow]
-        case .on: out = [.status(.on), .skipThisCall]
-        case .listening: out = [.status(.listening), .pause]
-        case .paused: out = [.status(.paused), .resume]
-        case .muted: out = [.status(.muted), .pause]
+        case .on: out = [.status(.on), .stopForCall]
+        case .listening: out = [.status(.listening), .pause, .stopForCall]
+        case .paused: out = [.status(.paused), .resume, .stopForCall]
+        case .muted: out = [.status(.muted), .pause, .stopForCall]
         }
         if !gptAvailable { out.insert(.gptOff, at: 1) }
         return out + [.turnOff, .separator, .settings]

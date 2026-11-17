@@ -111,10 +111,11 @@ final class PrivacyGuardTests: XCTestCase {
         }
     }
 
-    /// A host's only defaults are coach settings, never call data.
+    /// A host's only defaults are coach settings, never call data. `coach.cardPosition` is where the
+    /// user last dragged the coach card (an offset in points).
     func testHostDefaultsAreSettingsOnly() throws {
         let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
-                                    "coach.judgeProvider"]
+                                    "coach.judgeProvider", "coach.cardPosition"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
         for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {

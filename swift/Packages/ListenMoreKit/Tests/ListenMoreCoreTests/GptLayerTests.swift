@@ -332,6 +332,30 @@ final class GptCoreTests: XCTestCase {
         XCTAssertEqual(core.onText(.others, text: "x", refT: -1, now: 6).refT, 6, "a missing reference time falls back to arrival")
     }
 
+    /// With not_listening disabled (MeetingCard's default) nothing is judged: the judge decides only
+    /// not_listening, so a call would cost money for verdicts that never show.
+    func testNoJudgeWhileNotListeningIsDisabled() throws {
+        let core = GptCore(config: try ListenMoreConfig.load(overrides: ["cues": ["disabled": ["not_listening"]]]))
+        XCTAssertNil(core.onText(.others, text: "how would that work in practice", refT: 3, now: 3.5).start)
+        XCTAssertNil(core.onText(.me, text: "it depends", refT: 4, now: 4.5).start)
+        XCTAssertEqual(core.snapshot.judgeCalls, 0)
+    }
+
+    /// A TypeSafe judge also decides aggressive and missed_question, so it still judges with not_listening
+    /// off; it stops only when every cue it decides is off.
+    func testTypeSafeStillJudgesWithNotListeningDisabled() throws {
+        let some = GptCore(config: try ListenMoreConfig.load(overrides: ["cues": ["disabled": ["not_listening"]],
+                                                                          "judge": ["provider": "typesafe"]]))
+        XCTAssertNil(some.onText(.others, text: "how would that work in practice", refT: 3, now: 3.5).start)
+        XCTAssertEqual(some.onText(.me, text: "it depends", refT: 4, now: 4.5).start, GptCore.JudgeRequest(refT: 4, reason: "me_reply"))
+        let all = GptCore(config: try ListenMoreConfig.load(overrides: ["cues": ["disabled": ["not_listening", "aggressive", "missed_question"]],
+                                                                         "judge": ["provider": "typesafe"]]))
+        XCTAssertNil(all.onText(.others, text: "how would that work in practice", refT: 3, now: 3.5).start)
+        XCTAssertNil(all.onText(.me, text: "it depends", refT: 4, now: 4.5).start)
+        XCTAssertEqual(CueType.decided(by: .gpt), [.notListening])
+        XCTAssertEqual(CueType.decided(by: .typesafe), Set(CueType.judged))
+    }
+
     func testNoJudgeMidMonologue() {
         let core = GptCore(config: config)
         core.setMeRun(config.gpt.judgeSkipRunS)

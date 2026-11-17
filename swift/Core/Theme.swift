@@ -33,6 +33,12 @@ public struct CardStyle: Sendable {
     public static let criticalColor = SystemColor.red
     /// Caution: systemOrange.
     public static let cautionColor = SystemColor.orange
+    /// `labelColor` in sRGB on macOS 26 (85% black or white; opaque under Increase Contrast), for
+    /// contrast math and tests. The App draws the live semantic color.
+    public static func primaryTextSRGB(dark: Bool, increasedContrast: Bool = false) -> RGBA {
+        let a = increasedContrast ? 1 : 0.85
+        return dark ? .white(a) : .black(a)
+    }
     public var critical: RGBA { CardStyle.srgb(CardStyle.criticalColor, dark: dark) }
     public var caution: RGBA { CardStyle.srgb(CardStyle.cautionColor, dark: dark) }
     /// Secondary control fill (Ignore) per state.
@@ -106,6 +112,60 @@ public struct CardStyle: Sendable {
         public static let opaque = true
         public static let shadow = false
         public static let animates = false
+    }
+
+    /// Coach surface motion. Windows still appear and leave without AppKit's animation
+    /// (`Material.animates`); these time the coach card's own morph, glide and pill changes.
+    public enum Motion {
+        /// The morph's keyframes, from its start: the card's content has faded by the second, the
+        /// new surface is in and at its size by the third.
+        public static let morphKeyframes: [TimeInterval] = [0, 0.120, 0.280]
+        public static var morph: TimeInterval { morphKeyframes[morphKeyframes.count - 1] }
+        /// Reduce Motion: no frame animation; the surface fades out and back in.
+        public static let reduceMotionCrossfade: TimeInterval = 0.200
+        /// Glide to the placement spot, and the pill widening for a nudge.
+        public static let move: TimeInterval = 0.240
+    }
+
+    /// The call coach card, its pill, and their nudges.
+    public enum Coach {
+        /// How long a nudge tints the card or pill.
+        public static let nudgeHold: TimeInterval = 4.5
+        public static let pill = (width: 200.0, height: 45.0, radius: 15.0)
+        /// Nudge tint: the rose or amber tone at this alpha over the card's surface.
+        public static let nudgeTint = (light: 0.12, dark: 0.16)
+        public static let nudgeTintIncreasedContrast = (light: 0.20, dark: 0.26)
+        /// The tone's leading bar and outline: the card border's alpha, full under Increase Contrast.
+        public static let nudgeEdgeAlpha = (light: CardBorder.alphaLight, dark: CardBorder.alphaDark)
+        public static let nudgeEdgeAlphaIncreasedContrast = 1.0
+        public static let nudgeBar: Double = 5
+        public static let nudgeBorder = CardStyle.Stroke.border
+        /// Nudge words on the tint keep at least this contrast.
+        public static let nudgeMinContrast = 4.5
+        /// The pill's drag handle.
+        public static let grabber = (width: 28.0, height: 3.5)
+        /// Room for the call app's own top bar (Zoom's floating meeting controls) above the card.
+        /// UNVERIFIED: an estimate, to be measured on the Mac hand check (MAC_DEMO_CHECKS CC3).
+        public static let callBarClearance: Double = 52
+        /// Below the call bar.
+        public static let topGap: Double = 12
+
+        /// Menu bar height, or the notch's safe-area inset where that is taller.
+        public static func screenMetric(safeAreaTop: Double, menuBarHeight: Double) -> Double {
+            max(safeAreaTop, menuBarHeight)
+        }
+
+        /// Screen top edge to the card's top edge.
+        public static func topOffset(screenMetric: Double) -> Double { screenMetric + callBarClearance + topGap }
+
+        public static func nudgeTint(dark: Bool, increasedContrast: Bool) -> Double {
+            let t = increasedContrast ? nudgeTintIncreasedContrast : nudgeTint
+            return dark ? t.dark : t.light
+        }
+
+        public static func nudgeEdgeAlpha(dark: Bool, increasedContrast: Bool) -> Double {
+            increasedContrast ? nudgeEdgeAlphaIncreasedContrast : dark ? nudgeEdgeAlpha.dark : nudgeEdgeAlpha.light
+        }
     }
 }
 
@@ -220,7 +280,7 @@ public enum Theme {
         public static let pauseSymbol = "pause.fill"
         public static let resumeSymbol = "play.fill"
         /// SF Symbols for the coach status menu, drawn at the body font size like a native menu.
-        public static let menuSymbols = (enable: "power", start: resumeSymbol, skip: "forward.end.fill",
+        public static let menuSymbols = (enable: "power", start: resumeSymbol, stop: CoachCard.Symbols.stop,
                                          pause: pauseSymbol, resume: resumeSymbol, turnOff: "power",
                                          gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
                                          settings: "gearshape")
@@ -330,5 +390,131 @@ public enum Theme {
         /// Muted reads like Paused: the held text role, the coach glyph on its status line.
         public static let mutedText = Coach.heldText
         public static let mutedSymbol = Coach.symbol
+    }
+
+    /// The call coach card the reminder card morphs into: card width, radius, fill and insets; a
+    /// status row (the nudge band while a nudge holds) with Minimize, the captions area, and a
+    /// button row with Stop coach in the Ignore slot and Mute and Pause/Resume where Join sits.
+    public enum CoachCard {
+        public static let width = CardLayout.W
+        public static let radius = CardStyle.Radius.card
+        public static let leading = CardStyle.Spacing.leading
+        public static let trailing = CardStyle.Spacing.trailing
+        public static let vertical = CardStyle.Spacing.controlBottom
+        public static let rowHeight = CardStyle.Size.control
+        public static let rowGap = CardStyle.Spacing.control
+        /// Three caption lines.
+        public static let captionsHeight = 3 * Metrics.captionHeight
+        public static var height: Double { 2 * vertical + 2 * rowHeight + 2 * rowGap + captionsHeight }
+
+        public static let statusFont = CardStyle.Typography.body
+        /// The status line reads like the chip: primary, held (paused or muted) secondary.
+        public static let statusText = Coach.text
+        public static let heldText = Coach.heldText
+        public static let nudgeFont = Theme.FontSpec(CardStyle.Typography.body.size, .semibold)
+        /// Nudge words on the tint (contrast checked against it).
+        public static let nudgeText = CardStyle.Text.primary
+        public static let captionsFont = CardStyle.Typography.caption
+        public static let captionsText = CardStyle.Text.secondary
+        public static let buttonFont = CardStyle.Typography.button
+        public static let glyphSize = Coach.glyphSize
+        public static let glyphGap = Coach.glyphGap
+        /// Icon buttons (Mute, Pause/Resume, Minimize): one control height square, the control radius.
+        public static let iconButton = CardStyle.Size.control
+        public static let iconButtonRadius = CardStyle.Radius.control
+        public static let iconGlyph = CardStyle.Typography.button
+        /// Stop coach: the Ignore button, as wide as its label plus the card's text inset each side.
+        public static let textButtonPadding = CardStyle.Spacing.leading
+        public static let bandRadius = CardStyle.Radius.control
+        /// Status text and glyph inset inside the band, clear of the nudge bar.
+        public static let bandInset = CardStyle.Coach.nudgeBar + CardStyle.Spacing.control
+        /// Pointer travel before a press on the background becomes a drag.
+        public static let dragSlop = Coach.controlInset
+
+        public enum Symbols {
+            public static let status = Coach.symbol
+            public static let mute = "mic.fill"
+            public static let unmute = "mic.slash.fill"
+            public static let pause = Coach.pauseSymbol
+            public static let resume = Coach.resumeSymbol
+            public static let stop = "stop.fill"
+            public static let minimize = "arrow.down.right.and.arrow.up.left"
+            public static let expand = "arrow.up.left.and.arrow.down.right"
+        }
+
+        public struct Frame: Equatable, Sendable {
+            public var x: Double, y: Double, width: Double, height: Double
+            public init(x: Double, y: Double, width: Double, height: Double) {
+                self.x = x; self.y = y; self.width = width; self.height = height
+            }
+            public var maxX: Double { x + width }
+            public var maxY: Double { y + height }
+        }
+
+        /// Card coordinates, bottom-left origin.
+        public static var statusRow: Frame {
+            Frame(x: leading, y: height - vertical - rowHeight, width: width - leading - trailing - iconButton - rowGap,
+                  height: rowHeight)
+        }
+        public static var minimizeButton: Frame {
+            Frame(x: width - trailing - iconButton, y: height - vertical - rowHeight, width: iconButton, height: iconButton)
+        }
+        public static var captions: Frame {
+            Frame(x: leading, y: vertical + rowHeight + rowGap, width: width - leading - trailing, height: captionsHeight)
+        }
+        public static var pauseButton: Frame {
+            Frame(x: width - trailing - iconButton, y: vertical, width: iconButton, height: iconButton)
+        }
+        public static var muteButton: Frame {
+            Frame(x: pauseButton.x - CardStyle.Spacing.control - iconButton, y: vertical, width: iconButton, height: iconButton)
+        }
+        public static func stopButton(labelWidth: Double) -> Frame {
+            Frame(x: leading, y: vertical, width: labelWidth + 2 * textButtonPadding, height: rowHeight)
+        }
+    }
+
+    /// The minimized coach: a pill with a grabber, the coach glyph, and Mute, Pause/Resume and Stop.
+    /// While a nudge holds it tints, shows the nudge's leading bar, and widens for the nudge words.
+    public enum CoachPill {
+        public static let width = CardStyle.Coach.pill.width
+        public static let height = CardStyle.Coach.pill.height
+        public static let radius = CardStyle.Coach.pill.radius
+        public static let grabber = CardStyle.Coach.grabber
+        public static let grabberTop = Coach.controlInset
+        public static let grabberColor = CardStyle.Text.tertiary
+        public static let padding = Coach.paddingLeading
+        public static let glyphSize = Coach.glyphSize
+        public static let glyphGap = Coach.glyphGap
+        public static let button = Coach.pauseButtonSize
+        public static let buttonRadius = Coach.pauseButtonRadius
+        public static let buttonGlyph = CardStyle.Typography.caption
+        public static let buttonGap = Coach.controlInset
+        public static let wordsFont = CoachCard.nudgeFont
+        /// Room each side of the nudge words for the text field's own inset.
+        public static let wordsInset = Coach.glyphGap
+        public static let maxWidth = CardLayout.W
+        public static var glyphX: Double { CardStyle.Coach.nudgeBar + padding }
+        /// Mute (hidden with no Zoom call), Pause/Resume and Stop.
+        public static func buttonsWidth(_ n: Int = 3) -> Double { Double(n) * button + Double(max(0, n - 1)) * buttonGap }
+        /// The row's vertical center, under the grabber.
+        public static var rowMidY: Double { (height - grabberTop - grabber.height) / 2 }
+
+        /// Pill width for nudge words `wordsWidth` wide (nil: no nudge), between the pill and card widths.
+        public static func width(wordsWidth: Double?, buttons n: Int = 3) -> Double {
+            guard let w = wordsWidth else { return width }
+            let need = glyphX + glyphSize + glyphGap + w + CardStyle.Spacing.control + buttonsWidth(n) + padding
+            return min(maxWidth, max(width, need))
+        }
+
+        /// The words' room in a pill `pillWidth` wide.
+        public static func wordsRoom(pillWidth: Double, buttons n: Int = 3) -> Double {
+            max(0, pillWidth - glyphX - glyphSize - glyphGap - CardStyle.Spacing.control - buttonsWidth(n) - padding)
+        }
+
+        /// The buttons' x positions (pill coordinates), right-aligned.
+        public static func buttonXs(pillWidth: Double, buttons n: Int = 3) -> [Double] {
+            let first = pillWidth - padding - buttonsWidth(n)
+            return (0..<n).map { first + Double($0) * (button + buttonGap) }
+        }
     }
 }

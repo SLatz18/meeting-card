@@ -26,6 +26,14 @@ public enum CueType: String, CaseIterable, Equatable, Sendable {
     /// missed_question too; the policy's cooldowns keep it to one glow).
     public static let judged: [CueType] = [.aggressive, .notListening, .missedQuestion]
 
+    /// The cues `provider` can decide.
+    public static func decided(by provider: JudgeProviderKind) -> Set<CueType> {
+        switch provider {
+        case .gpt: [.notListening]
+        case .typesafe: Set(judged)
+        }
+    }
+
     /// A judge label -> cue type, for the provider that produced it.
     public init?(judgeLabel: String, provider: JudgeProviderKind) {
         switch provider {
@@ -101,6 +109,8 @@ public final class CuePolicy {
     public let fade: Double
     public let minConfidence: Double
     private let colors: [String: CueColor]
+    /// Never offered (`cues.disabled`).
+    public let disabled: Set<CueType>
     private let rank: [CueType: Int]
     private var last: [CueType: TimeInterval] = [:]
     private var lastAny: TimeInterval?
@@ -114,6 +124,7 @@ public final class CuePolicy {
         fade = config.fadeS
         minConfidence = config.gptMinConfidence
         colors = config.colors
+        disabled = config.disabledTypes
         let order = config.priority.isEmpty ? CueType.allCases.map(\.rawValue) : config.priority
         var rank: [CueType: Int] = [:]
         for (i, raw) in order.enumerated() {
@@ -124,7 +135,7 @@ public final class CuePolicy {
 
     public func offer(_ type: CueType, t: TimeInterval, onset: TimeInterval, source: CueSource,
                       confidence: Double? = nil, level: CueLevel? = nil, quiet: Bool = false) -> Cue? {
-        guard let color = colors[type.rawValue] else { return nil }
+        guard !disabled.contains(type), let color = colors[type.rawValue] else { return nil }
         if paused { return nil }
         if source == .gpt {
             guard let confidence, confidence >= minConfidence else { return nil }
