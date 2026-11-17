@@ -9,18 +9,22 @@ public enum CaptionEvent: Equatable, Sendable {
     case final(Speaker, text: String)
 }
 
-/// Display labels for the two streams: "You" (the mic) and "Them" (call audio). The user can tag
-/// either for the current call; tags are dropped with `reset()` at call end.
+/// Display labels for the two streams: "You" (the mic) and "Them" (call audio), or the host's own
+/// wording for them. The user can tag either for the current call; tags are dropped with `reset()`
+/// at call end, the host's defaults stay.
 public struct SpeakerLabels: Equatable, Sendable {
     public static let defaultLabels: [Speaker: String] = [.me: "You", .others: "Them"]
     public static let maxLength = 32
 
+    public let defaults: [Speaker: String]
     private var tags: [Speaker: String] = [:]
 
-    public init() {}
+    public init(defaults: [Speaker: String] = SpeakerLabels.defaultLabels) {
+        self.defaults = defaults
+    }
 
     public func label(_ speaker: Speaker) -> String {
-        tags[speaker] ?? Self.defaultLabels[speaker] ?? speaker.rawValue
+        tags[speaker] ?? defaults[speaker] ?? Self.defaultLabels[speaker] ?? speaker.rawValue
     }
 
     public var isTagged: Bool { !tags.isEmpty }
@@ -29,7 +33,7 @@ public struct SpeakerLabels: Equatable, Sendable {
     /// characters are dropped, and the tag is cut to `maxLength` characters.
     public mutating func rename(_ speaker: Speaker, to tag: String?) {
         let clean = Self.clean(tag ?? "")
-        tags[speaker] = clean.isEmpty || clean == Self.defaultLabels[speaker] ? nil : clean
+        tags[speaker] = clean.isEmpty || clean == defaults[speaker] ? nil : clean
     }
 
     public mutating func reset() {

@@ -75,6 +75,29 @@ final class SpeakerLabelsTests: XCTestCase {
         XCTAssertFalse(l.isTagged)
     }
 
+    func testHostWordingIsTheDefaultAndSurvivesReset() {
+        var l = SpeakerLabels(defaults: [.me: "Me", .others: "Guests"])
+        XCTAssertEqual(l.label(.me), "Me")
+        XCTAssertEqual(l.label(.others), "Guests")
+        l.rename(.others, to: "Team B")
+        XCTAssertEqual(l.label(.others), "Team B")
+        l.rename(.others, to: "Guests")
+        XCTAssertFalse(l.isTagged, "the host's own word is not a tag")
+        l.rename(.me, to: "Lead")
+        l.reset()
+        XCTAssertEqual(l.label(.me), "Me", "reset drops tags, keeps the host's wording")
+        let live = LiveTranscript(settings: .init(captions: true, saving: true, folder: TranscriptFixture.folder, keyUsable: true),
+                                  store: SpyStore(), labels: SpeakerLabels(defaults: [.me: "Me", .others: "Guests"]),
+                                  timeZone: TranscriptFixture.utc)
+        live.callStarted()
+        live.receive(.final(.others, text: "Hello."))
+        live.callEnded()
+        let file = (live.recorder.store as? SpyStore)?.files.values.first ?? ""
+        XCTAssertTrue(file.contains("] Guests:** Hello."))
+        XCTAssertTrue(file.contains("Speakers: Me (microphone), Guests (call audio)"))
+        XCTAssertEqual(live.labels.label(.others), "Guests")
+    }
+
     func testTagsAreCleanedAndResettable() {
         var l = SpeakerLabels()
         l.rename(.others, to: "  Guest\n  two\t")

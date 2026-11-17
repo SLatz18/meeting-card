@@ -35,15 +35,17 @@ public final class LiveTranscript {
     public var settings: Settings
     public let recorder: TranscriptRecorder
     public private(set) var captions: CaptionBuffer
-    public private(set) var labels = SpeakerLabels()
+    public private(set) var labels: SpeakerLabels
     public private(set) var callStart: Date?
     public private(set) var gptStop: GptStopReason?
     private let clock: () -> Date
 
+    /// `labels`: the host's wording for You and Them (tags reset at call end, these stay).
     public init(settings: Settings, store: TranscriptStore, captions: CaptionBuffer = CaptionBuffer(),
-                timeZone: TimeZone = .current, clock: @escaping () -> Date = Date.init) {
+                labels: SpeakerLabels = SpeakerLabels(), timeZone: TimeZone = .current, clock: @escaping () -> Date = Date.init) {
         self.settings = settings
         self.captions = captions
+        self.labels = labels
         recorder = TranscriptRecorder(store: store, timeZone: timeZone)
         self.clock = clock
     }
