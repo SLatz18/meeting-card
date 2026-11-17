@@ -417,6 +417,69 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertEqual(s.indicator, .hidden)
     }
 
+    /// Stop (the coach card's, replacing Skip this call) ends the coach for the rest of the call:
+    /// it doesn't restart while the call goes on, and the next call starts normally.
+    func testStopEndsTheCoachForTheRestOfTheCall() async {
+        let (s, provider) = audioSession()
+        provider.zoomCall()
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertEqual(s.indicator, .listening)
+        s.stopForThisCall()
+        XCTAssertNil(s.session)
+        XCTAssertEqual(s.indicator, .hidden)
+        XCTAssertTrue(s.capturingBundleIds.isEmpty)
+        XCTAssertEqual(mic.stopped, 1)
+        poll(s, seconds: 120)
+        XCTAssertEqual(s.indicator, .hidden, "no restart, no pre-warm while the call goes on")
+        XCTAssertEqual(mic.started, 1)
+        provider.silence()
+        poll(s, seconds: 1)
+        provider.zoomCall()
+        poll(s, seconds: 4)
+        XCTAssertEqual(s.indicator, .listening, "the next call starts normally")
+    }
+
+    func testStopWhilePausedOrMutedEndsTheCall() async {
+        let (s, provider) = audioSession()
+        provider.zoomCall()
+        s.tick()
+        poll(s, seconds: 3)
+        s.setPaused(true)
+        XCTAssertEqual(s.indicator, .paused)
+        s.stopForThisCall()
+        poll(s, seconds: 60)
+        XCTAssertEqual(s.indicator, .hidden)
+    }
+
+    /// While pre-warmed (a Join hint pending, the call app inside its start debounce), Stop means
+    /// nothing starts for this call, and the hint can't pre-warm it again.
+    func testStopWhilePrewarmedKeepsTheCallFromStarting() async {
+        let (s, provider) = audioSession()
+        s.joinHint(endsAt: clock.now() + 600)
+        provider.zoomCall()
+        s.tick()
+        XCTAssertEqual(s.indicator, .on)
+        s.stopForThisCall()
+        XCTAssertEqual(s.indicator, .hidden)
+        poll(s, seconds: 30)
+        XCTAssertNil(s.session)
+        XCTAssertEqual(s.indicator, .hidden)
+        XCTAssertEqual(mic.started, 0)
+    }
+
+    /// A Join hint pending when a running session is stopped doesn't bring the coach back.
+    func testStopDropsAPendingJoinHint() async {
+        let (s, provider) = audioSession()
+        s.joinHint(endsAt: clock.now() + 600)
+        provider.zoomCall()
+        poll(s, seconds: 4)
+        XCTAssertEqual(s.indicator, .listening)
+        s.stopForThisCall()
+        poll(s, seconds: 5)
+        XCTAssertEqual(s.indicator, .hidden)
+    }
+
     func testJoinHintEndsTheSessionAtTheEventEnd() async {
         let (s, provider) = audioSession()
         s.joinHint(endsAt: clock.now() + 10)

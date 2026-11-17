@@ -173,6 +173,15 @@ public final class CoachSession {
         changed()
     }
 
+    /// Stop: the coach is off for the rest of this call. A running session stops and its app stays
+    /// suppressed until its call audio ends; a pending Join hint is dropped, so nothing pre-warms
+    /// again for this call. The next call starts normally.
+    public func stopForThisCall() {
+        apply(trigger.manualStop())
+        trigger.dismissPrewarm()
+        changed()
+    }
+
     /// One control for the indicator: skip while pre-warmed, Pause while listening or muted, Resume
     /// while paused (still held if the call app is muted).
     public func toggleFromIndicator() {
