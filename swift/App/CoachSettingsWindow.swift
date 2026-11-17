@@ -43,7 +43,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let savingToggle = NSSwitch()
     private let transcriptNote = CoachSettingsWindow.text(CoachCopy.transcriptNeedsKey, font: Theme.Settings.helperFont,
                                                           color: CoachSettingsWindow.color(.secondary))
-    private let folderPath = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let folderPath = NSTextField(labelWithString: "")
     private let chooseFolderButton = NSButton(title: CoachCopy.chooseFolder, target: nil, action: nil)
     /// The same saving indicator as on screen during the call (the Kit's caption view).
     private let savingIndicator = CaptionView(style: CoachTranscript.captionStyle())
@@ -461,6 +461,17 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         deleteButton.action = #selector(deleteTranscript(_:))
         deleteButton.bezelStyle = .rounded
         deleteButton.controlSize = .small
+        // The path is one line, cut in the middle; the buttons beside it and the status keep their size.
+        folderPath.font = Theme.font(Theme.Settings.helperFont)
+        folderPath.textColor = Self.color(.secondary)
+        folderPath.lineBreakMode = .byTruncatingMiddle
+        folderPath.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        transcriptStatus.preferredMaxLayoutWidth = Self.innerWidth / 2
+        transcriptStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for b in [chooseFolderButton, deleteButton] {
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
+            b.setContentHuggingPriority(.required, for: .horizontal)
+        }
         for (field, speaker) in [(youField, Speaker.me), (themField, Speaker.others)] {
             field.placeholderString = SpeakerLabels().label(speaker)
             field.font = Theme.font(Theme.Settings.itemFont)
