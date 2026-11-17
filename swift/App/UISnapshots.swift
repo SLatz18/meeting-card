@@ -9,6 +9,10 @@ import MeetingCardCore
 ///   MEETING_CARD_COACH_CHIP_LABEL=<text>         a longer chip label (shows the icon-only collapse)
 ///   MEETING_CARD_COACH_SHOTS=<dir>               write glow, Settings, onboarding and menu PNGs,
 ///                                                 plus the design packet, then quit
+///   MEETING_CARD_COACH_CARD_SHOTS=<dir>          write the coach card and pill in each state
+///                                                 (`coachCardShotNames`), then morph the fixture card
+///                                                 into the coach card and collapse it, writing both
+///                                                 end states, then quit
 /// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
 /// surface (chip, the Muted chip, glow, Settings, Settings with Use Zoom/Meet controls on, onboarding,
 /// status menu off / listening / muted) for a side-by-side design review.
@@ -26,6 +30,7 @@ enum UISnapshots {
 
     @MainActor
     static func schedule(_ env: [String: String], card: Card, controller: Controller) {
+        if let dir = env["MEETING_CARD_COACH_CARD_SHOTS"] { return coachCardShots(dir: dir, card: card, controller: controller) }
         guard let dir = env["MEETING_CARD_COACH_SHOTS"] else { return }
         controller.schedule(1.0, repeats: false) { [weak card] in
             MainActor.assumeIsolated {
@@ -105,6 +110,132 @@ enum UISnapshots {
         ctx.interpolationQuality = .high
         ctx.draw(card, in: CGRect(x: pad, y: h - pad - ch, width: cw, height: ch))
         ctx.draw(surface, in: CGRect(x: pad + cw + pad, y: h - pad - sh, width: sw, height: sh))
+        return ctx.makeImage()
+    }
+
+    // MARK: coach card and pill
+
+    /// Each coach card and pill state as `coach-<name>-<appearance>.png`. Pills that can't mute
+    /// also show the tooltip that says why.
+    static let coachCardStates: [(name: String, state: CoachCardState, tooltip: Bool)] = {
+        let live = CoachCardState.Mute.available(muted: false)
+        let amber = CoachNudge(kind: .missedQuestion, tone: .amber), rose = CoachNudge(kind: .interrupt, tone: .rose)
+        func s(_ st: CoachCardState.Status, _ m: CoachCardState.Mute = live, _ n: CoachNudge? = nil, _ mode: CoachCardState.Mode = .card,
+               ic: Bool = false) -> CoachCardState {
+            CoachCardState(status: st, mute: m, nudge: n, mode: mode, increasedContrast: ic)
+        }
+        return [
+            ("card-idle", s(.idle), false), ("card-listening", s(.listening), false), ("card-paused", s(.paused), false),
+            ("card-muted", s(.muted, .available(muted: true)), false),
+            ("card-nudge-amber", s(.listening, live, amber), false), ("card-nudge-rose", s(.listening, live, rose), false),
+            ("card-increased-contrast", s(.listening, live, amber, ic: true), false),
+            ("pill-idle", s(.idle, live, nil, .pill), false), ("pill-muted", s(.muted, .available(muted: true), nil, .pill), false),
+            ("pill-paused", s(.paused, live, nil, .pill), false),
+            ("pill-nudge-amber", s(.listening, live, amber, .pill), false), ("pill-nudge-rose", s(.listening, live, rose, .pill), false),
+            ("pill-mute-disabled-meet", s(.listening, .blocked(.meet), nil, .pill), true),
+            ("pill-mute-disabled-off", s(.listening, .blocked(.controlsOff), nil, .pill), true),
+            ("pill-mute-disabled-permission", s(.listening, .blocked(.permission), nil, .pill), true),
+        ]
+    }()
+
+    /// Every PNG `coachCardShots` writes, per appearance (the CI gate checks for them).
+    static var coachCardShotNames: [String] { coachCardStates.map(\.name) + ["morph-end", "collapse-end"] }
+
+    @MainActor
+    static func coachCardShots(dir: String, card: Card, controller: Controller) {
+        let suite = "com.slatz.meetingcard.swift.snapshots"
+        guard let defaults = UserDefaults(suiteName: suite) else { return }
+        defaults.removePersistentDomain(forName: suite)
+        let tag = card.isDark ? "dark" : "light"
+        let p = CoachCardPresenter(defaults: defaults, positionKey: CoachController.Keys.cardPosition, captions: CoachCaptionsPlaceholder())
+        p.reduceMotion = { false }
+        func write(_ name: String, tooltip: String? = nil) {
+            let img = layerImage(p.root, scale: p.panel.backingScaleFactor).flatMap { framed($0, tooltip: tooltip, dark: card.isDark) }
+            let ok = img.map { Card.writePNG($0, "\(dir)/coach-\(name)-\(tag).png") } ?? false
+            controller.log("coach card shot \(name)-\(tag) ok=\(ok)")
+        }
+        func next(_ i: Int) {
+            guard i < coachCardStates.count else { return transitions() }
+            let (name, state, tooltip) = coachCardStates[i]
+            p.hide()
+            p.panel.appearance = state.increasedContrast
+                ? NSAppearance(named: card.isDark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua) : nil
+            p.applyChrome()
+            p.show(state, from: nil)
+            controller.schedule(0.4, repeats: false) {
+                MainActor.assumeIsolated {
+                    write(name, tooltip: tooltip ? state.muteControl.tooltip : nil)
+                    next(i + 1)
+                }
+            }
+        }
+        // The real morph out of the fixture card (then its glide), and the real collapse to the pill.
+        func transitions() {
+            p.hide()
+            p.panel.appearance = nil
+            p.applyChrome()
+            let state = coachCardStates[1].state
+            p.show(state, from: card)
+            let morph = CoachMotion.duration(.morph, reduceMotion: false) + CoachMotion.duration(.glide, reduceMotion: false)
+            controller.schedule(morph + 0.6, repeats: false) {
+                MainActor.assumeIsolated {
+                    write("morph-end")
+                    var pill = state
+                    pill.mode = .pill
+                    p.update(pill)
+                    controller.schedule(CoachMotion.duration(.collapse, reduceMotion: false) + 0.6, repeats: false) {
+                        MainActor.assumeIsolated {
+                            write("collapse-end")
+                            NSApp.terminate(nil)
+                        }
+                    }
+                }
+            }
+        }
+        controller.schedule(1.0, repeats: false) { MainActor.assumeIsolated { next(0) } }
+    }
+
+    /// A shown view's layer tree as drawn (like the card's snapshot).
+    @MainActor
+    static func layerImage(_ view: NSView, scale backing: CGFloat) -> CGImage? {
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        let scale = backing > 0 ? backing : 2
+        guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: Int(view.bounds.width * scale), height: Int(view.bounds.height * scale),
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        view.layer?.render(in: ctx)
+        return ctx.makeImage()
+    }
+
+    /// A coach surface on the desktop tone, with room around it; `tooltip` is drawn under it like
+    /// AppKit's tooltip, for the states whose difference only shows on hover.
+    static func framed(_ img: CGImage, tooltip: String?, dark: Bool) -> CGImage? {
+        let scale: CGFloat = 2, pad = CGFloat(CardStyle.Spacing.stack) * scale
+        let font = Theme.font(CardStyle.Typography.caption)
+        let text = tooltip.map { NSAttributedString(string: $0, attributes: [.font: font, .foregroundColor: dark ? NSColor.white : NSColor.black]) }
+        let ts = text?.size() ?? .zero
+        let tipW = text == nil ? 0 : (ts.width + CGFloat(CardStyle.Spacing.control) * 2) * scale
+        let tipH = text == nil ? 0 : (ts.height + CGFloat(CardStyle.Spacing.control)) * scale
+        let w = max(CGFloat(img.width), tipW) + 2 * pad, h = CGFloat(img.height) + 2 * pad + (text == nil ? 0 : tipH + pad / 2)
+        guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: Int(w), height: Int(h), bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.setFillColor(desktop(dark: dark))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.draw(img, in: CGRect(x: pad, y: h - pad - CGFloat(img.height), width: CGFloat(img.width), height: CGFloat(img.height)))
+        if let text {
+            let box = CGRect(x: pad, y: pad, width: tipW, height: tipH)
+            ctx.setFillColor(dark ? CGColor(srgbRed: 0.25, green: 0.25, blue: 0.26, alpha: 1) : CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+            ctx.fill(box)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+            ctx.scaleBy(x: scale, y: scale)
+            text.draw(at: NSPoint(x: box.minX / scale + CGFloat(CardStyle.Spacing.control), y: box.minY / scale + CGFloat(CardStyle.Spacing.control) / 2))
+            NSGraphicsContext.restoreGraphicsState()
+        }
         return ctx.makeImage()
     }
 

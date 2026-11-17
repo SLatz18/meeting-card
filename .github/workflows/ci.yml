@@ -99,7 +99,7 @@ jobs:
           path: swift/build/*.log
 
   # Reminder cards rendered at the base and head revisions must be pixel-identical; the coach UI
-  # (chip states, glow, Settings, onboarding) is rendered from head for review.
+  # (chip states, glow, Settings, onboarding, the coach card and pill) is rendered from head for review.
   snapshots:
     runs-on: macos-26
     timeout-minutes: 40
@@ -151,3 +151,15 @@ jobs:
         with:
           name: snapshots
           path: ${{ runner.temp }}/shots/
+      # The coach card and pill in each state (light and dark), and the morph and collapse end states.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coach-card-snapshots
+          path: |
+            ${{ runner.temp }}/shots/coach/coach-card-*.png
+            ${{ runner.temp }}/shots/coach/coach-pill-*.png
+            ${{ runner.temp }}/shots/coach/coach-morph-end-*.png
+            ${{ runner.temp }}/shots/coach/coach-collapse-end-*.png
+            ${{ runner.temp }}/shots/coach/coach-card-shots.log
+          if-no-files-found: error

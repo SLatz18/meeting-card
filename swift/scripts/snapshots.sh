@@ -7,8 +7,9 @@
 #   scripts/snapshots.sh coach <out-dir>
 #       coach chip states (incl. the multi-link card, full and collapsed), glow, Settings (incl. the
 #       TypeSafe cue judge), onboarding, status menu and the design packet
-#       (packet-<surface>-<appearance>.png, listed in packet-list.txt) from this checkout's build;
-#       fails if a Use Zoom/Meet controls packet is missing
+#       (packet-<surface>-<appearance>.png, listed in packet-list.txt), and the coach card and pill
+#       states with the morph and collapse end states (coach-<state>-<appearance>.png) from this
+#       checkout's build; fails if a Use Zoom/Meet controls packet or a coach card state is missing
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 # Start 10 min out: the "in 10 min" title is stable across a pair.
@@ -59,11 +60,24 @@ case "${1:-}" in
         scripts/show-fixture.sh meet "$a" 20 >/dev/null 2>&1) || true
       grep -hE "coach (shot|packet|menu)" "$LOG" >> "$OUT/coach-shots.log" 2>/dev/null || true
     done
+    # The coach card and pill in each state, and the morph and collapse end states (coach-<name>-<appearance>.png;
+    # names from UISnapshots.coachCardStates).
+    for a in light dark; do
+      (cd "$HERE" && MEETING_CARD_COACH_CARD_SHOTS="$OUT" scripts/show-fixture.sh meet "$a" 40 >/dev/null 2>&1) || true
+      grep -hE "coach card shot" "$LOG" >> "$OUT/coach-card-shots.log" 2>/dev/null || true
+    done
     ls "$OUT"
     # Use Zoom/Meet controls review: the card beside each surface it adds or changes (the Muted chip,
     # Settings with the new group off and on, the Muted status menu), light and dark, or fail.
     (cd "$OUT" && ls packet-*.png) > "$OUT/packet-list.txt" 2>/dev/null || true
     missing=0
+    for s in card-idle card-listening card-paused card-muted card-nudge-amber card-nudge-rose card-increased-contrast \
+             pill-idle pill-muted pill-paused pill-nudge-amber pill-nudge-rose \
+             pill-mute-disabled-meet pill-mute-disabled-off pill-mute-disabled-permission morph-end collapse-end; do
+      for a in light dark; do
+        [[ -s "$OUT/coach-$s-$a.png" ]] || { echo "missing coach-$s-$a.png" >&2; missing=1; }
+      done
+    done
     for s in chip-muted settings settings-call-controls menu-muted; do
       for a in light dark; do
         [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
