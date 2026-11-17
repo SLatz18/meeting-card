@@ -81,7 +81,9 @@ final class KeychainStoreTests: XCTestCase {
     }
 
     func testErrorsCarryNoSecret() {
-        let e = KeychainStore.KeychainError.unexpectedStatus(-25300)
-        XCTAssertFalse(String(describing: e).contains("sk-"))
+        let status = KeychainStore.KeychainError.unexpectedStatus(-25300)
+        let data = KeychainStore.KeychainError.badData("value")
+        XCTAssertFalse(String(describing: status).contains("sk-"))
+        XCTAssertFalse(String(describing: data).contains("sk-"))
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import ListenMoreCore
 import MeetingCardCore
 import ServiceManagement
 
@@ -93,7 +94,11 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
         let env = ProcessInfo.processInfo.environment
         if args.fixture == nil {
-            coach = try? CoachController()
+            do {
+                coach = try CoachController()
+            } catch {
+                log(ListenMoreConfig.loadFailureMessage(error))
+            }
             coach?.visibleCards = { [unowned self] in self.coord.cards }
         } else {
             demoChip = UISnapshots.demoChip(env)

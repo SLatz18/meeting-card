@@ -8,7 +8,7 @@ import Security
 /// unlocked and never migrated to another device. Ad-hoc and self-signed builds get
 /// `errSecMissingEntitlement` there, so the key goes to the login keychain instead, which ignores
 /// accessibility classes. Values never appear in errors, descriptions or logs; errors carry the
-/// OSStatus only.
+/// OSStatus or an attribute name, never the key.
 public struct KeychainStore {
     public static let defaultService = "com.slatz.meetingcard.swift.openai"
     public static let defaultAccount = "OPENAI_API_KEY"
@@ -16,7 +16,7 @@ public struct KeychainStore {
 
     public enum KeychainError: Error, Equatable {
         case unexpectedStatus(OSStatus)
-        case badData
+        case badData(String)
     }
 
     public enum Location: Equatable {
@@ -68,7 +68,7 @@ public struct KeychainStore {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         switch status {
         case errSecSuccess:
-            guard let data = item as? Data, let s = String(data: data, encoding: .utf8) else { throw KeychainError.badData }
+            guard let data = item as? Data, let s = String(data: data, encoding: .utf8) else { throw KeychainError.badData("value") }
             return APIKey(s)
         case errSecItemNotFound:
             return nil

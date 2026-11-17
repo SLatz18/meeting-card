@@ -81,6 +81,24 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testLoadFailureMessagePrintsTypeOnly() {
+        let path = "/Users/someone/Library/Application Support/coach/override.json"
+        let snippet = #"{"openai_api_key":"sk-test-not-real"}"#
+        let invalid = ListenMoreConfig.loadFailureMessage(ConfigError.invalid("\(path) \(snippet)"))
+        XCTAssertEqual(invalid, "listen-more: could not load the coach config (invalid)")
+        XCTAssertFalse(invalid.contains(path))
+        XCTAssertFalse(invalid.contains("sk-"))
+
+        let cocoa = NSError(domain: NSCocoaErrorDomain, code: 260, userInfo: [
+            NSFilePathErrorKey: path,
+            NSLocalizedDescriptionKey: "The file \(path) doesn't exist. \(snippet)",
+        ])
+        let line = ListenMoreConfig.loadFailureMessage(cocoa)
+        XCTAssertEqual(line, "listen-more: could not load the coach config (NSError)")
+        XCTAssertFalse(line.contains(path))
+        XCTAssertFalse(line.contains("260"))
+    }
+
     func testConfigHasNoSecrets() {
         XCTAssertNil(DefaultConfig.json.range(of: #"sk-[A-Za-z0-9_-]{10,}"#, options: .regularExpression))
     }

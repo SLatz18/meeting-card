@@ -1,8 +1,15 @@
 # ListenMoreKit
 
 The call coach engine inside MeetingCard, as a local Swift package (wired in through
-`swift/project.yml` `packages:`). Vendored from the listen-more prototype's Swift shell (`mac/`
-at `1a997e7`); there is no dependency on that repository.
+`swift/project.yml` `packages:`). Vendored from the listen-more prototype's Swift shell; there is
+no dependency on that repository.
+
+**Sync point: listen-more `mac/` at `9b5ea23`.** Ported from it: the Kit sources and tests
+(adapted to MeetingCard: the trigger, runner, chip indicator, glow profile and generic defaults are
+MeetingCard's), the type-only config error message, and the Keychain error and ThisDeviceOnly
+changes. Not vendored: the standalone menu-bar app (`mac/Sources/ListenMore`) and the prototype's
+demo clips, timelines and screenshots. To sync, diff upstream `mac/` from this commit forward and
+port changes by hand, then update this line.
 
 - `ListenMoreCore` (Foundation only, builds and tests on Linux): config and generic defaults,
   voice activity detection, local rules (interrupt, talk-over, monologue, talk share, tone flags),

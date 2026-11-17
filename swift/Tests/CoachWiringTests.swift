@@ -30,7 +30,9 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("var enabled: Bool { defaults.bool(forKey: Keys.enabled) }"), "bool(forKey:) is false until set")
         XCTAssertFalse(src.contains("register(defaults"), "no default that turns it on")
         let controller = try read("App/Controller.swift")
-        XCTAssertTrue(controller.contains("if args.fixture == nil {\n            coach = try? CoachController()"),
+        XCTAssertTrue(controller.contains("if args.fixture == nil {\n            do {\n                coach = try CoachController()"),
                       "fixture runs never create the coach")
+        XCTAssertTrue(controller.contains("log(ListenMoreConfig.loadFailureMessage(error))"),
+                      "a config failure logs its type only")
     }
 }

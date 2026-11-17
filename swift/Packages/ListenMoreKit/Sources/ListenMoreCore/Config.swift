@@ -141,6 +141,23 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
 
 public enum ConfigError: Error, Equatable {
     case invalid(String)
+
+    /// Case name only. The associated string can quote a path or a JSON snippet, so it is never printed.
+    public var publicName: String {
+        switch self {
+        case .invalid: "invalid"
+        }
+    }
+}
+
+extension ListenMoreConfig {
+    /// Log line for a failed config load: the error's type, never its payload. `ConfigError`
+    /// contributes its case name; anything else its Swift type name (`NSError`'s description
+    /// includes the file path).
+    public static func loadFailureMessage(_ error: Error) -> String {
+        let name = (error as? ConfigError)?.publicName ?? String(describing: type(of: error))
+        return "listen-more: could not load the coach config (\(name))"
+    }
 }
 
 public enum CueColor: String, Decodable, Equatable, Sendable {
