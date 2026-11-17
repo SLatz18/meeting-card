@@ -11,11 +11,12 @@ final class CaptionFeedViewTests: XCTestCase {
 
     /// Synthetic, content-free lines.
     static func demo(saving: Bool = true) -> CaptionFeedModel {
-        CaptionFeedModel(lines: [
+        CaptionFeedModel(header: "Live captions", lines: [
             .init(speaker: "Them", text: "Shall we start with the timeline for the next release?", own: false),
             .init(speaker: "You", text: "Yes, the first draft is ready for review.", own: true),
             .init(speaker: "Them", text: "Great, let's go through it section by", own: false),
-        ], savingLabel: saving ? "Saving transcript" : nil)
+        ], footnote: saving ? "Saving a transcript for this call." : "Kept in memory only. Not saved.",
+           savingLabel: saving ? "Saving transcript" : nil)
     }
 
     func write(_ img: CGImage, _ name: String) {
@@ -65,6 +66,20 @@ final class CaptionFeedViewTests: XCTestCase {
         XCTAssertGreaterThan(hi, h3)
         let saving = try XCTUnwrap(CaptionFeedSnapshot.image(CaptionFeedModel(savingLabel: "Saving transcript"), dark: true, scale: 2))
         write(saving, "caption-feed-saving-dark.png")
+    }
+
+    func testHeaderPlaceholderAndFootnoteEachAddARow() throws {
+        func height(_ m: CaptionFeedModel) throws -> Int { try XCTUnwrap(CaptionFeedSnapshot.image(m, dark: false, scale: 1)).height }
+        let empty = CaptionFeedModel(placeholder: "Captions will show here once someone talks.")
+        let withHeader = CaptionFeedModel(header: "Live captions", placeholder: empty.placeholder)
+        let full = CaptionFeedModel(header: "Live captions", placeholder: empty.placeholder, footnote: "Kept in memory only. Not saved.")
+        XCTAssertGreaterThan(try height(withHeader), try height(empty))
+        XCTAssertGreaterThan(try height(full), try height(withHeader))
+        let stopped = CaptionFeedModel(header: "Live captions", note: "Captions stopped", placeholder: "unused")
+        XCTAssertEqual(try height(stopped), try height(withHeader), "the note takes the placeholder's row")
+        for dark in [false, true] {
+            write(try XCTUnwrap(CaptionFeedSnapshot.image(full, dark: dark, scale: 2)), "caption-feed-empty-\(dark ? "dark" : "light").png")
+        }
     }
 
     func testModelClearsAndReportsEmpty() {

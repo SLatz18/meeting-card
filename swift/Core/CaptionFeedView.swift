@@ -2,9 +2,10 @@
 import Observation
 import SwiftUI
 
-/// What the caption feed shows: the call's recent lines with their speaker labels, an optional
-/// status note (e.g. captions stopped at the cost cap) and the saving indicator's label while a
-/// transcript is being written. The host updates it; the view follows. Content: memory only.
+/// What the caption feed shows: a header, the call's recent lines with their speaker labels (or a
+/// placeholder before anyone talks, or a status note such as captions stopped at the cost cap), a
+/// footnote, and the saving indicator's label while a transcript is being written. Every string is
+/// the host's copy. The host updates it; the view follows. Content: memory only.
 @MainActor
 @Observable
 public final class CaptionFeedModel {
@@ -21,23 +22,38 @@ public final class CaptionFeedModel {
         }
     }
 
+    /// Above the lines, e.g. "Live captions"; nil = none.
+    public var header: String?
     public var lines: [Line]
-    /// Shown in place of the lines when there are none.
+    /// A status shown in place of the lines (wins over `placeholder`).
     public var note: String?
-    /// nil = not saving.
+    /// Shown while there are no lines and no note, e.g. before anyone talks.
+    public var placeholder: String?
+    /// Under the lines, e.g. kept in memory only, or saving a transcript.
+    public var footnote: String?
+    /// The saving indicator's label; nil = not saving.
     public var savingLabel: String?
 
-    public init(lines: [Line] = [], note: String? = nil, savingLabel: String? = nil) {
+    public init(header: String? = nil, lines: [Line] = [], note: String? = nil, placeholder: String? = nil,
+                footnote: String? = nil, savingLabel: String? = nil) {
+        self.header = header
         self.lines = lines
         self.note = note
+        self.placeholder = placeholder
+        self.footnote = footnote
         self.savingLabel = savingLabel
     }
 
-    public var isEmpty: Bool { lines.isEmpty && note == nil && savingLabel == nil }
+    public var isEmpty: Bool {
+        header == nil && lines.isEmpty && note == nil && placeholder == nil && footnote == nil && savingLabel == nil
+    }
 
     public func clear() {
+        header = nil
         lines = []
         note = nil
+        placeholder = nil
+        footnote = nil
         savingLabel = nil
     }
 }
@@ -45,8 +61,8 @@ public final class CaptionFeedModel {
 /// Live captions for a host to place inside the reminder card. It has no window, surface or
 /// shadow of its own (the card supplies them) and takes every size, font and color from
 /// `CardStyle` through `Theme.Captions`, following the environment's light or dark appearance.
-/// Each line is one row: the speaker label, then the newest words (older words are cut at the
-/// start). The saving indicator, when set, sits above the lines.
+/// Top to bottom: the saving indicator, the header, the lines (each one row: the speaker label,
+/// then the newest words, older words cut at the start) or the note or placeholder, the footnote.
 public struct CaptionFeedView: View {
     private let model: CaptionFeedModel
     @Environment(\.colorScheme) private var colorScheme
@@ -62,8 +78,15 @@ public struct CaptionFeedView: View {
             if let saving = model.savingLabel {
                 CaptionSavingIndicator(label: saving)
             }
-            if model.lines.isEmpty, let note = model.note {
-                Text(note)
+            if let header = model.header {
+                Text(header)
+                    .font(c.headerFont.swiftUI)
+                    .foregroundStyle(c.header.shapeStyle(style))
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            if model.lines.isEmpty, let status = model.note ?? model.placeholder {
+                Text(status)
                     .font(c.noteFont.swiftUI)
                     .foregroundStyle(c.note.shapeStyle(style))
                     .lineLimit(1)
@@ -86,6 +109,12 @@ public struct CaptionFeedView: View {
                         .accessibilityElement(children: .combine)
                     }
                 }
+            }
+            if let footnote = model.footnote {
+                Text(footnote)
+                    .font(c.footnoteFont.swiftUI)
+                    .foregroundStyle(c.footnote.shapeStyle(style))
+                    .lineLimit(1)
             }
         }
         .padding(.horizontal, c.inset)

@@ -533,6 +533,12 @@ public enum Theme {
         public static let speakerFont = CardStyle.Typography.button
         public static let textFont = CardStyle.Typography.body
         public static let noteFont = CardStyle.Typography.caption
+        /// "Live captions": the card's button type in the primary role.
+        public static let headerFont = CardStyle.Typography.button
+        public static let header = CardStyle.Text.primary
+        /// The memory-only / saving line under the captions: caption type, tertiary role.
+        public static let footnoteFont = CardStyle.Typography.caption
+        public static let footnote = CardStyle.Text.tertiary
         /// Caption lines shown at once (the in-memory buffer holds no more).
         public static let visibleLines = 3
         public static let indicatorHeight = CardStyle.Size.control
