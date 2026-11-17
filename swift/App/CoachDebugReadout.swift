@@ -21,7 +21,7 @@ final class CoachDebugReadout: NSObject, NSWindowDelegate {
     private var label: NSTextField?
     private var timer: Timer?
 
-    func attach(mic: MicCapture, coach: CoachController) {
+    func attach(mic: MicCapture?, coach: CoachController) {
         self.mic = mic
         self.coach = coach
     }

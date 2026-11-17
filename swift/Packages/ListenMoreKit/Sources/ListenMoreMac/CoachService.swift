@@ -18,6 +18,8 @@ public final class CoachService: CoachSessionDelegate {
     public let config: ListenMoreConfig
     public let glow: GlowOverlayController
     public let session: CoachSession
+    /// The session's mic, for a host's diagnostics; the session alone starts and stops it.
+    public let mic: MicSource
     public let ownBundleId: String?
     public let excludedBundleIds: [String]
     public private(set) var anyApp: Bool
@@ -58,6 +60,7 @@ public final class CoachService: CoachSessionDelegate {
                 engine: CoachEngine = LocalCoachEngine(transports: .urlSession()),
                 glow: GlowOverlayController? = nil) {
         self.config = config
+        self.mic = mic
         self.anyApp = anyApp
         self.allowlist = allowlist
         self.ownBundleId = ownBundleId

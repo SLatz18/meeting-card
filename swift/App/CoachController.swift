@@ -242,11 +242,10 @@ final class CoachController: NSObject {
         let defaults = defaults
         let engine = LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,
                                       judgeProvider: { Self.storedJudgeProvider(defaults) })
-        let mic = MicCapture()
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
-                             allowlist: allowlist, keys: keyGate, callState: callControls, mic: mic, engine: engine)
+                             allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine)
         #if MEETINGCARD_TEST_ID
-        CoachDebugReadout.shared.attach(mic: mic, coach: self)
+        CoachDebugReadout.shared.attach(mic: s.mic as? MicCapture, coach: self)
         #endif
         s.fallbackScreen = { [weak self] in self?.cardScreen() }
         s.hostWindowNumber = { [weak self] in self?.hostWindowNumber() }
