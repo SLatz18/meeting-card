@@ -38,7 +38,7 @@ final class DebugReadoutTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(references, 2, "attached in makeService, offered in the coach menu")
+        XCTAssertEqual(references, 4, "attached in makeService, offered, given a status line and set as delegate in the coach menu")
     }
 
     func testOnlyTheTestIdBuildDefinesTheFlag() throws {

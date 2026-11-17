@@ -461,10 +461,14 @@ final class CoachController: NSObject {
     func menu(for items: [CoachMenuItem]) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        #if MEETINGCARD_TEST_ID
+        menu.delegate = CoachDebugReadout.shared
+        #endif
         for entry in items {
             menu.addItem(menuItem(entry))
             #if MEETINGCARD_TEST_ID
             if entry == .settings { menu.addItem(CoachDebugReadout.shared.menuItem()) }
+            if case .status = entry { menu.addItem(CoachDebugReadout.shared.statusMenuItem()) }
             #endif
         }
         addTranscriptItems(to: menu)
