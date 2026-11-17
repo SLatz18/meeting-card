@@ -344,6 +344,34 @@ final class PrivacyGuardTests: XCTestCase {
         }
     }
 
+    /// The call's window is picked from what CGWindowList says without titles (number, owner, layer,
+    /// on-screen, bounds) and from when the window appeared, or from the Meet script's window count:
+    /// never the largest, first or frontmost window, and no Accessibility window reads.
+    func testCallWindowSelectionRule() throws {
+        let files = ["CallWindows.swift", "CallDisplay.swift", "CallDisplayLocator.swift"]
+        let sources = try librarySources().filter { files.contains($0.0) }
+        XCTAssertEqual(Set(sources.map(\.0)), Set(files))
+        let locator = code(try XCTUnwrap(sources.first { $0.0 == "CallDisplayLocator.swift" }).1)
+        let re = try NSRegularExpression(pattern: #"\bkCGWindow[A-Za-z]+"#)
+        let keys = Set(re.matches(in: locator, range: NSRange(locator.startIndex..., in: locator))
+            .map { (locator as NSString).substring(with: $0.range) })
+        XCTAssertEqual(keys, ["kCGWindowOwnerPID", "kCGWindowNumber", "kCGWindowLayer", "kCGWindowBounds", "kCGWindowIsOnscreen"])
+        for (name, text) in sources {
+            for banned in ["kCGWindowName", "kCGWindowOwnerName", "frontmost", "mainWindow", "keyWindow", "isActive",
+                           "kAXFocusedWindow", "kAXMainWindow", "kAXWindows", "AXUIElement"] {
+                XCTAssertFalse(code(text).contains(banned), "\(name) selects by \(banned)")
+            }
+        }
+        let selector = code(try XCTUnwrap(sources.first { $0.0 == "CallWindows.swift" }).1)
+        XCTAssertFalse(selector.contains("max(by:") || selector.contains("width * "), "never the largest window")
+        XCTAssertTrue(selector.contains("firstSeen"), "chosen by when the window appeared")
+        let display = code(try XCTUnwrap(sources.first { $0.0 == "CallDisplay.swift" }).1)
+        XCTAssertFalse(display.contains("appKey") || display.contains("WindowInfo"), "CallDisplay no longer picks an app's window")
+        for (name, text) in try allSources() where name != "CallDisplayLocator.swift" {
+            XCTAssertFalse(code(text).contains("CGWindowListCopyWindowInfo"), "\(name) reads the window list")
+        }
+    }
+
     /// Nothing the providers see is logged, printed or kept beyond the call states.
     func testCallControlsNeverLog() throws {
         for (name, text) in try providerSources() {

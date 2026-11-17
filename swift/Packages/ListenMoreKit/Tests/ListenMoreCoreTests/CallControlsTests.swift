@@ -52,6 +52,8 @@ final class CallControlsTests: XCTestCase {
         /// Error numbers per bundle ID, for every script, or for scripts containing a marker.
         var failures: [String: Int] = [:]
         var failuresWhenContaining: [String: (marker: String, code: Int)] = [:]
+        /// The script's whole integer (count, window rank and visible windows; `MeetScript.decode`).
+        var raw: [String: Int] = [:]
         private(set) var runs: [(bundleId: String, source: String)] = []
 
         func permission(bundleId: String) -> AutomationPermission { permissions[bundleId] ?? .granted }
@@ -60,7 +62,7 @@ final class CallControlsTests: XCTestCase {
             runs.append((bundleId, source))
             if let code = failures[bundleId] { return .failed(code: code) }
             if let f = failuresWhenContaining[bundleId], source.contains(f.marker) { return .failed(code: f.code) }
-            return .count(meetTabs[bundleId] ?? 0)
+            return .count(raw[bundleId] ?? meetTabs[bundleId] ?? 0)
         }
     }
 
@@ -454,5 +456,57 @@ final class CallControlsTests: XCTestCase {
         q.sync {}
         XCTAssertEqual(ax.presses, 1)
         XCTAssertTrue(model.isMuted)
+    }
+
+    // MARK: the call's window
+
+    func testZoomHomeWindowInFrontNeverReadsAsEnded() throws {
+        var present: Bool? = true
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { present }
+        ax.inMeeting(muted: true)
+        audio.live(Self.zoom)
+        run(0, 5)
+        XCTAssertEqual(provider.callStates()[Self.zoom], .muted)
+        ax.home()                                  // the menu bar follows the home window in front
+        XCTAssertTrue(stops(run(5.5, 30)).isEmpty, "the meeting window is still there: not ended")
+        XCTAssertEqual(provider.callStates()[Self.zoom], .muted, "the last mute reading holds")
+        present = nil                              // the meeting window closed (Leave)
+        XCTAssertEqual(try XCTUnwrap(stops(run(30.5, 40)).first).0, 33.5, accuracy: 1e-9)
+    }
+
+    func testZoomWithoutAWindowSignalKeepsTheMenuRule() {
+        ax.inMeeting()
+        XCTAssertEqual(ZoomControlsReader(ax: ax).read(), .inCall(muted: false))
+        ax.home()
+        let reader = ZoomControlsReader(ax: ax)
+        reader.callWindowPresent = { nil }
+        XCTAssertEqual(reader.read(), .noCall, "nothing bound: the menu shortcuts decide as before")
+    }
+
+    func testMeetReportsWhichWindowHoldsTheCall() {
+        scripts.raw[Self.chrome] = 1 + 1000 * 2 + 1_000_000 * 3
+        _ = provider.callStates()
+        XCTAssertEqual(provider.callStates()["com.google.chrome"], .started)
+        XCTAssertEqual(provider.windowHints["com.google.chrome"], CallWindowHint(rank: 2, visibleWindows: 3))
+        scripts.raw[Self.chrome] = 2 + 1_000_000 * 3              // meeting tabs in two windows
+        _ = provider.callStates()
+        XCTAssertNil(provider.windowHints["com.google.chrome"], "no single window: no hint")
+        XCTAssertEqual(provider.callStates()["com.google.chrome"], .started)
+        provider.isEnabled = false
+        XCTAssertTrue(provider.windowHints.isEmpty)
+    }
+
+    func testMeetScriptReadsOnlyMinimizedFromAWindow() throws {
+        let re = try NSRegularExpression(pattern: #"\b(\w+) of (w|p)\b"#)
+        for reader in [MeetTabReader.chrome(runner: scripts), MeetTabReader.dia(runner: scripts)] {
+            for source in reader.scripts {
+                let reads = Set(re.matches(in: source, range: NSRange(source.startIndex..., in: source))
+                    .map { (source as NSString).substring(with: $0.range(at: 1)) })
+                XCTAssertTrue(reads.isSubset(of: ["minimized", "tabs", "profiles"]), "\(reader.bundleId) reads \(reads)")
+                XCTAssertFalse(source.contains("bounds"), "no window frames")
+                XCTAssertFalse(source.contains("index of"), "the rank is counted, never read")
+            }
+        }
     }
 }

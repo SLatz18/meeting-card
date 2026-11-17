@@ -2,34 +2,66 @@ import AppKit
 import CoreGraphics
 import ListenMoreCore
 
-/// Reads on-screen window owners and bounds (never titles or pixels, so no Screen Recording
-/// permission is involved) to find the display holding the call app's window.
-public enum CallDisplayLocator {
-    public static func windows() -> [CallDisplay.WindowInfo] {
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-                as? [[String: Any]] else { return [] }
-        var bundleByPid: [pid_t: String?] = [:]
-        return list.compactMap { w in
-            guard let pid = (w[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
-                  let layer = (w[kCGWindowLayer as String] as? NSNumber)?.intValue,
-                  let dict = w[kCGWindowBounds as String] as? NSDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: dict) else { return nil }
-            let bundle: String?
-            if let cached = bundleByPid[pid] {
-                bundle = cached
-            } else {
-                bundle = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
-                bundleByPid[pid] = bundle
-            }
-            return CallDisplay.WindowInfo(bundleId: bundle, layer: layer, bounds: bounds)
+/// Observes call apps' windows into a `CallWindowSelector`: window number, owner, layer, on-screen
+/// flag and bounds from CGWindowListCopyWindowInfo (never titles or pixels, so no Screen Recording
+/// permission is involved). Updated from the coach's poll on the main thread and read from the
+/// call-controls queue, so it locks. Reads nothing while no call app is running.
+public final class CallWindowTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var selector: CallWindowSelector
+
+    public init(lookbackS: Double) {
+        selector = CallWindowSelector(lookbackS: lookbackS)
+    }
+
+    public convenience init(config: ListenMoreConfig) {
+        self.init(lookbackS: config.trigger.callWindowLookbackS)
+    }
+
+    /// One observation. `session` is the coach session's app and start time (system uptime).
+    public func update(session: (appKey: String, startedAt: Double)?, appKeys: Set<String>, browserKeys: Set<String>,
+                       hints: [String: CallWindowHint], now: Double = ProcessInfo.processInfo.systemUptime) {
+        let all = Self.windows(appKeys: appKeys)
+        lock.withLock {
+            selector.observe(all, appKeys: appKeys, browserKeys: browserKeys, session: session, hints: hints, now: now)
         }
     }
 
+    public func reset() { lock.withLock { selector.reset() } }
+
+    /// Bounds (CG coordinates) of the call's window, or nil when none is identified.
+    public func target(appKey: String?) -> CGRect? { lock.withLock { selector.target(appKey: appKey) } }
+
+    public func callWindowPresent(appKey: String) -> Bool? { lock.withLock { selector.callWindowPresent(appKey: appKey) } }
+
+    /// Windows owned by running apps in `appKeys` (their main process; helpers don't own windows).
+    static func windows(appKeys: Set<String>) -> [AppWindow] {
+        var bundleByPid: [pid_t: String] = [:]
+        for app in NSWorkspace.shared.runningApplications where !app.isTerminated {
+            guard let id = app.bundleIdentifier, appKeys.contains(where: { BundleIds.belongs(id, to: $0) }) else { continue }
+            bundleByPid[app.processIdentifier] = id
+        }
+        guard !bundleByPid.isEmpty,
+              let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return [] }
+        return list.compactMap { w in
+            guard let pid = (w[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, let bundle = bundleByPid[pid],
+                  let number = (w[kCGWindowNumber as String] as? NSNumber)?.intValue,
+                  let layer = (w[kCGWindowLayer as String] as? NSNumber)?.intValue,
+                  let dict = w[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: dict) else { return nil }
+            let onScreen = (w[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
+            return AppWindow(id: number, bundleId: bundle, layer: layer, onScreen: onScreen, bounds: bounds)
+        }
+    }
+}
+
+/// The display for the glow: the one holding the call's window, else the card's display.
+public enum CallDisplayLocator {
     /// Cocoa frame of the display for the glow; `fallback` is the card's display.
-    public static func screen(appKey: String?, fallback: NSRect?) -> NSRect? {
+    public static func screen(callWindow: CGRect?, fallback: NSRect?) -> NSRect? {
         let screens = NSScreen.screens.map(\.frame)
         let primaryHeight = NSScreen.screens.first?.frame.maxY ?? 0
-        return CallDisplay.screen(appKey: appKey, windows: appKey == nil ? [] : windows(), screens: screens,
-                                  primaryHeight: primaryHeight, fallback: fallback)
+        return CallDisplay.screen(callWindow: callWindow, screens: screens, primaryHeight: primaryHeight, fallback: fallback)
     }
 }

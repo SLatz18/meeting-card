@@ -62,4 +62,24 @@ final class CallControlsMacTests: XCTestCase {
         XCTAssertTrue(p.callStates().isEmpty)
         XCTAssertEqual(p.readers.map(\.appKey), ["us.zoom.xos", "com.google.chrome", "company.thebrowser.dia"])
     }
+
+    /// The real window tracker reads nothing while no tracked app runs and never invents a target.
+    func testCallWindowTrackerWithNoCallAppRunning() {
+        let t = CallWindowTracker(lookbackS: 60)
+        XCTAssertTrue(CallWindowTracker.windows(appKeys: ["com.example.notinstalled"]).isEmpty)
+        t.update(session: (appKey: "com.example.notinstalled", startedAt: 0), appKeys: ["com.example.notinstalled"],
+                 browserKeys: [], hints: [:])
+        XCTAssertNil(t.target(appKey: "com.example.notinstalled"))
+        XCTAssertNil(t.callWindowPresent(appKey: "com.example.notinstalled"))
+        XCTAssertEqual(CallDisplayLocator.screen(callWindow: nil, fallback: NSRect(x: 1, y: 2, width: 3, height: 4)),
+                       NSRect(x: 1, y: 2, width: 3, height: 4), "nothing identified: the card's display")
+    }
+
+    func testZoomReaderGetsTheMeetingWindowSignal() throws {
+        let t = CallWindowTracker(lookbackS: 60)
+        let p = CallControlsProvider.live(config: try .builtIn(), callWindows: t)
+        let zoom = try XCTUnwrap(p.readers.first as? ZoomControlsReader)
+        XCTAssertNotNil(zoom.callWindowPresent)
+        XCTAssertNil(zoom.callWindowPresent?() ?? nil, "nothing bound yet")
+    }
 }
