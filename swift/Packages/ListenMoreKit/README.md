@@ -11,10 +11,13 @@ Swift-native inside the app: no helper process, no interpreter.
   streaming VAD, local rules (interrupt, talk-over, monologue, talk share, prosody), text rules,
   cue policy and cooldowns, the GPT layer (rolling in-memory transcript, judge, budget cap), the
   judge providers (`JudgeProvider`: the GPT judge, the default, or `TypeSafeJudge` for TypeSafe System One), the
-  engine (`LocalCoachEngine`), the Core Audio trigger (`CoachTrigger`, `AudioActivitySignal`) and
-  `CoachSession`, which reaches capture, rendering and the key store only through protocols.
-- `ListenMoreMac` (macOS only): mic capture (AVAudioEngine with voice processing, other-audio
-  ducking set to its minimum by `MicProcessing`), call audio
+  engine (`LocalCoachEngine`), the Core Audio trigger (`CoachTrigger`, `AudioActivitySignal`), the mic
+  policy (`MicPlan`, `MicRestartPolicy`, `RoutedMic`) and `CoachSession`, which reaches capture,
+  rendering and the key store only through protocols.
+- `ListenMoreMac` (macOS only): mic capture (AVAudioEngine, routed by `MicPlan`: no voice processing
+  on headphones, the built-in mic with Bluetooth output, voice processing with other-audio ducking
+  at its minimum by `MicProcessing` on speakers; reopened on route changes by `RoutedMic` and
+  `CoreAudioRoutes`), call audio
   (ScreenCaptureKit audio-only, Chromium helper fallback, Core Audio process tap), the Core Audio
   running-state provider, URLSession transports (ephemeral, no cache or cookies), Keychain store,
   glow overlay and `CoachService`. The host injects the glow style and the Keychain service name.

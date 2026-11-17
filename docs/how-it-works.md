@@ -53,7 +53,7 @@ MeetingCard's provider is the **Use Zoom/Meet controls** setting (off by default
 
 An ended call is reported for up to `stop_after_s` (30 s) after it ends; after that Core Audio decides again.
 
-While the coach listens it uses Apple's voice processing, so call audio from your speakers isn't mistaken for you. Voice processing lowers other audio a little while it runs, and the coach sets that to Apple's minimum. Pause and, with **Use Zoom/Meet controls**, being muted in Zoom or leaving the call release the mic and end that ducking at once; without it, leaving the call ends it at the 30 s stop.
+On headphones, wired or Bluetooth, the coach uses no voice processing, so nothing is lowered. With Bluetooth output it always uses the Mac's built-in mic, so AirPods never switch to the hands-free profile; a Mac with no built-in mic then runs on call audio only. The coach never opens a Bluetooth input. On speakers it uses Apple's voice processing, so call audio isn't mistaken for you, and sets the lowering of other audio to Apple's minimum. Pause, the coach's Mute and, with **Use Zoom/Meet controls**, being muted in Zoom or leaving the call release the mic at once (without it, leaving the call releases it at the 30 s stop), and a change of output or input reopens it on the new route.
 
 ## Without an API key
 
