@@ -92,14 +92,14 @@ Click **Pause** on the coach chip on the meeting card, or in the coach's menu ba
 **Privacy**
 - While the coach is on, call audio and transcripts go to OpenAI on your own API key. No audio is sent when it's off or paused.
 - Nothing is saved. There are no transcripts, stats or recaps, nothing is stored on disk, and nothing about the call is logged (the coach logs only counters and states). Audio exists only in memory (RAM) while it's being processed.
-- Your API key is stored in the macOS Keychain.
+- Your API key is stored in the macOS Keychain, never synced. Keychain caveat: the key is saved with "this device only" (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), but the login keychain ignores that setting. It takes effect only once a properly signed build (with a team ID) stores the key in the data-protection keychain. Builds from `build.sh` are ad-hoc or self-signed, so today the key sits in your login keychain like any other saved password.
 
 **Setup**
 Reopen MeetingCard (double-click it in Finder, or `open ~/Applications/MeetingCardSwift.app` while it runs) to open Settings. Add your OpenAI API key, turn on Call coach, then allow mic and system audio recording when macOS asks.
 
 **For IT and admins**
 - Opt-in: the boolean UserDefaults key `coach.enabled` in the `com.slatz.meetingcard.swift` domain (absent or false = off). Other settings: `coach.anyApp`, `coach.allowlist` (bundle IDs), `coach.onboarded`.
-- API key: Keychain generic password, service `com.slatz.meetingcard.swift.openai`, account `OPENAI_API_KEY`, never synchronizable. A build signed with a team ID stores it in the data protection keychain with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (readable only while unlocked, never migrated). Ad-hoc and self-signed builds, like `build.sh` makes, aren't entitled to that keychain, so the key goes to the login keychain, which doesn't enforce accessibility classes.
+- API key: Keychain generic password, service `com.slatz.meetingcard.swift.openai`, account `OPENAI_API_KEY`, never synchronizable. `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is requested on every save, but the login keychain ignores it. It is enforced (readable only while unlocked, never migrated) only once a properly signed build, with a team ID, uses the data-protection keychain. The app tries that keychain first and falls back to the login keychain on `errSecMissingEntitlement`, which is what ad-hoc and self-signed builds from `build.sh` get.
 - Network: `api.openai.com` only (realtime transcription WebSocket, Responses API with `store: false`, `GET /v1/models` to check the key), only while the coach is on and not paused.
 - Permissions (TCC): Microphone, System Audio Recording (Core Audio process taps), and Screen Recording (ScreenCaptureKit's audio-only call capture). Reset with `tccutil reset Microphone|AudioCapture|ScreenCapture com.slatz.meetingcard.swift`.
 
