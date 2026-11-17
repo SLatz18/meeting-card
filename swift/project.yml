@@ -31,6 +31,10 @@ settings:
       ONLY_ACTIVE_ARCH: NO
       DEBUG_INFORMATION_FORMAT: dwarf
       STRIP_INSTALLED_PRODUCT: YES
+# The call coach engine, vendored from listen-more (see Packages/ListenMoreKit/README.md).
+packages:
+  ListenMoreKit:
+    path: Packages/ListenMoreKit
 targets:
   # Foundation-only logic shared by the app, the tests, and a future WidgetKit extension.
   MeetingCardCore:
@@ -51,7 +55,10 @@ targets:
     type: application
     platform: macOS
     sources: [App]
-    dependencies: [{target: MeetingCardCore, embed: true}]
+    dependencies:
+      - {target: MeetingCardCore, embed: true}
+      - {package: ListenMoreKit, product: ListenMoreCore}
+      - {package: ListenMoreKit, product: ListenMoreMac}
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.slatz.meetingcard.swift
@@ -68,6 +75,9 @@ targets:
         LSUIElement: true
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: ""
+        # Call coach (opt-in, off by default): mic, and system audio of the call app.
+        NSMicrophoneUsageDescription: "MeetingCard uses your mic during calls so Call coach can notice interruptions and missed questions. Nothing is recorded or saved."
+        NSAudioCaptureUsageDescription: "MeetingCard needs system audio so Call coach can hear the other people on your call. Nothing is recorded or saved."
   # Hostless: an app-hosted bundle fought the app's run loop in the phase-1 probe.
   MeetingCardCoreTests:
     type: bundle.unit-test

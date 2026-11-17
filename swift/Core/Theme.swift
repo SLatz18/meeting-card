@@ -1,0 +1,158 @@
+import Foundation
+
+/// The one source of MeetingCard's look, shared by the reminder cards and the call coach so the
+/// two can't drift. Values are the cards' original literals (the refactor is pixel-identical,
+/// checked by the CI snapshot job); colors come from `CardPalette`, geometry from `CardLayout`.
+public enum Theme {
+    public static func palette(dark: Bool) -> CardPalette { CardPalette.for(dark: dark) }
+
+    /// System font specs (the App maps them to NSFont.systemFont).
+    public struct FontSpec: Equatable, Sendable {
+        public enum Weight: Sendable { case regular, medium, semibold }
+        public let size: Double
+        public let weight: Weight
+        public init(_ size: Double, _ weight: Weight = .regular) { self.size = size; self.weight = weight }
+    }
+
+    public enum Fonts {
+        /// Card title line ("Standup in 2 min").
+        public static let title = FontSpec(17, .semibold)
+        /// Placeholder title font before the countdown is applied.
+        public static let titlePlaceholder = FontSpec(17)
+        /// "Ends 10:30 AM" / flags / coach status text.
+        public static let body = FontSpec(13.5)
+        /// "Next up" line, helper text.
+        public static let caption = FontSpec(12.5)
+        /// Ignore / Join / Pause buttons.
+        public static let button = FontSpec(14, .medium)
+    }
+
+    public enum Metrics {
+        public static let cardWidth = CardLayout.W
+        public static let cardHeight = CardLayout.H
+        public static let cardRadius = CardLayout.radius
+        public static let cardMargin = CardLayout.margin
+        public static let stackGap = CardLayout.gap
+        public static let borderWidth = CardBorder.width
+        public static let buttonRadius: Double = 9
+        public static let buttonHeight: Double = 33
+        public static let buttonBottom: Double = 15
+        public static let buttonHairline: Double = 0.5
+        /// Left edge of the title line and the Ignore button.
+        public static let leadingInset: Double = 17
+        /// Left edge of the Ends / Next up lines.
+        public static let textInset: Double = 18
+        /// Right edge of the Join button.
+        public static let trailingInset: Double = 16
+        public static let titleTop: Double = 40, titleHeight: Double = 24
+        public static let bodyTop: Double = 67, bodyHeight: Double = 20
+        public static let captionTop: Double = 90, captionHeight: Double = 18
+        public static let ignoreWidth: Double = 67
+        public static let joinWidth: Double = 114, joinWidthMeet: Double = 110, joinWidthCalendar: Double = 142
+        public static let providerIconSize: Double = 20
+        /// Gap between controls in the button row.
+        public static let controlGap: Double = 8
+    }
+
+    /// Card show/hide motion: the cards appear and leave instantly (no AppKit window animation);
+    /// coach surfaces do the same.
+    public enum Motion {
+        public static let windowAnimation = false
+    }
+
+    /// Screen-edge glow for coach cues: calm, peripheral, plays once. Hues are derived, not
+    /// hard-coded: rose = the system red muted toward neutral gray, amber = the card's flag amber
+    /// muted the same way (approximately the design tokens #A65B57/#C47A76 and #B4843A/#D4A45A).
+    public enum Glow {
+        /// NSColor.systemRed in sRGB (light / dark); the App passes the live semantic value.
+        public static func systemRed(dark: Bool) -> RGBA { dark ? RGBA(hex: 0xFF453A) : RGBA(hex: 0xFF3B30) }
+
+        /// Mix `c` toward a neutral gray: light appearance mutes harder and darker.
+        public static func mute(_ c: RGBA, dark: Bool, amount: Double? = nil, gray: Double? = nil) -> RGBA {
+            let gray = gray ?? (dark ? 0.6 : 0.5)
+            let k = amount ?? (dark ? 0.55 : 0.65)
+            return RGBA(c.r * (1 - k) + gray * k, c.g * (1 - k) + gray * k, c.b * (1 - k) + gray * k, 1)
+        }
+
+        /// Interrupt, talk-over, aggressive.
+        public static func rose(dark: Bool, systemRed: RGBA? = nil) -> RGBA {
+            mute(systemRed ?? Glow.systemRed(dark: dark), dark: dark)
+        }
+
+        /// Monologue, missed question, not listening, talk share.
+        public static func amber(dark: Bool) -> RGBA {
+            mute(Theme.palette(dark: true).flag, dark: dark, amount: 0.48, gray: dark ? 0.65 : 0.4)
+        }
+
+        public static let width: Double = 32
+        public static let peakOpacity: Double = 0.45
+        public static let displayCornerRadius: Double = 16
+        /// (fraction of width from the outer edge, opacity factor)
+        public static let stops: [(at: Double, factor: Double)] = [
+            (0, 1), (0.15, 0.78), (0.35, 0.42), (0.6, 0.16), (0.82, 0.05), (1, 0)]
+        /// One cycle, ~3 s in total: rise (ease-in), hold, fade (ease-out). Never repeats.
+        public static let rise: TimeInterval = 0.32
+        public static let hold: TimeInterval = 0.8
+        public static let fade: TimeInterval = 1.88
+        public static var cycle: TimeInterval { rise + hold + fade }
+        /// Reduce Motion: appear at 70% of peak, 2 s linear fade.
+        public static let reduceMotionAppear: Double = 0.7
+        public static let reduceMotionFade: TimeInterval = 2.0
+    }
+
+    /// The coach chip on the live card's button row and the coach glyph.
+    public enum Coach {
+        public static let symbol = "ear.badge.waveform"
+        public static let pauseSymbol = "pause.fill"
+        public static let resumeSymbol = "play.fill"
+        public static let glyphSize: Double = 16
+        /// Right edge sits this far left of the Join button (or of the Join slot if there is none).
+        public static let joinGap: Double = 10
+        public static let height: Double = Metrics.buttonHeight
+        public static let radius: Double = Metrics.buttonRadius
+        public static let labelFont = FontSpec(13.5, .medium)
+        public static let paddingLeading: Double = 10
+        public static let paddingTrailing: Double = 6
+        public static let glyphGap: Double = 5
+        public static let dotDiameter: Double = 4.6
+        public static let dotGap: Double = 7
+        public static let controlGap: Double = 8
+        public static let pauseButtonSize: Double = 22
+        public static let pauseButtonRadius: Double = 7
+        public static let pauseGlyphSize: Double = 9
+        /// Chip fills: the Ignore fill, lighter while paused.
+        public static func fill(dark: Bool, paused: Bool) -> RGBA {
+            paused ? (dark ? .white(0.08) : .black(0.07)) : Theme.palette(dark: dark).ignoreFill(.normal)
+        }
+        public static func pauseButtonFill(dark: Bool) -> RGBA { dark ? .white(0.14) : .black(0.10) }
+        /// Live dot = the card's Next up blue.
+        public static func dot(dark: Bool) -> RGBA { Theme.palette(dark: dark).nextUp }
+
+        /// Chip frame in card coordinates: content-hugging width, right-anchored `joinGap` left of
+        /// Join. The label is dropped (glyph, dot and control stay) if the chip would reach the
+        /// Ignore button, e.g. next to the wide multi-link Join.
+        public static func layout(labelWidth: Double, live: Bool, joinX: Double?) -> (x: Double, width: Double, showsLabel: Bool) {
+            let m = Metrics.self
+            let right = (joinX ?? (m.cardWidth - m.trailingInset)) - joinGap
+            let minX = m.leadingInset + m.ignoreWidth + m.controlGap
+            func width(_ label: Bool) -> Double {
+                paddingLeading + glyphSize + (label ? glyphGap + labelWidth : 0) + (live ? dotGap + dotDiameter : 0)
+                    + controlGap + pauseButtonSize + paddingTrailing
+            }
+            let full = width(true)
+            if right - full >= minX { return (right - full, full, true) }
+            let compact = width(false)
+            return (right - compact, compact, false)
+        }
+    }
+
+    /// Settings window: a standard titled window; window and group fills are AppKit semantic colors.
+    public enum Settings {
+        public static let width: Double = 592
+        public static let inset: Double = 22
+        public static let groupRadius: Double = 10
+        public static let rowFont = FontSpec(13.5, .medium)
+        public static let helperFont = FontSpec(11.5)
+        public static let sectionFont = FontSpec(13.5, .semibold)
+    }
+}
