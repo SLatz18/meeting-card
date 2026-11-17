@@ -4,11 +4,12 @@ import MeetingCardCore
 
 /// Call coach Settings: a standard titled window with grouped rows (the approved mock). Opened by
 /// reopening the app (Finder / Spotlight / `open -a`) or from the coach status item. The first
-/// open shows the three onboarding screens.
+/// open shows the three onboarding screens, which are the card itself: a borderless, clear,
+/// shadowless window whose only surface is the card-shaped group (no window plate behind it).
 @MainActor
 final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     let coach: CoachController
-    let window: NSWindow
+    private(set) var window: NSWindow
     private var screen = 0
     private var showingOnboarding: Bool
     private let toggle = NSSwitch()
@@ -23,6 +24,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let root = NSStackView()
     private let document = NSView()
     private let scroll = NSScrollView()
+    private var rootWidth: NSLayoutConstraint!
     /// CI screenshots only: a shorter visible frame, to show the groups scrolling.
     private let visibleHeightOverride: Double?
 
@@ -32,13 +34,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         self.visibleHeightOverride = visibleHeightOverride
         showingOnboarding = onboardingScreen != nil || !coach.onboarded
         screen = onboardingScreen ?? 0
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Theme.Settings.width, height: Theme.Metrics.cardHeight),
-                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window = Self.makeWindow(onboarding: showingOnboarding)
         super.init()
-        window.title = "MeetingCard"
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-        window.backgroundColor = .windowBackgroundColor
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = true
@@ -46,13 +43,60 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         scroll.documentView = document
         root.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(root)
+        rootWidth = root.widthAnchor.constraint(equalToConstant: CGFloat(windowWidth))
         NSLayoutConstraint.activate([
             root.topAnchor.constraint(equalTo: document.topAnchor),
             root.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            root.widthAnchor.constraint(equalToConstant: CGFloat(Theme.Settings.width)),
+            rootWidth,
         ])
-        window.contentView = scroll
+        adopt(window)
         build()
+    }
+
+    /// Onboarding's window: key-capable while borderless, so Return (the primary button) and Esc
+    /// (close) work; dragged by its background.
+    final class CardWindow: NSWindow {
+        override var canBecomeKey: Bool { true }
+        override var canBecomeMain: Bool { true }
+        override func cancelOperation(_ sender: Any?) { close() }
+    }
+
+    static func makeWindow(onboarding: Bool) -> NSWindow {
+        let rect = NSRect(x: 0, y: 0, width: Theme.Settings.groupWidth, height: Theme.Metrics.cardHeight)
+        guard !onboarding else {
+            let w = CardWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            w.hasShadow = CardStyle.Material.shadow
+            w.isMovableByWindowBackground = true
+            return w
+        }
+        let w = NSWindow(contentRect: rect, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        w.title = "MeetingCard"
+        w.backgroundColor = .windowBackgroundColor
+        return w
+    }
+
+    private func adopt(_ w: NSWindow) {
+        w.isReleasedWhenClosed = false
+        w.delegate = self
+        w.contentView = scroll
+    }
+
+    /// Onboarding: the group alone, card width. Settings: the groups inset in a titled window.
+    private var windowWidth: Double { showingOnboarding ? Theme.Settings.groupWidth : Theme.Settings.width }
+
+    /// Moves the content into the window kind the current mode needs (onboarding ending swaps the
+    /// card window for the titled Settings window). Returns true if it swapped a visible window.
+    private func useWindowForMode() -> Bool {
+        guard (window is CardWindow) != showingOnboarding else { return false }
+        let old = window
+        let wasVisible = old.isVisible
+        window = Self.makeWindow(onboarding: showingOnboarding)
+        adopt(window)
+        old.delegate = nil
+        old.orderOut(nil)
+        return wasVisible
     }
 
     /// Snapshots: the groups' stack (layer render can't draw the scroll view upright) and the
@@ -164,10 +208,12 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     // MARK: content
 
     private func build() {
+        let swappedVisible = useWindowForMode()
+        rootWidth.constant = CGFloat(windowWidth)
         root.arrangedSubviews.forEach { $0.removeFromSuperview() }
         root.orientation = .vertical
         root.alignment = .leading
-        let inset = CGFloat(Theme.Settings.inset)
+        let inset = showingOnboarding ? 0 : CGFloat(Theme.Settings.inset)
         root.spacing = inset
         root.edgeInsets = NSEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
         let width = Self.outerWidth
@@ -177,13 +223,18 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             v.widthAnchor.constraint(equalToConstant: width).isActive = true
         }
         update()
+        if swappedVisible {
+            window.center()
+            update()
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 
     /// Card-width window sized to its groups, but never past the screen's visible frame: taller
     /// content scrolls inside the window instead.
     private func fitWindow() {
         root.layoutSubtreeIfNeeded()
-        let w = Theme.Settings.width, fitting = Double(root.fittingSize.height)
+        let w = windowWidth, fitting = Double(root.fittingSize.height)
         document.frame = NSRect(x: 0, y: 0, width: w, height: fitting)
         let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
         let chrome = Double(window.frameRect(forContentRect: .zero).height)

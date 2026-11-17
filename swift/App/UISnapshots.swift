@@ -211,8 +211,9 @@ enum UISnapshots {
         }
     }
 
-    /// A shown window's content over its resolved background (layer render, like the card snapshot;
-    /// `cacheDisplay` skips most controls of a window that was never on screen).
+    /// A shown window's content over its window background; a clear window (the onboarding card)
+    /// gets no backing, like on screen. Layer render, like the card snapshot (`cacheDisplay` skips
+    /// most controls of a window that was never on screen).
     @MainActor
     static func windowImage(_ window: NSWindow) -> CGImage? {
         guard let view = window.contentView else { return nil }
@@ -237,10 +238,12 @@ enum UISnapshots {
               let ctx = CGContext(data: nil, width: Int(view.bounds.width * scale), height: Int(view.bounds.height * scale),
                                   bitsPerComponent: 8, bytesPerRow: 0, space: cs,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        var bg = CGColor(gray: 1, alpha: 1)
-        window.effectiveAppearance.performAsCurrentDrawingAppearance { bg = NSColor.windowBackgroundColor.cgColor }
-        ctx.setFillColor(bg)
-        ctx.fill(CGRect(x: 0, y: 0, width: ctx.width, height: ctx.height))
+        if window.isOpaque {
+            var bg = CGColor(gray: 1, alpha: 1)
+            window.effectiveAppearance.performAsCurrentDrawingAppearance { bg = window.backgroundColor.cgColor }
+            ctx.setFillColor(bg)
+            ctx.fill(CGRect(x: 0, y: 0, width: ctx.width, height: ctx.height))
+        }
         ctx.scaleBy(x: scale, y: scale)
         view.layer?.render(in: ctx)
         return ctx.makeImage()

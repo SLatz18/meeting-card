@@ -161,6 +161,22 @@ final class ThemeTests: XCTestCase {
         XCTAssertTrue(window.contains("b.role = .ignore"))
     }
 
+    /// Onboarding is the card itself: a borderless, clear, shadowless window with no plate (no
+    /// window inset around the group), and the snapshot draws no backing for a clear window.
+    func testOnboardingWindowHasNoBackingPlate() throws {
+        let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
+        let window = try String(contentsOf: app.appendingPathComponent("CoachSettingsWindow.swift"), encoding: .utf8)
+        for needle in ["CardWindow(contentRect: rect, styleMask: [.borderless]", "w.isOpaque = false", "w.backgroundColor = .clear",
+                       "w.hasShadow = CardStyle.Material.shadow", "let inset = showingOnboarding ? 0 :",
+                       "showingOnboarding ? Theme.Settings.groupWidth : Theme.Settings.width",
+                       "override var canBecomeKey: Bool { true }", "override func cancelOperation"] {
+            XCTAssertTrue(window.contains(needle), needle)
+        }
+        let snapshots = try String(contentsOf: app.appendingPathComponent("UISnapshots.swift"), encoding: .utf8)
+        XCTAssertTrue(snapshots.contains("if window.isOpaque {"))
+        XCTAssertFalse(CardStyle.Material.shadow)
+    }
+
     /// Every coach surface value is a CardStyle token or derived from one.
     func testCoachSurfacesDeriveFromCardStyle() {
         let c = Theme.Coach.self
