@@ -23,6 +23,10 @@ override it per session (`LocalCoachEngine(judgeProvider:)`) and passes the Type
 (`judgeKeys:`, `KeychainStore.typeSafeAccount` under its own service). `judge.typesafe` holds the
 endpoint, model, confidence floor, timeout, window, error limit, the optional per-call price and
 the question criteria. The TypeSafe state is the minimal window only, redacted by `JudgeRedactor`.
+`SystemOne` is the confirmed wire format (`questions` keyed by id, `answers` keyed by the same ids,
+`usage` tokens); the GPT layer's snapshot sums the tokens, and `CoachSession.judgeStopped` says why
+judging stopped after `max_consecutive_errors`. `KeychainStore.sibling(account:)` puts the TypeSafe
+key beside the host's OpenAI key.
 
 The call trigger reads Core Audio "is running" flags only (the default input device plus a call
 app's output); it never reads window titles. `PrivacyGuardTests` checks this, along with no disk
