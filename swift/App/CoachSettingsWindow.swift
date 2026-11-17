@@ -65,6 +65,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             stack = NSStackView(views: views)
             super.init(frame: .zero)
             wantsLayer = true
+            applyFill()
             stack.orientation = .vertical
             stack.alignment = .leading
             stack.spacing = 10
@@ -82,12 +83,17 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-        override var wantsUpdateLayer: Bool { true }
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyFill()
+        }
 
-        override func updateLayer() {
+        private func applyFill() {
             layer?.cornerRadius = CGFloat(Theme.Settings.groupRadius)
             layer?.cornerCurve = .continuous
-            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            }
         }
     }
 
