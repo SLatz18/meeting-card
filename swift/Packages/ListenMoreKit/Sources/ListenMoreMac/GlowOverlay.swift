@@ -23,12 +23,19 @@ public struct GlowStyle: Equatable {
     }
 
     /// From a platform-neutral `CoachStyle`; a tone the style lacks takes the other tone's color.
+    /// With dark colors, each color follows the appearance it is drawn in.
     public init(_ coach: CoachStyle, level: NSWindow.Level = GlowPanel.overlayLevel) {
         func ns(_ c: CoachStyle.RGBA?) -> NSColor {
             guard let c else { return .clear }
             return NSColor(srgbRed: c.red, green: c.green, blue: c.blue, alpha: c.alpha)
         }
-        self.init(rose: ns(coach.color(for: .red)), amber: ns(coach.color(for: .amber)), profile: coach.profile, level: level)
+        func color(_ tone: CueColor) -> NSColor {
+            guard coach.darkColors != nil else { return ns(coach.color(for: tone)) }
+            return NSColor(name: nil) { appearance in
+                ns(coach.color(for: tone, dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua))
+            }
+        }
+        self.init(rose: color(.red), amber: color(.amber), profile: coach.profile, level: level)
     }
 
     public func color(_ c: CueColor) -> NSColor {

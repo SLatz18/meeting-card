@@ -511,4 +511,16 @@ final class CoachStyleTests: XCTestCase {
         XCTAssertEqual(style.color(for: .red), teal)
         XCTAssertEqual(style.color(for: .amber), teal)
     }
+
+    func testDarkColorsFollowTheAppearance() {
+        let light = CoachStyle.RGBA(red: 0.6, green: 0.3, blue: 0.3, alpha: 1)
+        let dark = CoachStyle.RGBA(red: 0.8, green: 0.5, blue: 0.5, alpha: 1)
+        var style = CoachStyle(colors: [.red: light, .amber: light], fadeIn: 0.2, fadeOut: 2.5, bandWidth: 20,
+                               cooldownDisplay: .hidden)
+        XCTAssertEqual(style.color(for: .red, dark: true), light, "no dark colors: one set for both")
+        style.darkColors = [.red: dark]
+        XCTAssertEqual(style.color(for: .red, dark: false), light)
+        XCTAssertEqual(style.color(for: .red, dark: true), dark)
+        XCTAssertEqual(style.color(for: .amber, dark: true), dark, "a missing dark tone takes the other dark tone")
+    }
 }

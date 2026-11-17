@@ -41,12 +41,16 @@ public struct CoachStyle: Equatable, Sendable {
 
     /// Glow color per cue tone (red = cut-in / talk-over / aggressive, amber = the softer cues).
     public var colors: [CueColor: RGBA]
+    /// Dark-appearance colors; nil = `colors` in both appearances.
+    public var darkColors: [CueColor: RGBA]?
     /// Band shape and motion (rise, hold, fade, Reduce Motion variant).
     public var profile: GlowProfile
     public var cooldownDisplay: CooldownDisplay
 
-    public init(colors: [CueColor: RGBA], profile: GlowProfile, cooldownDisplay: CooldownDisplay) {
+    public init(colors: [CueColor: RGBA], darkColors: [CueColor: RGBA]? = nil, profile: GlowProfile,
+                cooldownDisplay: CooldownDisplay) {
         self.colors = colors
+        self.darkColors = darkColors
         self.profile = profile
         self.cooldownDisplay = cooldownDisplay
     }
@@ -72,5 +76,11 @@ public struct CoachStyle: Equatable, Sendable {
     /// Color for a tone; a host theme missing one falls back to the other tone, never to a Kit color.
     public func color(for tone: CueColor) -> RGBA? {
         colors[tone] ?? colors.values.first
+    }
+
+    /// Color for a tone in one appearance; without dark colors both appearances use `colors`.
+    public func color(for tone: CueColor, dark: Bool) -> RGBA? {
+        guard dark, let darkColors else { return color(for: tone) }
+        return darkColors[tone] ?? darkColors.values.first ?? color(for: tone)
     }
 }

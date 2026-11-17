@@ -120,6 +120,21 @@ final class GlowOverlayTests: XCTestCase {
         c.hideAll()
     }
 
+    func testHostDarkColorsResolvePerAppearance() {
+        var style = hostStyle
+        style.darkColors = [.red: CoachStyle.RGBA(red: 0.2, green: 0.4, blue: 0.6, alpha: 1),
+                            .amber: CoachStyle.RGBA(red: 0.6, green: 0.4, blue: 0.2, alpha: 1)]
+        let glow = GlowStyle(style)
+        func red(_ name: NSAppearance.Name) -> NSColor? {
+            var c: NSColor?
+            NSAppearance(named: name)?.performAsCurrentDrawingAppearance { c = glow.rose.usingColorSpace(.sRGB) }
+            return c
+        }
+        XCTAssertEqual(red(.aqua)?.redComponent ?? 0, 0.9, accuracy: 0.01)
+        XCTAssertEqual(red(.darkAqua)?.redComponent ?? 0, 0.2, accuracy: 0.01)
+        XCTAssertEqual(red(.darkAqua)?.blueComponent ?? 0, 0.6, accuracy: 0.01)
+    }
+
     func testLiveRetheme() {
         let c = GlowOverlayController(style: GlowStyle(hostStyle), screenFrames: { [NSRect(x: 0, y: 0, width: 400, height: 300)] })
         c.flash(.red)
