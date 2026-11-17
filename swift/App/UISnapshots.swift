@@ -66,9 +66,8 @@ enum UISnapshots {
         ]
         // The card layout, at the coach card's captions-area size (what the coach card hosts).
         let cardFeeds: [(String, CaptionFeedModel)] = [
-            ("caption-feed-card", CaptionFeedModel(header: header, lines: feed.lines, footnote: CoachCopy.captionsNote)),
-            ("caption-feed-card-empty", CaptionFeedModel(header: header, placeholder: CoachCopy.captionsEmpty,
-                                                         footnote: CoachCopy.captionsNote)),
+            ("caption-feed-card", CaptionFeedModel(lines: feed.lines)),
+            ("caption-feed-card-empty", CaptionFeedModel(placeholder: CoachCopy.captionsEmpty)),
         ]
         let scale = NSScreen.main?.backingScaleFactor ?? 2
         for (name, model) in cardFeeds {
@@ -244,8 +243,9 @@ enum UISnapshots {
     static let roseNudge = CoachNudge(kind: .interrupt, tone: .rose)
 
     static func shotState(_ st: CoachCardState.Status, _ m: MuteControlPresentation, _ n: CoachNudge?, _ mode: CoachCardState.Mode,
-                          ic: Bool = false) -> CoachCardState {
-        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, nudge: n, mode: mode, increasedContrast: ic)
+                          ic: Bool = false, saving: Bool = false) -> CoachCardState {
+        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, nudge: n, mode: mode, increasedContrast: ic,
+                       savingBadge: saving ? CoachCopy.savingNow : nil)
     }
 
     static func disabledMute(_ r: MuteDisabledReason) -> MuteControlPresentation { CoachMuteCopy.presentation(reason: r, isMuted: false) }
@@ -260,6 +260,9 @@ enum UISnapshots {
         ("card-nudge-amber", shotState(.listening, liveMute, amberNudge, .card), false),
         ("card-nudge-rose", shotState(.listening, liveMute, roseNudge, .card), false),
         ("card-increased-contrast", shotState(.listening, liveMute, amberNudge, .card, ic: true), false),
+        // Save transcripts on (#13c): the saving badge on the status line, and still there under a nudge.
+        ("card-saving", shotState(.listening, liveMute, nil, .card, saving: true), false),
+        ("card-saving-nudge", shotState(.listening, liveMute, amberNudge, .card, saving: true), false),
         ("pill-idle", shotState(.idle, liveMute, nil, .pill), false),
         ("pill-muted", shotState(.muted, mutedMute, nil, .pill), false),
         ("pill-paused", shotState(.paused, liveMute, nil, .pill), false),

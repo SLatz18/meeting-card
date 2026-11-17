@@ -59,14 +59,14 @@ public final class CaptionFeedModel {
 }
 
 /// Live captions for a host to place inside the reminder card (the coach card hosts the `card`
-/// layout in its captions area through `CaptionFeedSlot`). It has no window, surface or
+/// layout, three caption rows, in its captions area through `CaptionFeedSlot`). It has no window, surface or
 /// shadow of its own (the card supplies them) and takes every size, font and color from
 /// `CardStyle` through `Theme.Captions`, following the environment's light or dark appearance.
 /// Top to bottom: the saving indicator, the header, the lines (each one row: the speaker label,
 /// then the newest words, older words cut at the start) or the note or placeholder, the footnote.
 public struct CaptionFeedView: View {
     /// `full`: everything, for a host with room. `card`: for the coach card's captions area
-    /// (`Theme.Captions.cardArea`): caption rows only, the footnote on the last row when set.
+    /// (`Theme.Captions.cardArea`): caption rows only (the card's status line carries the saving badge).
     public enum Layout: Sendable { case full, card }
 
     private let model: CaptionFeedModel
@@ -87,10 +87,10 @@ public struct CaptionFeedView: View {
     }
 
     /// The card's captions area: up to `cardRows` rows of the card's caption height, newest lines
-    /// last; a note or the placeholder when there are no lines; the footnote takes the last row.
+    /// last; a note or the placeholder when there are no lines. No header, indicator or footnote.
     @ViewBuilder private func card(_ style: CardStyle) -> some View {
         let c = Theme.Captions.self
-        let rows = max(1, c.cardRows - (model.footnote == nil ? 0 : 1))
+        let rows = c.cardRows
         VStack(alignment: .leading, spacing: c.cardLineGap) {
             if model.lines.isEmpty, let status = model.note ?? model.placeholder {
                 Text(status)
@@ -118,13 +118,6 @@ public struct CaptionFeedView: View {
                         .accessibilityElement(children: .combine)
                     }
                 }
-            }
-            if let footnote = model.footnote {
-                Text(footnote)
-                    .font(c.footnoteFont.swiftUI)
-                    .foregroundStyle(c.footnote.shapeStyle(style))
-                    .lineLimit(1)
-                    .frame(height: c.cardRowHeight, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

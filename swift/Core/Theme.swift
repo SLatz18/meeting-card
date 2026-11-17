@@ -459,6 +459,17 @@ public enum Theme {
         public static var minimizeButton: Frame {
             Frame(x: width - trailing - iconButton, y: height - vertical - rowHeight, width: iconButton, height: iconButton)
         }
+        /// The saving badge (#13c) at the right end of the status band, in band coordinates: the
+        /// chip's inner control height and radius, inset like it; the caption indicator's padding,
+        /// dot and gap around the label's own width, so the label never clips (the status text
+        /// gives way instead).
+        public static func savingBadge(labelWidth: Double) -> Frame {
+            let c = Captions.self
+            let h = Coach.pauseButtonSize
+            let w = c.indicatorPadding + c.dotDiameter + c.indicatorGap + labelWidth + c.indicatorPadding
+            return Frame(x: statusRow.width - Coach.controlInset - w, y: (rowHeight - h) / 2, width: w, height: h)
+        }
+        public static var savingBadgeRadius: Double { Coach.pauseButtonRadius }
         public static var captions: Frame {
             Frame(x: leading, y: vertical + rowHeight + rowGap, width: width - leading - trailing, height: captionsHeight)
         }

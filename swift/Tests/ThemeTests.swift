@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import MeetingCardCore
 
@@ -286,6 +287,24 @@ final class ThemeTests: XCTestCase {
             XCTAssertEqual(c.dot(style: t), t.critical)
             XCTAssertEqual(n.surface(style: t), t.surface)
         }
+    }
+
+    /// The saving badge sits inside the coach card's status row at the card's width, sized to its
+    /// label so it never clips, and leaves the status text its start (glyph and gap first).
+    func testSavingBadgeFitsTheStatusRow() {
+        let k = Theme.CoachCard.self
+        let field = NSTextField(labelWithString: "Saving transcript")
+        field.font = .systemFont(ofSize: CGFloat(Theme.Captions.indicatorFont.size))
+        let label = Double(field.intrinsicContentSize.width.rounded(.up))
+        let b = k.savingBadge(labelWidth: label)
+        XCTAssertEqual(b.width, Theme.Captions.indicatorPadding * 2 + Theme.Captions.dotDiameter + Theme.Captions.indicatorGap + label,
+                       accuracy: 1e-9, "the label's whole width")
+        XCTAssertEqual(b.maxX, k.statusRow.width - Theme.Coach.controlInset, accuracy: 1e-9)
+        XCTAssertEqual(b.height, Theme.Coach.pauseButtonSize)
+        XCTAssertEqual(b.y * 2 + b.height, k.rowHeight, accuracy: 1e-9, "centred in the row")
+        XCTAssertGreaterThan(b.x, k.bandInset + k.glyphSize + k.glyphGap + CardStyle.Spacing.control, "room for the status text")
+        XCTAssertEqual(k.savingBadgeRadius, Theme.Coach.pauseButtonRadius)
+        XCTAssertLessThanOrEqual(k.statusRow.maxX + k.rowGap, k.minimizeButton.x + 1e-9, "inside the card, clear of Minimize")
     }
 
     /// The coach UI files carry no literal sizes, radii or colors of their own.

@@ -82,8 +82,8 @@ final class CaptionFeedViewTests: XCTestCase {
         }
     }
 
-    /// The coach card's captions area: exactly its size, light and dark, with the footnote on the
-    /// last row and at most `cardRows` rows.
+    /// The coach card's captions area: exactly its size, light and dark, three caption rows; the
+    /// footnote and saving label stay out of it (the card's status line carries the saving badge).
     func testCardLayoutFillsTheCoachCardCaptionsArea() throws {
         let area = Theme.Captions.cardArea
         var shots: [Bool: CGImage] = [:]
@@ -96,6 +96,11 @@ final class CaptionFeedViewTests: XCTestCase {
         }
         XCTAssertNotEqual(pixels(try XCTUnwrap(shots[false])), pixels(try XCTUnwrap(shots[true])))
         XCTAssertEqual(Theme.Captions.cardRows, 3)
+        let bare = Self.demo()
+        bare.footnote = nil
+        bare.savingLabel = nil
+        XCTAssertEqual(pixels(try XCTUnwrap(CaptionFeedSnapshot.cardImage(bare, dark: false, scale: 2))),
+                       pixels(try XCTUnwrap(shots[false])), "footnote and saving label don't draw in the card")
         let empty = CaptionFeedModel(placeholder: "Captions will show here once someone talks.", footnote: "Kept in memory only. Not saved.")
         let img = try XCTUnwrap(CaptionFeedSnapshot.cardImage(empty, dark: false, scale: 1))
         XCTAssertEqual(img.height, Int(area.height))

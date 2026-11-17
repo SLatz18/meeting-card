@@ -74,13 +74,14 @@ case "${1:-}" in
     (cd "$OUT" && ls packet-*.png) > "$OUT/packet-list.txt" 2>/dev/null || true
     missing=0
     for s in card-idle card-listening card-paused card-muted card-nudge-amber card-nudge-rose card-increased-contrast \
+             card-saving card-saving-nudge \
              pill-idle pill-muted pill-paused pill-nudge-amber pill-nudge-rose \
              pill-mute-disabled-meet pill-mute-disabled-off pill-mute-disabled-permission morph-end collapse-end; do
       for a in light dark; do
         [[ -s "$OUT/coach-$s-$a.png" ]] || { echo "missing coach-$s-$a.png" >&2; missing=1; }
       done
     done
-    for s in chip-muted settings settings-call-controls menu-muted; do
+    for s in chip-muted settings settings-call-controls menu-muted caption-feed-card caption-feed-card-empty; do
       for a in light dark; do
         [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
       done

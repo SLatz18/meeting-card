@@ -377,7 +377,8 @@ final class CoachController: NSObject {
         nudges.expire(now: now)
         return CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, nudge: nudges.active(now: now),
                               mode: minimized ? .pill : .card,
-                              increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+                              increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
+                              savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
     }
 
     private func updateCoachCard(_ s: CoachCardState?) {

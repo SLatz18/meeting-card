@@ -8,6 +8,17 @@ final class CoachCardTests: XCTestCase {
 
     // MARK: tokens
 
+    /// The saving badge (#13c) is off unless the host sets it, and changes the state when set.
+    func testSavingBadgeIsOffByDefault() {
+        let mute = CoachMuteCopy.presentation(reason: nil, isMuted: false)
+        let plain = CoachCardState(status: .listening, mute: mute)
+        XCTAssertNil(plain.savingBadge)
+        var saving = plain
+        saving.savingBadge = "Saving transcript"
+        XCTAssertNotEqual(plain, saving)
+        XCTAssertEqual(CoachCardState(status: .listening, mute: mute, savingBadge: "Saving transcript"), saving)
+    }
+
     func testMotionAndCoachTokens() {
         XCTAssertEqual(CardStyle.Motion.morphKeyframes, [0, 0.120, 0.280])
         XCTAssertEqual(CardStyle.Motion.morph, 0.280)

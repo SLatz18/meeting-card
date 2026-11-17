@@ -123,6 +123,11 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(try read("App/CoachCardPanel.swift").contains("let c = captionsView ?? captions.makeView()"))
         XCTAssertTrue(try read("App/CoachController.swift").contains("captions: CaptionFeedSlot(model: transcript.feed)"))
         XCTAssertTrue(captions.contains("NSHostingView(rootView: CaptionFeedView(model: model, layout: .card))"))
+        // The saving badge rides the status line while (and only while) a transcript is being written.
+        XCTAssertTrue(try read("App/CoachController.swift").contains("savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)"))
+        let view = try read("App/CoachCardView.swift")
+        XCTAssertTrue(view.contains("applyBadge(s.savingBadge)"))
+        XCTAssertTrue(view.contains("private let badgeLabel = NSTextField(labelWithString: \"\")"), "a plain label, never truncated")
     }
 
     /// The motion the App runs is CoachMotion's (Reduce Motion included); windows still appear without AppKit animation.
