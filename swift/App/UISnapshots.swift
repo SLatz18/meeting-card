@@ -91,6 +91,9 @@ enum UISnapshots {
         func settingsShot() {
             for key in [CoachController.Keys.onboarded, CoachController.Keys.enabled, CoachTranscript.Keys.captions,
                         CoachTranscript.Keys.saveTranscripts, CoachTranscript.Keys.noticeSeen] { defaults.set(true, forKey: key) }
+            // Shot with the other opt-ins at their defaults: Use Zoom/Meet controls off, GPT as the cue judge.
+            defaults.set(false, forKey: CoachController.Keys.callControls)
+            defaults.set(JudgeProviderKind.gpt.rawValue, forKey: CoachController.Keys.judgeProvider)
             let keychain = KeychainStore(service: suite, account: "none")
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false,
                                                    transcriptStore: MemoryTranscriptStore()) else { return finish() }
