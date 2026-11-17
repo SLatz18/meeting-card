@@ -178,6 +178,10 @@ public enum CoachIndicator: String, Equatable, Sendable {
     case paused
     /// Session held because the call app reports the mic muted: no capture, no streams.
     case muted
+    /// Session listening to the call with the user's mic off (the coach's own Mute,
+    /// `CoachSession.setMicMuted`): call audio is still analysed, nothing comes from the mic.
+    /// `CoachSession` reports it; the trigger never does.
+    case micOff
 }
 
 public enum TriggerAction: Equatable, Sendable {

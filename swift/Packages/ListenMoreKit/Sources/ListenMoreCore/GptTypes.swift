@@ -182,6 +182,11 @@ public struct CostTracker: Equatable {
         }
     }
 
+    /// The open segment was cleared, never committed: nothing of it is transcribed or billed.
+    public mutating func discardOpen(speaker: Speaker) {
+        openS.removeValue(forKey: speaker)
+    }
+
     public mutating func addApiAudio(seconds: Double, speaker: Speaker) {
         apiAudioS += seconds
         if unreported[speaker]?.isEmpty == false { unreported[speaker]?.removeFirst() }

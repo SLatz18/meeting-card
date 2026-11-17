@@ -6,9 +6,11 @@ final class StubPipelineGpt: PipelineGpt {
     var queued: [GptOutput] = []
     var locals: [LocalEvent.Kind] = []
     var frames = 0
+    var micMutes: [Bool] = []
 
     func onLocal(_ event: LocalEvent) { locals.append(event.kind) }
     func feed(me: [Float], meVad: VadState, others: [Float], othersVad: VadState, meRunS: Double) { frames += 1 }
+    func setMicMuted(_ muted: Bool) { micMutes.append(muted) }
     func drain(now: TimeInterval) -> [GptOutput] {
         defer { queued.removeAll() }
         return queued

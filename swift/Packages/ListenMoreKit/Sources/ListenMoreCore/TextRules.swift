@@ -78,6 +78,8 @@ public final class TextRules: LocalTextContext {
     private var closingT: TimeInterval?
     private var userQuietSince = 0.0
     public private(set) var outcomes = Outcomes()
+    /// The user's mic is off (`setMicMuted`): no question waits on an answer they can't give.
+    public private(set) var micMuted = false
 
     public init(config: ListenMoreConfig, participants: Int = 2, meetingOffsetS: Double = 0) {
         x = config.text
@@ -100,6 +102,15 @@ public final class TextRules: LocalTextContext {
     public func onLocal(_ ev: LocalEvent) {
         guard ev.kind == .prosody, let p = ev.prosody, p.baselineReady else { return }
         prosody.append((ev.onset, p.loudnessJumpDb, p.rateJumpPct))
+    }
+
+    /// The user's mic went off (true) or came back. Either way a pending question is dropped, and
+    /// while it's off the other side's questions don't open one, so neither the gap nor the user's
+    /// first words back ("sorry, I was on mute") read as a missed answer.
+    public func setMicMuted(_ muted: Bool) {
+        guard muted != micMuted else { return }
+        micMuted = muted
+        pending = nil
     }
 
     /// The rules run sentence by sentence, so a question or a contradiction is judged where it sits in
@@ -168,7 +179,7 @@ public final class TextRules: LocalTextContext {
             q = pending
         }
         let sents = Self.sentences(seg.text)
-        if let question = sents.last, question.hasSuffix("?") {
+        if !micMuted, let question = sents.last, question.hasSuffix("?") {
             let named = !names.isDisjoint(with: seg.words)
             if named || participants == 2 {
                 let (kind, personal) = openKind(question)

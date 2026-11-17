@@ -84,6 +84,8 @@ public final class CoachSession {
     public private(set) var cuesShown = 0
     /// Mic or call capture failed to start in the current session (usually a missing permission).
     public private(set) var captureProblem = false
+    /// The user's own Mute (`setMicMuted`): the coach isn't listening to their mic. Off at every session start.
+    public private(set) var micMuted = false
 
     private let engine: EngineQueue
     private let mic: MicSource
@@ -96,6 +98,9 @@ public final class CoachSession {
     private let wallClock: () -> TimeInterval
     private let gate = AudioGate()
     private var gateGeneration = 0
+    /// The mic's own switch inside `gate`: closed by Mute, so a buffer the device was already
+    /// delivering when it stopped is dropped too.
+    private let micGate = AudioGate()
     private var fallback = CaptureFallbackPolicy()
     private let callLevel = CallLevelMeter()
     private var shownAt: [CueType: TimeInterval] = [:]
@@ -124,7 +129,12 @@ public final class CoachSession {
         bridge.session = self
     }
 
-    public var indicator: CoachIndicator { trigger.indicator }
+    /// The trigger's indicator, with Listening shown as Mic off while the user is muted. Pause and the
+    /// call app's mute hold all capture, so they show over it.
+    public var indicator: CoachIndicator {
+        let i = trigger.indicator
+        return i == .listening && micMuted ? .micOff : i
+    }
     public var session: TriggerSession? { trigger.session }
     public var isEnabled: Bool { trigger.enabled }
     public var isCapturing: Bool { !capturingBundleIds.isEmpty }
@@ -171,6 +181,40 @@ public final class CoachSession {
     public func stopManual() { apply(trigger.manualStop()) }
     public func setPaused(_ paused: Bool) { apply(trigger.setPaused(paused)) }
 
+    /// Mute: the coach stops listening to the user's mic and only that. The mic engine is stopped
+    /// (the device is released and its voice processing ends), its gate closes, and the engine drops
+    /// what it held of the user's speech, so no mic audio reaches the engine or OpenAI and no "me"
+    /// text is produced. Call capture, the other side's captions and the cues that need only the
+    /// other side keep going. It lasts until unmuted or the session ends (a new session starts
+    /// unmuted). Pause and the call app's mute hold all capture on top of it and leave it as it was:
+    /// resuming from either keeps the mic off. Nothing to mute without a session. Never touches the
+    /// call app.
+    public func setMicMuted(_ muted: Bool) {
+        guard trigger.session != nil, muted != micMuted else { return }
+        micMuted = muted
+        if isCapturing {
+            if muted {
+                setMicDevice(on: false)
+                engine.setMicMuted(true)
+            } else {
+                engine.setMicMuted(false)
+                setMicDevice(on: true)
+            }
+        }
+        changed()
+    }
+
+    /// The one place Mute reaches the mic device: it stops and restarts capture through `MicSource`.
+    /// A host mic with its own mute API (the ducking work owns `MicCapture`) swaps in here alone.
+    private func setMicDevice(on: Bool) {
+        if on {
+            startMic()
+        } else {
+            micGate.close()
+            mic.stop()
+        }
+    }
+
     /// Pause while pre-warmed (indicator `.on`): skip this call. Nothing starts for the call that is
     /// starting now; the next call starts normally.
     public func skipThisCall() {
@@ -193,7 +237,7 @@ public final class CoachSession {
         switch indicator {
         case .hidden: break
         case .on: skipThisCall()
-        case .listening, .muted: setPaused(true)
+        case .listening, .muted, .micOff: setPaused(true)
         case .paused: setPaused(false)
         }
     }
@@ -246,8 +290,10 @@ public final class CoachSession {
                 judgeStopped = nil
                 cuesShown = 0
                 captureProblem = false
+                micMuted = false
             case .stop:
                 renderer.clear()
+                micMuted = false
             case .pause(let paused):
                 cuePolicy.paused = paused
                 if paused { renderer.clear() }
@@ -294,15 +340,7 @@ public final class CoachSession {
             }
             gateGeneration = gate.openNew()
             engine.start(config: config, apiKey: key)
-            let gen = gateGeneration
-            do {
-                try mic.start(sampleRate: config.audio.sampleRate) { samples in
-                    if gate.admits(gen) { engine.ingest(.mic, samples: samples, time: 0) }
-                }
-            } catch {
-                captureProblem = true
-                delegate?.coachSession(self, didReport: .micUnavailable)
-            }
+            if micMuted { engine.setMicMuted(true) } else { startMic() }
         }
         let level = callLevel
         let call = call
@@ -327,6 +365,23 @@ public final class CoachSession {
                 self.delegate?.coachSession(self, didReport: .callCaptureFailed(stage: stage))
                 self.changed()
             }
+        }
+    }
+
+    private func startMic() {
+        let engine = engine
+        let gate = gate
+        let gen = gateGeneration
+        let micGate = micGate
+        let micGen = micGate.openNew()
+        do {
+            try mic.start(sampleRate: config.audio.sampleRate) { samples in
+                if gate.admits(gen) && micGate.admits(micGen) { engine.ingest(.mic, samples: samples, time: 0) }
+            }
+        } catch {
+            micGate.close()
+            captureProblem = true
+            delegate?.coachSession(self, didReport: .micUnavailable)
         }
     }
 
@@ -498,6 +553,10 @@ public final class EngineQueue: @unchecked Sendable {
 
     public func ingest(_ stream: AudioStream, samples: [Float], time: TimeInterval) {
         queue.async { self.engine.ingest(stream, samples: samples, time: time) }
+    }
+
+    public func setMicMuted(_ muted: Bool) {
+        queue.async { self.engine.setMicMuted(muted) }
     }
 
     public func stop() {

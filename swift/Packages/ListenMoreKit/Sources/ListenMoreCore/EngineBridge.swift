@@ -82,6 +82,10 @@ public protocol CoachEngine: AnyObject {
     func start(config: ListenMoreConfig, apiKey: APIKey?)
     /// Mono Float32 PCM at `config.audio.sampleRate`. `time` is seconds since `start`.
     func ingest(_ stream: AudioStream, samples: [Float], time: TimeInterval)
+    /// The user's mic went off (true) or came back (false) within the session. While off, mic
+    /// samples are dropped and nothing that reads the user's speech may fire from the gap or right
+    /// after it. `start` begins with the mic on.
+    func setMicMuted(_ muted: Bool)
     func stop()
 }
 
@@ -91,6 +95,7 @@ public final class StubCoachEngine: CoachEngine {
     public private(set) var isRunning = false
     public private(set) var hasKey = false
     public private(set) var samplesIngested: [AudioStream: Int] = [:]
+    public private(set) var micMuted = false
 
     public init() {}
 
@@ -98,11 +103,16 @@ public final class StubCoachEngine: CoachEngine {
         isRunning = true
         hasKey = apiKey != nil
         samplesIngested = [:]
+        micMuted = false
     }
 
     public func ingest(_ stream: AudioStream, samples: [Float], time: TimeInterval) {
-        guard isRunning else { return }
+        guard isRunning, !(stream == .mic && micMuted) else { return }
         samplesIngested[stream, default: 0] += samples.count
+    }
+
+    public func setMicMuted(_ muted: Bool) {
+        micMuted = muted
     }
 
     public func stop() {

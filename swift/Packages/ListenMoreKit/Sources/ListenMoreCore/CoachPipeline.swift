@@ -5,6 +5,8 @@ import Foundation
 public protocol PipelineGpt: AnyObject {
     func onLocal(_ event: LocalEvent)
     func feed(me: [Float], meVad: VadState, others: [Float], othersVad: VadState, meRunS: Double)
+    /// The user's mic went off or came back (`GptCore.setMeMuted`).
+    func setMicMuted(_ muted: Bool)
     /// Transcripts and verdicts that landed since the last frame, oldest first.
     func drain(now: TimeInterval) -> [GptOutput]
 }
@@ -104,6 +106,16 @@ public final class CoachPipeline {
         if text.questionNear(ev.onset) { return .drop }
         if ev.othersActive == true || text.othersTextSince((ev.othersLastSpeech ?? ev.onset) - 0.1) { return .fire }
         return t - ev.t >= waitS ? .fire : .wait
+    }
+
+    /// The user's mic went off (true) or came back. Either way no cut-in waits across the change, and
+    /// the local layer, the transcript rules and the GPT layer drop what they held of the user's speech
+    /// and suspend the checks that read it (`LocalLayer`, `TextRules`, `GptCore.setMeMuted`).
+    public func setMicMuted(_ muted: Bool) {
+        cutIns.removeAll()
+        local.setMicMuted(muted)
+        text?.setMicMuted(muted)
+        gpt?.setMicMuted(muted)
     }
 
     /// Drops transcript state (RAM only) at the end of a session.

@@ -6,6 +6,8 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     func sendAudio(_ pcm16: Data) async throws
     /// Commits the current audio turn; `refT` is the audio time of the turn's end (the VAD offset).
     func commit(refT: TimeInterval) async throws
+    /// Drops the audio sent since the last commit: nothing is transcribed from it.
+    func clear() async throws
     func close() async
 }
 
@@ -81,6 +83,11 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
         guard let ws = lock.withLock({ socket }) else { throw GptError.notConnected }
         lock.withLock { commitRefs.append(refT) }
         try await ws.send(Self.json(["type": "input_audio_buffer.commit"]))
+    }
+
+    public func clear() async throws {
+        guard let ws = lock.withLock({ socket }) else { return }
+        try await ws.send(Self.json(["type": "input_audio_buffer.clear"]))
     }
 
     public func close() async {
