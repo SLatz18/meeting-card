@@ -250,10 +250,10 @@ public final class OpenAITransport: GptTransportFactory {
 
 /// Checks a key with GET /v1/models before the coach is switched on. Reads only the status code.
 public enum KeyValidator {
-    public static func check(_ text: String, session: URLSession = OpenAISession.make()) async -> KeyCheck {
+    public static func check(_ text: String, session: URLSession? = nil) async -> KeyCheck {
         guard let key = APIKey(text) else { return .empty }
         do {
-            let (_, response) = try await session.data(for: KeyCheck.request(key))
+            let (_, response) = try await (session ?? OpenAISession.make()).data(for: KeyCheck.request(key))
             return KeyCheck.classify(httpStatus: (response as? HTTPURLResponse)?.statusCode)
         } catch {
             return .unreachable
