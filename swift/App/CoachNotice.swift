@@ -90,8 +90,9 @@ final class CoachNotice: NSObject {
             x -= Theme.cg(n.buttonGap)
         }
         root.onAppearance = { [weak self] in self?.applyChrome() }
-        window.contentView = root
+        // Size the window first: setting contentView resizes the view to the window's content size.
         window.setContentSize(root.frame.size)
+        window.contentView = root
         applyChrome()
     }
 
