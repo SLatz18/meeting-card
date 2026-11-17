@@ -35,20 +35,6 @@ enum UISnapshots {
         func remove(_ url: URL) throws { files[url] = nil }
     }
 
-    /// A view's layer tree over a transparent background (the notice).
-    @MainActor
-    static func layerImage(_ view: NSView, scale: CGFloat) -> CGImage? {
-        view.layoutSubtreeIfNeeded()
-        view.displayIfNeeded()
-        guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
-              let ctx = CGContext(data: nil, width: Int(view.bounds.width * scale), height: Int(view.bounds.height * scale),
-                                  bitsPerComponent: 8, bytesPerRow: 0, space: cs,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.scaleBy(x: scale, y: scale)
-        view.layer?.render(in: ctx)
-        return ctx.makeImage()
-    }
-
     /// The caption feed (CaptionFeedView at the card's width on the card surface: lines, lines while
     /// saving, before anyone talks, the cost-cap note, the indicator alone), then the one-time notice and
     /// the Settings group with captions and saving on during a call. The feed has no window and
