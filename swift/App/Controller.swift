@@ -82,6 +82,7 @@ final class Controller: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         installSignalHandlers()
+        EditMenu.install()
         log("start pid=\(getpid()) fixture=\(args.fixture ?? "None") no_poll=\(args.noPoll) recheck=\(coord.recheck)")
         registerLoginItem()
         switch args.appearance {

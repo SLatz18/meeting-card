@@ -136,6 +136,17 @@ enum CoachCopy {
     static let micMutedAnnouncement = "Call coach muted. It hears the call, not your mic."
     static let micUnmutedAnnouncement = "Call coach unmuted. It hears your mic again."
 
+    // MARK: The hidden Edit menu (`EditMenu`): never drawn, so these names only label its key
+    // equivalents for macOS (standard macOS wording)
+
+    static let editMenu = "Edit"
+    static let editUndo = "Undo"
+    static let editRedo = "Redo"
+    static let editCut = "Cut"
+    static let editCopy = "Copy"
+    static let editPaste = "Paste"
+    static let editSelectAll = "Select All"
+
     struct Screen {
         let title: String
         let body: String
