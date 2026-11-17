@@ -28,8 +28,7 @@ enum UISnapshots {
                     let ok = glowShot(color, card: card, path: "\(dir)/glow-\(name)-\(tag).png")
                     controller.log("coach shot glow-\(name)-\(tag) ok=\(ok)")
                 }
-                settingsShots(dir: dir, tag: tag, controller: controller)
-                NSApp.terminate(nil)
+                settingsShots(dir: dir, tag: tag, controller: controller) { NSApp.terminate(nil) }
             }
         }
     }
@@ -69,25 +68,67 @@ enum UISnapshots {
         return Card.writePNG(out, path)
     }
 
-    /// Settings (toggle off, the default) and the three onboarding screens, from scratch defaults.
+    /// A shown window's content over its resolved background (layer render, like the card snapshot;
+    /// `cacheDisplay` skips most controls of a window that was never on screen).
     @MainActor
-    static func settingsShots(dir: String, tag: String, controller: Controller) {
+    static func windowImage(_ window: NSWindow) -> CGImage? {
+        guard let view = window.contentView else { return nil }
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        let scale = window.backingScaleFactor > 0 ? window.backingScaleFactor : 2
+        guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: Int(view.bounds.width * scale), height: Int(view.bounds.height * scale),
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        var bg = CGColor(gray: 1, alpha: 1)
+        window.effectiveAppearance.performAsCurrentDrawingAppearance { bg = NSColor.windowBackgroundColor.cgColor }
+        ctx.setFillColor(bg)
+        ctx.fill(CGRect(x: 0, y: 0, width: ctx.width, height: ctx.height))
+        ctx.scaleBy(x: scale, y: scale)
+        view.layer?.render(in: ctx)
+        return ctx.makeImage()
+    }
+
+    /// Settings (toggle off, the default) and the three onboarding screens, from scratch defaults.
+    /// Each window is shown briefly so AppKit draws it, captured, then closed.
+    @MainActor
+    static func settingsShots(dir: String, tag: String, controller: Controller, done: @escaping () -> Void) {
         let suite = "com.slatz.meetingcard.swift.snapshots"
-        guard let defaults = UserDefaults(suiteName: suite) else { return }
+        guard let defaults = UserDefaults(suiteName: suite) else { return done() }
         defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
         let keychain = KeychainStore(service: "com.slatz.meetingcard.swift.snapshots", account: "none")
-        for i in 0..<CoachCopy.onboarding.count {
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain) else { return }
-            let w = CoachSettingsWindow(coach: coach, onboardingScreen: i)
-            let ok = image(of: w.window.contentView!).map { Card.writePNG($0, "\(dir)/onboarding-\(i + 1)-\(tag).png") } ?? false
-            controller.log("coach shot onboarding-\(i + 1)-\(tag) ok=\(ok)")
+        let onboarding: [(String, () -> CoachSettingsWindow?)] = (0..<CoachCopy.onboarding.count).map { i in
+            ("onboarding-\(i + 1)", {
+                guard let coach = try? CoachController(defaults: defaults, keychain: keychain) else { return nil }
+                return CoachSettingsWindow(coach: coach, onboardingScreen: i)
+            })
         }
-        defaults.set(true, forKey: CoachController.Keys.onboarded)
-        guard let coach = try? CoachController(defaults: defaults, keychain: keychain) else { return }
-        let w = CoachSettingsWindow(coach: coach)
-        w.update()
-        let ok = image(of: w.window.contentView!).map { Card.writePNG($0, "\(dir)/settings-\(tag).png") } ?? false
-        controller.log("coach shot settings-\(tag) ok=\(ok)")
+        let shots: [(String, () -> CoachSettingsWindow?)] = onboarding + [("settings", {
+            defaults.set(true, forKey: CoachController.Keys.onboarded)
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain) else { return nil }
+            let w = CoachSettingsWindow(coach: coach)
+            w.update()
+            return w
+        })]
+        func next(_ i: Int) {
+            guard i < shots.count else {
+                defaults.removePersistentDomain(forName: suite)
+                return done()
+            }
+            let (name, make) = shots[i]
+            guard let w = make() else { return next(i + 1) }
+            w.window.appearance = NSApp.effectiveAppearance
+            w.window.center()
+            w.window.orderFrontRegardless()
+            controller.schedule(0.5, repeats: false) {
+                MainActor.assumeIsolated {
+                    let ok = windowImage(w.window).map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
+                    controller.log("coach shot \(name)-\(tag) ok=\(ok)")
+                    w.window.orderOut(nil)
+                    next(i + 1)
+                }
+            }
+        }
+        next(0)
     }
 }

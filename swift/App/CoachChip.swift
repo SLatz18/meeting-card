@@ -59,8 +59,14 @@ final class CoachChipView: NSView {
             .withSymbolConfiguration(.init(pointSize: CGFloat(size), weight: weight))
     }
 
+    static func makeLabel(_ chip: CoachChip, color: NSColor = .labelColor) -> NSTextField {
+        NSTextField(labelWithAttributedString: NSAttributedString(
+            string: chip.label, attributes: [.font: Theme.font(Theme.Coach.labelFont), .foregroundColor: color]))
+    }
+
+    /// Includes the text field's cell padding, so the label never clips.
     static func labelWidth(_ chip: CoachChip) -> Double {
-        Double((chip.label as NSString).size(withAttributes: [.font: Theme.font(Theme.Coach.labelFont)]).width.rounded(.up))
+        Double(makeLabel(chip).intrinsicContentSize.width.rounded(.up))
     }
 
     /// Frame (card coordinates) right-anchored `Theme.Coach.joinGap` left of `joinX`.
@@ -99,10 +105,9 @@ final class CoachChipView: NSView {
         if showsLabel {
             x += c.glyphGap
             let w = Self.labelWidth(chip)
-            let font = Theme.font(Theme.Coach.labelFont)
-            let label = NSTextField(labelWithAttributedString: NSAttributedString(string: chip.label, attributes: [.font: font, .foregroundColor: fg]))
+            let label = Self.makeLabel(chip, color: fg)
             let h = Double(label.intrinsicContentSize.height)
-            label.frame = NSRect(x: x, y: Double(midY) - h / 2, width: w + 2, height: h)
+            label.frame = NSRect(x: x, y: Double(midY) - h / 2, width: w, height: h)
             label.setAccessibilityElement(false)
             addSubview(label)
             x += w
