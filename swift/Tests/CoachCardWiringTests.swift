@@ -115,13 +115,14 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(controller.contains("config = try ListenMoreConfig.load(overrides: Self.configOverrides)"))
     }
 
-    /// #13c's caption feed drops into a slot; until then the placeholder shows the empty-state line.
+    /// #13c's caption feed drops into the slot; the placeholder stays for hosts without a feed.
     func testCaptionsAreHostedThroughASlot() throws {
         let captions = try read("App/CoachCaptions.swift")
         XCTAssertTrue(captions.contains("protocol CoachCaptionsSlot: AnyObject {\n    func makeView() -> NSView\n}"))
         XCTAssertTrue(captions.contains("NSTextField(wrappingLabelWithString: CoachCardCopy.Captions.empty)"))
         XCTAssertTrue(try read("App/CoachCardPanel.swift").contains("let c = captionsView ?? captions.makeView()"))
-        XCTAssertTrue(try read("App/CoachController.swift").contains("captions: CoachCaptionsPlaceholder()"))
+        XCTAssertTrue(try read("App/CoachController.swift").contains("captions: CaptionFeedSlot(model: transcript.feed)"))
+        XCTAssertTrue(captions.contains("NSHostingView(rootView: CaptionFeedView(model: model, layout: .card))"))
     }
 
     /// The motion the App runs is CoachMotion's (Reduce Motion included); windows still appear without AppKit animation.

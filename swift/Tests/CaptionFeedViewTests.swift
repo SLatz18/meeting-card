@@ -82,6 +82,25 @@ final class CaptionFeedViewTests: XCTestCase {
         }
     }
 
+    /// The coach card's captions area: exactly its size, light and dark, with the footnote on the
+    /// last row and at most `cardRows` rows.
+    func testCardLayoutFillsTheCoachCardCaptionsArea() throws {
+        let area = Theme.Captions.cardArea
+        var shots: [Bool: CGImage] = [:]
+        for dark in [false, true] {
+            let img = try XCTUnwrap(CaptionFeedSnapshot.cardImage(Self.demo(), dark: dark, scale: 2))
+            XCTAssertEqual(img.width, Int(area.width * 2))
+            XCTAssertEqual(img.height, Int(area.height * 2), "fits the card's three caption lines")
+            write(img, "caption-feed-card-\(dark ? "dark" : "light").png")
+            shots[dark] = img
+        }
+        XCTAssertNotEqual(pixels(try XCTUnwrap(shots[false])), pixels(try XCTUnwrap(shots[true])))
+        XCTAssertEqual(Theme.Captions.cardRows, 3)
+        let empty = CaptionFeedModel(placeholder: "Captions will show here once someone talks.", footnote: "Kept in memory only. Not saved.")
+        let img = try XCTUnwrap(CaptionFeedSnapshot.cardImage(empty, dark: false, scale: 1))
+        XCTAssertEqual(img.height, Int(area.height))
+    }
+
     func testModelClearsAndReportsEmpty() {
         let m = Self.demo()
         XCTAssertFalse(m.isEmpty)

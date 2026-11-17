@@ -567,6 +567,17 @@ public enum Theme {
         public static let savingLabel = CardStyle.Text.primary
         /// Status menu entries for the saved transcript.
         public static let menuSymbols = (saving: "record.circle", delete: "trash")
+
+        /// In the coach card's captions area (`CoachCard.captions`): one row per caption line of the
+        /// reminder card, caption type, no header or indicator (the card has its own status row); the
+        /// footnote takes the last row when set.
+        public static var cardArea: CoachCard.Frame { CoachCard.captions }
+        public static let cardRowHeight = Metrics.captionHeight
+        public static let cardRows = Int(CoachCard.captionsHeight / Metrics.captionHeight)
+        /// Rows are spaced by their height (the card's caption line), not by a gap.
+        public static let cardLineGap: Double = 0
+        public static let cardTextFont = CoachCard.captionsFont
+        public static let cardSpeakerFont = Theme.FontSpec(CardStyle.Typography.caption.size, CardStyle.Typography.button.weight)
     }
 
     /// The one-time transcription notice: a card-shaped sheet (card width, surface, text insets) with

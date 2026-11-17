@@ -58,22 +58,80 @@ public final class CaptionFeedModel {
     }
 }
 
-/// Live captions for a host to place inside the reminder card. It has no window, surface or
+/// Live captions for a host to place inside the reminder card (the coach card hosts the `card`
+/// layout in its captions area through `CaptionFeedSlot`). It has no window, surface or
 /// shadow of its own (the card supplies them) and takes every size, font and color from
 /// `CardStyle` through `Theme.Captions`, following the environment's light or dark appearance.
 /// Top to bottom: the saving indicator, the header, the lines (each one row: the speaker label,
 /// then the newest words, older words cut at the start) or the note or placeholder, the footnote.
 public struct CaptionFeedView: View {
+    /// `full`: everything, for a host with room. `card`: for the coach card's captions area
+    /// (`Theme.Captions.cardArea`): caption rows only, the footnote on the last row when set.
+    public enum Layout: Sendable { case full, card }
+
     private let model: CaptionFeedModel
+    private let layout: Layout
     @Environment(\.colorScheme) private var colorScheme
 
-    public init(model: CaptionFeedModel) {
+    public init(model: CaptionFeedModel, layout: Layout = .full) {
         self.model = model
+        self.layout = layout
     }
 
     public var body: some View {
-        let c = Theme.Captions.self
         let style = CardStyle.for(dark: colorScheme == .dark)
+        switch layout {
+        case .full: full(style)
+        case .card: card(style)
+        }
+    }
+
+    /// The card's captions area: up to `cardRows` rows of the card's caption height, newest lines
+    /// last; a note or the placeholder when there are no lines; the footnote takes the last row.
+    @ViewBuilder private func card(_ style: CardStyle) -> some View {
+        let c = Theme.Captions.self
+        let rows = max(1, c.cardRows - (model.footnote == nil ? 0 : 1))
+        VStack(alignment: .leading, spacing: c.cardLineGap) {
+            if model.lines.isEmpty, let status = model.note ?? model.placeholder {
+                Text(status)
+                    .font(c.cardTextFont.swiftUI)
+                    .foregroundStyle(c.note.shapeStyle(style))
+                    .lineLimit(1)
+                    .frame(height: c.cardRowHeight, alignment: .leading)
+            } else if !model.lines.isEmpty {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: c.speakerGap, verticalSpacing: c.cardLineGap) {
+                    ForEach(Array(model.lines.suffix(rows).enumerated()), id: \.offset) { _, line in
+                        GridRow {
+                            Text(line.speaker)
+                                .font(c.cardSpeakerFont.swiftUI)
+                                .foregroundStyle((line.own ? c.ownSpeaker : c.speaker).shapeStyle(style))
+                                .lineLimit(1)
+                                .fixedSize()
+                                .frame(height: c.cardRowHeight)
+                            Text(line.text)
+                                .font(c.cardTextFont.swiftUI)
+                                .foregroundStyle(c.text.shapeStyle(style))
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .frame(maxWidth: .infinity, minHeight: c.cardRowHeight, maxHeight: c.cardRowHeight, alignment: .leading)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+            if let footnote = model.footnote {
+                Text(footnote)
+                    .font(c.footnoteFont.swiftUI)
+                    .foregroundStyle(c.footnote.shapeStyle(style))
+                    .lineLimit(1)
+                    .frame(height: c.cardRowHeight, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder private func full(_ style: CardStyle) -> some View {
+        let c = Theme.Captions.self
         VStack(alignment: .leading, spacing: c.stackGap) {
             if let saving = model.savingLabel {
                 CaptionSavingIndicator(label: saving)
@@ -163,6 +221,19 @@ public enum CaptionFeedSnapshot {
         let content = CaptionFeedView(model: model)
             .padding(.vertical, CardStyle.Spacing.controlBottom)
             .frame(width: Theme.Captions.cardWidth)
+            .background(style.surface.swiftUI)
+            .environment(\.colorScheme, dark ? .dark : .light)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = scale
+        return renderer.cgImage
+    }
+
+    /// The `card` layout at the coach card's captions-area size, on the card surface.
+    public static func cardImage(_ model: CaptionFeedModel, dark: Bool, scale: CGFloat) -> CGImage? {
+        let style = CardStyle.for(dark: dark)
+        let area = Theme.Captions.cardArea
+        let content = CaptionFeedView(model: model, layout: .card)
+            .frame(width: area.width, height: area.height)
             .background(style.surface.swiftUI)
             .environment(\.colorScheme, dark ? .dark : .light)
         let renderer = ImageRenderer(content: content)

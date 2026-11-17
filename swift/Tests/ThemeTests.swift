@@ -267,6 +267,11 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(c.dotColor, CardStyle.criticalColor)
         XCTAssertEqual(c.costFont, CardStyle.Typography.caption)
         XCTAssertEqual(c.cost, .secondary)
+        XCTAssertEqual(c.cardArea, Theme.CoachCard.captions, "the coach card's captions area")
+        XCTAssertEqual(Double(c.cardRows) * c.cardRowHeight, Theme.CoachCard.captionsHeight)
+        XCTAssertEqual(c.cardRowHeight, Theme.Metrics.captionHeight)
+        XCTAssertEqual(c.cardTextFont, Theme.CoachCard.captionsFont)
+        XCTAssertEqual(c.cardSpeakerFont, Theme.FontSpec(CardStyle.Typography.caption.size, CardStyle.Typography.button.weight))
         let n = Theme.Notice.self
         XCTAssertEqual(n.width, Theme.Metrics.cardWidth)
         XCTAssertEqual(n.titleFont, Theme.Fonts.title)

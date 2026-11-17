@@ -395,7 +395,7 @@ final class CoachController: NSObject {
     }
 
     private func makeCoachCard() -> CoachCardPresenter {
-        let p = CoachCardPresenter(defaults: defaults, positionKey: Keys.cardPosition, captions: CoachCaptionsPlaceholder())
+        let p = CoachCardPresenter(defaults: defaults, positionKey: Keys.cardPosition, captions: CaptionFeedSlot(model: transcript.feed))
         p.actions = CoachCardActions(stop: { [weak self] in self?.stopForThisCall() },
                                      mute: { [weak self] in self?.toggleMute() },
                                      pause: { [weak self] in self?.pauseOrResume() },

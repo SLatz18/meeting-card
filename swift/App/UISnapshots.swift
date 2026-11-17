@@ -78,8 +78,21 @@ enum UISnapshots {
                                                       footnote: CoachCopy.captionsNote)),
             ("saving-indicator", CaptionFeedModel(savingLabel: CoachCopy.savingNow)),
         ]
+        // The card layout, at the coach card's captions-area size (what the coach card hosts).
+        let cardFeeds: [(String, CaptionFeedModel)] = [
+            ("caption-feed-card", CaptionFeedModel(header: header, lines: feed.lines, footnote: CoachCopy.captionsNote)),
+            ("caption-feed-card-empty", CaptionFeedModel(header: header, placeholder: CoachCopy.captionsEmpty,
+                                                         footnote: CoachCopy.captionsNote)),
+        ]
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        for (name, model) in cardFeeds {
+            let img = CaptionFeedSnapshot.cardImage(model, dark: tag == "dark", scale: scale)
+            let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
+            controller.log("coach shot \(name)-\(tag) ok=\(ok)")
+            packet(name, img)
+        }
         for (name, model) in feeds {
-            let img = CaptionFeedSnapshot.image(model, dark: tag == "dark", scale: NSScreen.main?.backingScaleFactor ?? 2)
+            let img = CaptionFeedSnapshot.image(model, dark: tag == "dark", scale: scale)
             let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
             controller.log("coach shot \(name)-\(tag) ok=\(ok)")
             packet(name, img)
