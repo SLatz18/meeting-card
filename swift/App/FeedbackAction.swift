@@ -16,13 +16,13 @@ enum FeedbackAction {
         NSWorkspace.shared.open(Feedback.url(.current(identity: identity)))
     }
 
-    /// One line, Continue (Return) and Cancel (Esc), and a "Don't show again" checkbox.
+    /// One line, Open GitHub (Return) and Cancel (Esc), and a "Don't show again" checkbox.
     static func noticeAlert() -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = FeedbackCopy.notice
         alert.informativeText = ""
-        alert.addButton(withTitle: FeedbackCopy.noticeContinue)
+        alert.addButton(withTitle: FeedbackCopy.noticeOpen)
         alert.addButton(withTitle: FeedbackCopy.noticeCancel)
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = FeedbackCopy.dontShowAgain

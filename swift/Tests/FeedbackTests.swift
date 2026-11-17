@@ -30,7 +30,7 @@ final class FeedbackTests: XCTestCase {
         let url = Feedback.url(info)
         XCTAssertEqual(url.absoluteString,
                        "https://github.com/SLatz18/meeting-card/issues/new?template=feedback.yml"
-                           + "&app-version=2.0&build-number=1&macos-version=26.1.0&build-type=release")
+                           + "&app-version=2.0&build-number=1&macos-version=26.1.0&build-type=Release")
         XCTAssertEqual(url.scheme, "https")
         XCTAssertEqual(url.host, "github.com")
         XCTAssertEqual(url.path, "/SLatz18/meeting-card/issues/new")
@@ -56,7 +56,7 @@ final class FeedbackTests: XCTestCase {
         let items = query(url)
         XCTAssertEqual(items.map(\.name), ["template"] + Self.fieldIds)
         XCTAssertEqual(items.map(\.value), ["feedback.yml", "2.0 beta \u{e9}\u{1F600}", "7 body=injected",
-                                            "26.1 &labels=bug+x", "test-id"])
+                                            "26.1 &labels=bug+x", "Test"])
     }
 
     func testValuesAreOneLineTrimmedAndCapped() {
@@ -88,10 +88,10 @@ final class FeedbackTests: XCTestCase {
             XCTAssertEqual(Set(Feedback.Field.allCases.map(\.rawValue)), Set(Self.fieldIds))
             XCTAssertNil(url.fragment)
             let s = url.absoluteString
-            XCTAssertFalse(s.contains(identity.bundleId), "only release / test-id, not the bundle id")
+            XCTAssertFalse(s.contains(identity.bundleId), "only Release / Test, not the bundle id")
             XCTAssertFalse(s.contains("%2F"), "no file paths")
             let values = items.compactMap(\.value)
-            XCTAssertEqual(values, ["feedback.yml", "2.0", "1", "26.1.0", identity.isRelease ? "release" : "test-id"])
+            XCTAssertEqual(values, ["feedback.yml", "2.0", "1", "26.1.0", identity.isRelease ? "Release" : "Test"])
             for personal in [NSHomeDirectory(), NSUserName(), NSFullUserName()] where !personal.isEmpty {
                 XCTAssertFalse(values.contains { $0.contains(personal) }, "\(personal) in \(s)")
             }
@@ -105,15 +105,15 @@ final class FeedbackTests: XCTestCase {
         let i = Feedback.Info.current(infoDictionary: plist,
                                       os: OperatingSystemVersion(majorVersion: 26, minorVersion: 1, patchVersion: 2), identity: .test)
         XCTAssertEqual(i, Feedback.Info(appVersion: "2.0", buildNumber: "7", macOSVersion: "26.1.2", identity: .test))
-        XCTAssertEqual(query(Feedback.url(i)).compactMap(\.value), ["feedback.yml", "2.0", "7", "26.1.2", "test-id"])
+        XCTAssertEqual(query(Feedback.url(i)).compactMap(\.value), ["feedback.yml", "2.0", "7", "26.1.2", "Test"])
         let empty = Feedback.Info.current(infoDictionary: nil, os: OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0),
                                           identity: .release)
-        XCTAssertEqual(query(Feedback.url(empty)).compactMap(\.value), ["feedback.yml", "unknown", "unknown", "15.0.0", "release"])
+        XCTAssertEqual(query(Feedback.url(empty)).compactMap(\.value), ["feedback.yml", "Unknown", "Unknown", "15.0.0", "Release"])
     }
 
-    func testBuildFieldIsTestIdOrRelease() {
-        XCTAssertEqual(Feedback.Info(appVersion: "", buildNumber: "", macOSVersion: "", identity: .release).value(.buildType), "release")
-        XCTAssertEqual(Feedback.Info(appVersion: "", buildNumber: "", macOSVersion: "", identity: .test).value(.buildType), "test-id")
+    func testBuildTypeIsTestOrRelease() {
+        XCTAssertEqual(Feedback.Info(appVersion: "", buildNumber: "", macOSVersion: "", identity: .release).value(.buildType), "Release")
+        XCTAssertEqual(Feedback.Info(appVersion: "", buildNumber: "", macOSVersion: "", identity: .test).value(.buildType), "Test")
     }
 
     /// The form the link opens has exactly the two free-text fields and the four pre-filled ones, its
@@ -138,10 +138,10 @@ final class FeedbackTests: XCTestCase {
 
     // MARK: notice
 
-    func testNoticeShowsUntilDontShowAgainOnContinue() {
+    func testNoticeShowsUntilDontShowAgainOnOpen() {
         let n = FeedbackNotice(defaults: defaults, identity: .release)
         XCTAssertTrue(n.shouldShow, "shown the first time")
-        XCTAssertTrue(n.resolve(.continue, dontShowAgain: false), "Continue opens the link")
+        XCTAssertTrue(n.resolve(.continue, dontShowAgain: false), "Open GitHub opens the link")
         XCTAssertTrue(n.shouldShow, "and the notice shows again")
         XCTAssertFalse(n.resolve(.cancel, dontShowAgain: false), "Cancel opens nothing")
         XCTAssertFalse(n.resolve(.cancel, dontShowAgain: true), "Cancel opens nothing, even with the box ticked")
@@ -153,6 +153,13 @@ final class FeedbackTests: XCTestCase {
         XCTAssertFalse(FeedbackNotice(defaults: defaults, identity: .release).shouldShow, "persisted in defaults")
         XCTAssertFalse(FeedbackNotice(defaults: UserDefaults(suiteName: suite)!, identity: .release).shouldShow,
                        "read back through a new defaults object")
+    }
+
+    /// NSAlert's message is bold at a fixed width: past about 25 characters it wraps (seen in the
+    /// feedback-notice snapshot).
+    func testNoticeFitsOnOneLine() {
+        XCTAssertLessThanOrEqual(FeedbackCopy.notice.count, 25, FeedbackCopy.notice)
+        XCTAssertFalse(FeedbackCopy.notice.contains("\n"))
     }
 
     func testNoticeKeyIsPerIdentity() {

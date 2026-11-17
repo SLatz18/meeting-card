@@ -102,7 +102,7 @@ public struct FeedbackNotice {
 
     public var shouldShow: Bool { !defaults.bool(forKey: key) }
 
-    /// Whether to open the link. "Don't show again" sticks only on Continue; Cancel opens nothing and
+    /// Whether to open the link. "Don't show again" sticks only on Open GitHub (`.continue`); Cancel opens nothing and
     /// the notice shows next time.
     @discardableResult
     public func resolve(_ choice: Choice, dontShowAgain: Bool) -> Bool {

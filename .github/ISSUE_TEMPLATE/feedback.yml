@@ -1,6 +1,6 @@
 # Opened by the app's "Send Feedback…" item, pre-filled through the field ids below
 # (swift/Core/Feedback.swift). The strings match swift/Core/FeedbackCopy.swift.
-name: "Feedback from the app"
+name: "App feedback"
 description: "Opened from Send Feedback in MeetingCard."
 body:
   - type: markdown
@@ -31,4 +31,4 @@ body:
   - type: input
     id: build-type
     attributes:
-      label: "Build"
+      label: "Build type"
