@@ -175,6 +175,14 @@ public final class CaptionView: NSView {
         return out
     }
 
+    /// A label's full width, cell padding included. Measured on a plain label: one set up to truncate
+    /// reports less than its text needs.
+    public static func labelWidth(_ s: String, _ font: NSFont) -> CGFloat {
+        let f = NSTextField(labelWithString: s)
+        f.font = font
+        return f.intrinsicContentSize.width.rounded(.up)
+    }
+
     private func label(_ s: String, _ font: NSFont, _ color: NSColor, truncateHead: Bool = false) -> NSTextField {
         let f = NSTextField(labelWithString: s)
         f.font = font
@@ -199,7 +207,7 @@ public final class CaptionView: NSView {
         var top = size.height
         if let saving = content.saving {
             let text = label(saving, s.indicatorFont, s.textColor)
-            let textW = text.intrinsicContentSize.width.rounded(.up)
+            let textW = Self.labelWidth(saving, s.indicatorFont)
             let w = s.indicatorPadding + s.dotDiameter + s.indicatorPadding / 2 + textW + s.indicatorPadding
             let pill = NSView(frame: NSRect(x: 0, y: top - s.indicatorHeight, width: w, height: s.indicatorHeight))
             pill.wantsLayer = true
@@ -247,7 +255,7 @@ public final class CaptionView: NSView {
             return
         }
         let speakers = content.lines.map { label($0.speaker, s.speakerFont, $0.own ? s.ownSpeakerColor : s.speakerColor) }
-        let column = min(inner / 2, speakers.map { $0.intrinsicContentSize.width.rounded(.up) }.max() ?? 0)
+        let column = min(inner / 2, content.lines.map { Self.labelWidth($0.speaker, s.speakerFont) }.max() ?? 0)
         for (line, name) in zip(content.lines, speakers) {
             name.frame = NSRect(x: s.padding.width, y: top - row, width: column, height: row)
             let text = label(line.text, s.textFont, s.textColor, truncateHead: true)

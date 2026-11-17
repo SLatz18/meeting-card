@@ -48,6 +48,8 @@ final class CaptionPanelTests: XCTestCase {
         XCTAssertEqual(v.frame.height, CaptionView.stripHeight(testCaptionStyle, rows: 2))
         XCTAssertEqual(v.strip?.layer?.cornerRadius, 20)
         XCTAssertEqual(v.strip?.layer?.cornerCurve, .continuous)
+        XCTAssertGreaterThanOrEqual(v.stripLabels[0].frame.width, CaptionView.labelWidth("Them", testCaptionStyle.speakerFont),
+                                    "speaker labels never clip")
         let first = v.stripLabels[1].frame, second = v.stripLabels[3].frame
         XCTAssertGreaterThan(first.minY, second.minY, "oldest line on top")
         XCTAssertEqual(v.stripLabels[1].frame.minX, v.stripLabels[3].frame.minX, "text column aligned")
@@ -58,6 +60,7 @@ final class CaptionPanelTests: XCTestCase {
         v.show(CaptionContent(saving: "Saving transcript"))
         XCTAssertNil(v.strip)
         XCTAssertEqual(v.indicatorLabel?.stringValue, "Saving transcript")
+        XCTAssertGreaterThanOrEqual(v.indicatorLabel?.frame.width ?? 0, CaptionView.labelWidth("Saving transcript", testCaptionStyle.indicatorFont))
         XCTAssertEqual(v.frame.height, 33)
         var both = two
         both.saving = "Saving transcript"
