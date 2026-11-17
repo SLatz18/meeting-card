@@ -45,26 +45,26 @@ final class CoachMicMuteTests: XCTestCase {
     /// Every new string lives in CoachCopy, under the draft heading, word for word.
     func testCopyIsDraftedInOnePlace() throws {
         let copy = try read("App/CoachCopy.swift")
-        let heading = try XCTUnwrap(copy.range(of: "// MARK: DRAFT: the coach menu's Start/Stop toggle and its Mute, mic only"))
+        let heading = try XCTUnwrap(copy.range(of: "// MARK: Final copy (VP Comms): the coach menu's Start/Stop toggle and its Mute, mic only"))
         let strings: [(String, String)] = [
             ("menuStart", "Start Coach"),
             ("menuStop", "Stop Coach"),
-            ("menuMute", "Mute"),
-            ("menuUnmute", "Unmute"),
-            ("menuMuteHelp", "The coach stops listening to your mic. It still hears the call. Zoom and Meet aren't muted."),
-            ("menuUnmuteHelp", "The coach listens to your mic again."),
-            ("coachMicOff", "Coach muted, hearing others only"),
-            ("chipMicOff", "Mic off"),
-            ("micMutedAnnouncement", "Call coach muted. It hears the call, not your mic."),
-            ("micUnmutedAnnouncement", "Call coach unmuted. It hears your mic again."),
+            ("menuMute", "Mute My Mic for Coach"),
+            ("menuUnmute", "Unmute My Mic for Coach"),
+            ("menuMuteHelp", "The coach stops hearing your mic. It still hears the others. This doesn't mute you in Zoom or Meet."),
+            ("menuUnmuteHelp", "The coach hears your mic again."),
+            ("coachMicOff", "Coach is hearing others only"),
+            ("chipMicOff", "Coach can't hear you"),
+            ("micMutedAnnouncement", "Call coach stopped hearing your mic. It still hears the others."),
+            ("micUnmutedAnnouncement", "Call coach hears your mic again."),
         ]
         for (name, value) in strings {
             let line = "static let \(name) = \"\(value)\""
             let at = try XCTUnwrap(copy.range(of: line), line)
             XCTAssertGreaterThan(at.lowerBound, heading.upperBound, "\(name) sits under the heading")
         }
-        XCTAssertTrue(copy.contains("static let menuMute = \"Mute\"\n"), "the menu title is exactly Mute")
-        XCTAssertTrue(copy.contains("static let menuUnmute = \"Unmute\"\n"), "the menu title is exactly Unmute")
+        XCTAssertTrue(copy.contains("static let menuStop = \"Stop Coach\"\n"), "Stop Coach, as on the card button")
+        XCTAssertTrue(copy.contains("static let menuStart = \"Start Coach\"\n"))
     }
 
     /// Mute is the coach's alone: the menu items map to it, it stops only the service's mic, and it

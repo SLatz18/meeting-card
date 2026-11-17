@@ -123,18 +123,18 @@ enum CoachCopy {
     static let noticeConfirm = "I Understand, Turn On"
     static let noticeCancel = "Not Now"
 
-    // MARK: DRAFT: the coach menu's Start/Stop toggle and its Mute, mic only (not yet copy-reviewed; edit before release)
+    // MARK: Final copy (VP Comms): the coach menu's Start/Stop toggle and its Mute, mic only
 
     static let menuStart = "Start Coach"
     static let menuStop = "Stop Coach"
-    static let menuMute = "Mute"
-    static let menuUnmute = "Unmute"
-    static let menuMuteHelp = "The coach stops listening to your mic. It still hears the call. Zoom and Meet aren't muted."
-    static let menuUnmuteHelp = "The coach listens to your mic again."
-    static let coachMicOff = "Coach muted, hearing others only"
-    static let chipMicOff = "Mic off"
-    static let micMutedAnnouncement = "Call coach muted. It hears the call, not your mic."
-    static let micUnmutedAnnouncement = "Call coach unmuted. It hears your mic again."
+    static let menuMute = "Mute My Mic for Coach"
+    static let menuUnmute = "Unmute My Mic for Coach"
+    static let menuMuteHelp = "The coach stops hearing your mic. It still hears the others. This doesn't mute you in Zoom or Meet."
+    static let menuUnmuteHelp = "The coach hears your mic again."
+    static let coachMicOff = "Coach is hearing others only"
+    static let chipMicOff = "Coach can't hear you"
+    static let micMutedAnnouncement = "Call coach stopped hearing your mic. It still hears the others."
+    static let micUnmutedAnnouncement = "Call coach hears your mic again."
 
     // MARK: The hidden Edit menu (`EditMenu`): never drawn, so these names only label its key
     // equivalents for macOS (standard macOS wording)

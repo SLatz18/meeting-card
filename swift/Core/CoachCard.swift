@@ -10,7 +10,7 @@ import Foundation
 public enum CoachCardCopy {
     public enum Button {
         /// Replaces "Skip this call": ends the coach for the rest of this call.
-        public static let stop = "Stop coach"
+        public static let stop = "Stop Coach"
     }
 
     public enum Tooltip {

@@ -205,7 +205,7 @@ class CoachSurfaceView: NSView {
 }
 
 /// The full coach card: status line (the nudge band while a nudge holds) with Minimize, the
-/// captions area, and Stop coach, Mute and Pause/Resume on the button row.
+/// captions area, and Stop Coach, Mute and Pause/Resume on the button row.
 final class CoachFullCardView: CoachSurfaceView {
     private let band = CoachSurfaceView.layerView()
     private let bar = CoachSurfaceView.layerView()

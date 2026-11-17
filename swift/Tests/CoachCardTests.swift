@@ -49,7 +49,7 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(k.radius, CardStyle.Radius.card)
         XCTAssertEqual(k.height, 2 * CardStyle.Spacing.controlBottom + 2 * CardStyle.Size.control
                        + 2 * CardStyle.Spacing.control + 3 * Theme.Metrics.captionHeight)
-        XCTAssertEqual(k.stopButton(labelWidth: 70).x, Theme.Metrics.leadingInset, "Stop coach sits in the Ignore slot")
+        XCTAssertEqual(k.stopButton(labelWidth: 70).x, Theme.Metrics.leadingInset, "Stop Coach sits in the Ignore slot")
         XCTAssertEqual(k.pauseButton.maxX, k.width - Theme.Metrics.trailingInset, accuracy: 1e-9, "Pause/Resume where Join ends")
         XCTAssertEqual(k.pauseButton.x - k.muteButton.maxX, CardStyle.Spacing.control, accuracy: 1e-9)
         XCTAssertEqual(k.minimizeButton.maxX, k.pauseButton.maxX, accuracy: 1e-9)
@@ -210,7 +210,7 @@ final class CoachCardTests: XCTestCase {
     }
 
     func testCopy() {
-        XCTAssertEqual(CoachCardCopy.Button.stop, "Stop coach")
+        XCTAssertEqual(CoachCardCopy.Button.stop, "Stop Coach", "the same casing as the menu's Stop Coach")
         XCTAssertEqual(CoachCardCopy.A11y.skipped, "Call coach is off for the rest of this call.")
         XCTAssertEqual(CoachCardCopy.Captions.empty, "Captions will show here once someone talks.")
         XCTAssertEqual([CoachMuteCopy.muteTooltip, CoachMuteCopy.unmuteTooltip, CoachCardCopy.Tooltip.pause, CoachCardCopy.Tooltip.resume,
