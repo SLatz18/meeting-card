@@ -6,7 +6,8 @@
 #       between the two renders and the card shows absolute times)
 #   scripts/snapshots.sh coach <out-dir>
 #       coach chip states (incl. the multi-link card, full and collapsed), glow, Settings (incl. the
-#       TypeSafe cue judge, and its feedback row), onboarding, status menu, the feedback notice and the design packet
+#       TypeSafe cue judge, and its feedback row), onboarding, status menu, the feedback notice, caption
+#       strip, saving indicator, transcript notice, transcript settings and the design packet
 #       (packet-<surface>-<appearance>.png, listed in packet-list.txt), and the coach card and pill
 #       states with the morph and collapse end states (coach-<state>-<appearance>.png) from this
 #       checkout's build; fails if a Use Zoom/Meet controls packet or a coach card state is missing
@@ -52,13 +53,13 @@ case "${1:-}" in
       shot "$HERE" multilink "$a" "$OUT/coach-chip-collapsed-multilink-$a.png" MEETING_CARD_COACH_CHIP=listening \
         MEETING_CARD_COACH_CHIP_LABEL="Listening to this call"
     done
-    # Glow, Settings, onboarding, the status menu, the feedback notice and the design packet
-    # (packet-*.png: the card beside each coach surface). The fixture log's coach-shot lines (names
-    # and sizes only) are kept.
+    # Glow, Settings, onboarding, the status menu, the feedback notice, the caption and transcript
+    # surfaces and the design packet (packet-*.png: the card beside each coach surface). The fixture
+    # log's coach-shot lines (names and sizes only) are kept.
     LOG="$HOME/Library/Logs/MeetingCardSwift-fixture.log"
     for a in light dark; do
       (cd "$HERE" && MEETING_CARD_COACH_CHIP=listening MEETING_CARD_COACH_SHOTS="$OUT" \
-        scripts/show-fixture.sh meet "$a" 20 >/dev/null 2>&1) || true
+        scripts/show-fixture.sh meet "$a" 30 >/dev/null 2>&1) || true
       grep -hE "coach (shot|packet|menu|notice)" "$LOG" >> "$OUT/coach-shots.log" 2>/dev/null || true
     done
     # The coach card and pill in each state, and the morph and collapse end states (coach-<name>-<appearance>.png;

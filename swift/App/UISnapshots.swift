@@ -15,8 +15,133 @@ import MeetingCardCore
 ///                                                 end states, then quit
 /// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
 /// surface (chip, the Muted chip, glow, Settings, Settings with Use Zoom/Meet controls on, onboarding,
-/// status menu off / listening / muted, feedback notice) for a side-by-side design review.
+/// status menu off / listening / muted, feedback notice, caption strip, saving indicator, transcript
+/// notice, transcript settings) for a side-by-side design review. Caption text is synthetic and
+/// nothing is saved (an in-memory transcript store).
 enum UISnapshots {
+    /// Synthetic caption lines for the screenshots.
+    static let demoCaptions: [CaptionEvent] = [
+        .final(.others, text: "Shall we start with the timeline for the next release?"),
+        .final(.me, text: "Yes, the first draft is ready for review."),
+        .partial(.others, item: "demo", text: "Great, let's go through it section by"),
+    ]
+
+    /// Holds transcript text in memory for the screenshots; never touches disk.
+    final class MemoryTranscriptStore: TranscriptStore {
+        var files: [URL: String] = [:]
+        func prepare(folder: URL) throws {}
+        func exists(_ url: URL) -> Bool { files[url] != nil }
+        func write(_ text: String, to url: URL) throws { files[url] = text }
+        func remove(_ url: URL) throws { files[url] = nil }
+    }
+
+    /// A view's layer tree over a transparent background (the caption panel, the notice).
+    @MainActor
+    static func layerImage(_ view: NSView, scale: CGFloat) -> CGImage? {
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: Int(view.bounds.width * scale), height: Int(view.bounds.height * scale),
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        view.layer?.render(in: ctx)
+        return ctx.makeImage()
+    }
+
+    /// The caption strip (synthetic lines), the saving indicator alone, the one-time notice and the
+    /// Settings group with captions and saving on during a call. Each shown briefly on screen so
+    /// AppKit draws it, captured, then hidden.
+    @MainActor
+    static func transcriptShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
+                                done: @escaping () -> Void) {
+        let suite = "com.slatz.meetingcard.swift.snapshots"
+        guard let defaults = UserDefaults(suiteName: suite) else { return done() }
+        defaults.removePersistentDomain(forName: suite)
+        let live = LiveTranscript(settings: .init(captions: true, saving: true, folder: FileTranscriptStore.defaultFolder(), keyUsable: true),
+                                  store: MemoryTranscriptStore(), captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines))
+        live.callStarted()
+        demoCaptions.forEach { live.receive($0) }
+        var strip = CoachTranscript.content(live)
+        strip.saving = nil
+        let panels: [(String, CaptionContent)] = [
+            ("captions", strip),
+            ("saving", CaptionContent(saving: CoachCopy.savingNow)),
+            ("captions-saving", CoachTranscript.content(live)),
+        ]
+        let captions = CaptionPanelController(style: CoachTranscript.captionStyle())
+        captions.panel.appearance = NSApp.effectiveAppearance
+        func finish() {
+            defaults.removePersistentDomain(forName: suite)
+            done()
+        }
+        func settingsShot() {
+            for key in [CoachController.Keys.onboarded, CoachController.Keys.enabled, CoachTranscript.Keys.captions,
+                        CoachTranscript.Keys.saveTranscripts, CoachTranscript.Keys.noticeSeen] { defaults.set(true, forKey: key) }
+            let keychain = KeychainStore(service: suite, account: "none")
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false,
+                                                   transcriptStore: MemoryTranscriptStore()) else { return finish() }
+            coach.service?.setEnabled(false)
+            coach.keyStored = true
+            coach.transcript.sync(keyUsable: coach.transcriptKeyUsable)
+            coach.transcript.callStarted()
+            demoCaptions.forEach { coach.transcript.receive($0) }
+            coach.transcript.record(CostReading(transcribeUsd: 0.0085, judgeUsd: 0.0012, budgetUsd: 1, billedAudioS: 30))
+            let w = CoachSettingsWindow(coach: coach)
+            w.update()
+            w.window.appearance = NSApp.effectiveAppearance
+            w.window.center()
+            w.window.orderFrontRegardless()
+            controller.schedule(0.5, repeats: false) {
+                MainActor.assumeIsolated {
+                    let img = windowImage(w.window)
+                    let ok = img.map { Card.writePNG($0, "\(dir)/transcript-settings-\(tag).png") } ?? false
+                    controller.log("coach shot transcript-settings-\(tag) ok=\(ok)")
+                    packet("transcript-settings", img)
+                    w.window.orderOut(nil)
+                    coach.transcript.callEnded()
+                    finish()
+                }
+            }
+        }
+        func noticeShot() {
+            let notice = CoachNotice { _ in }
+            notice.window.appearance = NSApp.effectiveAppearance
+            notice.window.center()
+            notice.window.orderFrontRegardless()
+            controller.schedule(0.5, repeats: false) {
+                MainActor.assumeIsolated {
+                    let img = notice.window.contentView.flatMap { layerImage($0, scale: notice.window.backingScaleFactor > 0 ? notice.window.backingScaleFactor : 2) }
+                    let ok = img.map { Card.writePNG($0, "\(dir)/notice-\(tag).png") } ?? false
+                    controller.log("coach shot notice-\(tag) ok=\(ok)")
+                    packet("notice", img)
+                    notice.window.orderOut(nil)
+                    settingsShot()
+                }
+            }
+        }
+        func shoot(_ i: Int) {
+            guard i < panels.count else {
+                captions.hide()
+                live.callEnded()
+                return noticeShot()
+            }
+            captions.show(panels[i].1)
+            controller.schedule(0.4, repeats: false) {
+                MainActor.assumeIsolated {
+                    let scale = captions.panel.backingScaleFactor > 0 ? captions.panel.backingScaleFactor : 2
+                    let img = layerImage(captions.panel.captionView, scale: scale)
+                    let name = panels[i].0
+                    let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
+                    controller.log("coach shot \(name)-\(tag) ok=\(ok)")
+                    packet(name, img)
+                    shoot(i + 1)
+                }
+            }
+        }
+        shoot(0)
+    }
+
     static func demoChip(_ env: [String: String]) -> CoachChip? {
         let label = env["MEETING_CARD_COACH_CHIP_LABEL"]
         switch env["MEETING_CARD_COACH_CHIP"] {
@@ -85,8 +210,10 @@ enum UISnapshots {
                             packet("glow-\(name)", img)
                         }
                         settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
-                            menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
-                            noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
+                            transcriptShots(dir: dir, tag: tag, controller: controller, packet: packet) {
+                                menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
+                                noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
+                            }
                         }
                     }
                 }
