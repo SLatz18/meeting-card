@@ -467,11 +467,6 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         folderPath.lineBreakMode = .byTruncatingMiddle
         folderPath.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         transcriptStatus.preferredMaxLayoutWidth = Self.innerWidth / 2
-        transcriptStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for b in [chooseFolderButton, deleteButton] {
-            b.setContentCompressionResistancePriority(.required, for: .horizontal)
-            b.setContentHuggingPriority(.required, for: .horizontal)
-        }
         for (field, speaker) in [(youField, Speaker.me), (themField, Speaker.others)] {
             field.placeholderString = SpeakerLabels().label(speaker)
             field.font = Theme.font(Theme.Settings.itemFont)
@@ -497,16 +492,16 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         folderLabels.alignment = .leading
         folderLabels.spacing = 0
         let folderRow = Self.row(folderLabels, chooseFolderButton)
-        let statusRow = Self.row(NSStackView(views: [savingHolder, transcriptStatus]), deleteButton)
+        let statusRow = Self.row(transcriptStatus, deleteButton)
         let names = NSStackView(views: [youField, themField])
         names.orientation = .horizontal
         names.distribution = .fillEqually
         names.spacing = CGFloat(Theme.Settings.groupSpacing)
         let namesHelp = Self.text(CoachCopy.speakerNamesHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
-        let views: [NSView] = [heading, transcriptNote, captionsRow, captionsHelp, savingRow, savingHelp, folderRow, statusRow,
-                               Self.text(CoachCopy.speakerNames, font: Theme.Settings.itemFont), names, namesHelp, costLabel]
+        let views: [NSView] = [heading, transcriptNote, captionsRow, captionsHelp, savingRow, savingHelp, folderRow, savingHolder,
+                               statusRow, Self.text(CoachCopy.speakerNames, font: Theme.Settings.itemFont), names, namesHelp, costLabel]
         let g = Self.group(views)
-        for v in views where v !== heading { pin(v, in: g) }
+        for v in views where v !== heading && v !== savingHolder { pin(v, in: g) }
         return g
     }
 
