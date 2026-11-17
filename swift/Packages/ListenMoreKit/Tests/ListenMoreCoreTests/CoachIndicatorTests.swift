@@ -62,4 +62,17 @@ final class CoachIndicatorTests: XCTestCase {
         run(zoom, 5.5, 10)
         XCTAssertEqual(trigger.indicator, .hidden)
     }
+
+    func testPauseWhilePrewarmedSkipsThisCall() {
+        trigger.joinHint(endsAt: 600, now: 0)
+        run(zoom, 0, 1)
+        XCTAssertEqual(trigger.indicator, .on)
+        trigger.dismissPrewarm()
+        XCTAssertEqual(trigger.indicator, .hidden)
+        run(zoom, 1.5, 10)
+        XCTAssertNil(trigger.session, "the dismissed call never auto-starts")
+        run(silent, 10.5, 11)
+        run(zoom, 11.5, 15)
+        XCTAssertEqual(trigger.indicator, .listening, "a later call starts normally")
+    }
 }

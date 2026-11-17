@@ -73,9 +73,11 @@ final class PrivacyGuardTests: XCTestCase {
 
     /// The coach keeps nothing: no daily summary, history, recap or stats, in memory or on disk.
     func testNoSummaryOrHistory() throws {
-        let re = #"(?i)\b(summary|summaries|history|recap|daily|stats|statistics|journal|archive)\b"#
+        let re = #"(?i)\b(summary|summaries|history|recap|recaps|daily|stats|statistics|journal|archive)\b"#
         for (name, text) in try allSources() {
-            XCTAssertNil(text.range(of: re, options: .regularExpression), "\(name) mentions a stored-history concept")
+            // Code and comments only: user-facing copy may promise "no stats, no recaps".
+            let code = text.replacingOccurrences(of: #""(?:[^"\\\n]|\\.)*""#, with: "\"\"", options: .regularExpression)
+            XCTAssertNil(code.range(of: re, options: .regularExpression), "\(name) mentions a stored-history concept")
         }
     }
 

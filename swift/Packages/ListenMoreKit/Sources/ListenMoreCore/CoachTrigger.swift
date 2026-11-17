@@ -59,8 +59,9 @@ public struct TriggerSettings: Equatable, Sendable {
         self.stopAfterS = stopAfterS
     }
 
-    public init(config: ListenMoreConfig, anyApp: Bool, ownPid: Int32, ownBundleId: String?) {
-        self.init(allowlist: config.captureTargets.map(\.bundleId), anyApp: anyApp,
+    /// `allowlist` is the user's edited list from Settings; nil means the config's call apps.
+    public init(config: ListenMoreConfig, anyApp: Bool, ownPid: Int32, ownBundleId: String?, allowlist: [String]? = nil) {
+        self.init(allowlist: allowlist ?? config.captureTargets.map(\.bundleId), anyApp: anyApp,
                   excludedBundleIds: config.trigger.excludeBundleIds + [ownBundleId].compactMap { $0 },
                   ownPid: ownPid, startAfterS: config.trigger.startAfterS, stopAfterS: config.trigger.stopAfterS)
     }
@@ -255,6 +256,14 @@ public struct CoachTrigger: Sendable {
         s.paused = on
         session = s
         return [.pause(on)]
+    }
+
+    /// Pause while pre-warmed (chip "On", no session yet): skip this call. Clears the Join hint
+    /// and suppresses apps already in the start debounce until their audio stops.
+    public mutating func dismissPrewarm() {
+        guard session == nil else { return }
+        hintEndsAt = nil
+        for key in qualifyingSince.keys { suppressed.insert(key) }
     }
 
     /// The user clicked Join on a card: remember the event's end. An audio session that is running
