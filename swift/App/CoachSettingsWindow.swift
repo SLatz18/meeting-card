@@ -20,6 +20,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let keyField = NSSecureTextField()
     private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let anyAppBox = NSButton(checkboxWithTitle: CoachCopy.anyApp, target: nil, action: nil)
+    private let callControlsSwitch = NSSwitch()
+    private let callControlsNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let requestAccessButton = NSButton(title: CoachCopy.requestAccess, target: nil, action: nil)
     private var appsStack = NSStackView()
     private let root = NSStackView()
     private let document = NSView()
@@ -108,6 +111,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         update()
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        updateCallControls()
+        fitWindow()
     }
 
     // MARK: building blocks
@@ -302,6 +307,18 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let g1 = Self.group([toggleRow, help, gptNote, toggleError, permissionNote, startButton])
         for v in [toggleRow, help, gptNote, toggleError, permissionNote] { pin(v, in: g1) }
 
+        callControlsSwitch.target = self
+        callControlsSwitch.action = #selector(callControlsToggled(_:))
+        callControlsSwitch.setAccessibilityLabel(CoachCopy.callControlsToggle)
+        requestAccessButton.target = self
+        requestAccessButton.action = #selector(requestAccess(_:))
+        requestAccessButton.bezelStyle = startButton.bezelStyle
+        requestAccessButton.controlSize = startButton.controlSize
+        let callControlsRow = Self.row(Self.text(CoachCopy.callControlsToggle, font: Theme.Settings.rowFont), callControlsSwitch)
+        let callControlsHelp = Self.text(CoachCopy.callControlsHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
+        let gControls = Self.group([callControlsRow, callControlsHelp, callControlsNote, requestAccessButton])
+        for v in [callControlsRow, callControlsHelp, callControlsNote] { pin(v, in: gControls) }
+
         keyField.placeholderString = coach.hasKey ? CoachCopy.keySavedPlaceholder : CoachCopy.keyPlaceholder
         keyField.font = Theme.font(Theme.Settings.itemFont)
         keyField.target = self
@@ -331,7 +348,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
                                 color: Self.color(.secondary), maxWidth: Self.outerWidth)
-        return [section, g1, g2, g3, privacy]
+        return [section, g1, gControls, g2, g3, privacy]
     }
 
     private func appName(_ bundleId: String) -> String {
@@ -375,6 +392,19 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         toggleError.stringValue = coach.enabled ? toggleMessage(coach) ?? "" : ""
         toggleError.isHidden = toggleError.stringValue.isEmpty
         keyStatus.isHidden = keyStatus.stringValue.isEmpty
+        updateCallControls()
+    }
+
+    /// The toggle, and while it's on, what it still needs (checked, never asked; the Request access
+    /// button asks). Checked only while the window is up.
+    private func updateCallControls() {
+        callControlsSwitch.state = coach.callControlsOn ? .on : .off
+        let needs = window.isVisible ? coach.callControlsNeeds() : CoachController.CallControlsNeeds()
+        let note = [CoachCopy.callControlsNeeds(accessibility: needs.accessibility, automation: needs.automation),
+                    needs.diaUnsupported ? CoachCopy.callControlsDiaUnsupported : nil].compactMap { $0 }.joined(separator: " ")
+        callControlsNote.stringValue = note
+        callControlsNote.isHidden = note.isEmpty
+        requestAccessButton.isHidden = !(needs.accessibility || !needs.automation.isEmpty)
     }
 
     /// Under the toggle: problems with the stored key. A missing key is the GPT note, not an error.
@@ -400,6 +430,16 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     }
 
     @objc private func startNow(_ sender: Any?) { coach.startClicked(sender) }
+
+    @objc private func callControlsToggled(_ sender: NSSwitch) {
+        coach.setCallControls(sender.state == .on)
+        update()
+    }
+
+    @objc private func requestAccess(_ sender: Any?) {
+        coach.requestCallControlsAccess()
+        update()
+    }
 
     @objc private func keyEntered(_ sender: NSSecureTextField) {
         let text = sender.stringValue

@@ -40,6 +40,8 @@ macOS asks. If a call app's bundle ID differs from `capture_targets` in
 `swift/Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift` (`osascript -e 'id of app "<App>"'`), note it.
 
 The coach starts from Core Audio state only: the call app producing output and the microphone running, for about 3 s.
+With **Use Zoom/Meet controls** on (checks ZC*, MC*, MD*), Zoom's meeting controls and an open Meet tab also end it
+about 3 s after the call ends and hold it while Zoom is muted.
 The indicator is the chip on a visible card (On → Listening → Paused) and the top line of the coach menu bar menu, which is
 always there (Turn On Call Coach while off).
 
@@ -66,6 +68,18 @@ always there (Turn On Call Coach while off).
 | L2 | All | Rejected key | Save a key, then revoke it at OpenAI and relaunch | Settings and the menu flag the key; local cues still fire |
 | G1 | All | Focus | A cue fires while typing in another app | Keyboard focus never moves; clicks pass through |
 | G2 | All | No sound / cooldown | Trigger the same cue twice in 20 s | One glow, no sound |
+| ZC1 | Zoom desktop | Use Zoom/Meet controls: prompt in context | Turn on **Use Zoom/Meet controls** in Settings | macOS asks for Accessibility only now (never before the toggle); Settings names what is still missing; nothing changes for Core Audio checks Z1–Z3 |
+| ZC2 | Zoom desktop | Fast stop | With Accessibility granted, join a test meeting, then click Leave (Zoom keeps running) | Listening within about 3 s; chip hides about 3 s after Leave, not 30 s; doesn't restart while Zoom stays open |
+| ZC3 | Zoom desktop | Mute pauses | In the meeting, mute (⇧⌘A or the toolbar), wait, unmute | Chip shows **Muted** and the menu says Coach paused while you're muted; no cues and no traffic to api.openai.com while muted; Listening again within about 1 s of unmute |
+| ZC4 | Zoom desktop | Pause beats unmute | While muted, click Pause on the chip, then unmute | Chip stays **Paused** until Resume |
+| ZC5 | Zoom desktop | Denied / revoked | Deny Accessibility (or remove MeetingCard from it mid-call) | No dialog or error; the coach falls back to the 30 s audio stop |
+| MC1 | Meet in Chrome | Prompt in context | Open Chrome, turn the toggle on (or click Request access) | macOS asks "MeetingCard wants to control Google Chrome" only now; Chrome is never launched by MeetingCard |
+| MC2 | Meet in Chrome | Fast stop | With Automation granted, join a test Meet (`meet.google.com/xxx-xxxx-xxx`) with other tabs open, then close the Meet tab or click Leave | Listening within about 3 s; chip hides about 3 s after the meeting URL goes away |
+| MC3 | Meet in Chrome | Denied | Deny Automation for Chrome (System Settings > Privacy & Security > Automation) | No dialog; Chrome calls fall back to the 30 s audio stop |
+| MD1 | Meet in Dia | Scripting check | `osascript -e 'tell application "Dia" to get version'` and `osascript -e 'tell application "Dia" to count (tabs of window 1 whose URL starts with "https://meet.google.com/")'` | Note Dia's version and whether the count works. If it errors, Dia isn't supported: Settings says so and Dia uses the 30 s audio stop |
+| MD2 | Meet in Dia | Prompt + fast stop | Open Dia, turn the toggle on, join a test Meet, switch to another Dia space for a minute, then close the Meet tab | One Automation prompt for Dia; the coach keeps listening while the Meet tab is in another space; hides about 3 s after the tab closes |
+| MD3 | Meet in Dia | Unsupported or denied | On a Dia where MD1's count errors, or with Automation denied | No dialog; Dia calls fall back to the 30 s audio stop |
+| K3 | All | Nothing read is kept | During ZC2–MD2, `log show --predicate 'subsystem == "com.listenmore.kit"' --last 10m` and the MeetingCard log | No meeting or page titles, names, chat, URLs or menu labels anywhere |
 | K1 | All | Keychain and logs | Inspect the Keychain and `log show --predicate 'subsystem == "com.listenmore.kit"'` | Key only in the Keychain; no transcript text or key in logs; no files written |
 | K2 | All | Keychain caveat | Keychain Access → login → the `com.slatz.meetingcard.swift.test.openai` item | Item is in the **login** keychain. Expected until the app is properly signed (see below), not a failure |
 

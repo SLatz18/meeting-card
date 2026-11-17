@@ -24,6 +24,8 @@
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>With Use Zoom/Meet controls on, MeetingCard asks your browser only whether a Google Meet call tab is open, so Call coach can stop when you leave. It never reads page titles or other tabs.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>MeetingCard needs system audio so Call coach can hear the other people on your call. Nothing is recorded or saved.</string>
 	<key>NSHumanReadableCopyright</key>

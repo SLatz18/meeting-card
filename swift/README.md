@@ -33,13 +33,15 @@ Seams: `--fixture <json>`, `--no-poll`, `--no-recheck`, `--snapshot <png>` (CALa
 `MEETING_CARD_BORDER_SWAP_DELAY` s, default 3; logs `border demo: <provider|none>` + `border layers=<n>` per apply),
 `MEETING_CARD_SELFTEST=join|ignore` (+ `MEETING_CARD_SELFTEST_DELAY`), `MEETING_CARD_DRY_JOIN=1`.
 Coach seams (fixture runs only; the coach itself is never created on a fixture run):
-`MEETING_CARD_COACH_CHIP=on|listening|paused` (that chip on the card), `MEETING_CARD_COACH_SHOTS=<dir>` (write glow,
-Settings and onboarding PNGs, then quit). `scripts/snapshots.sh` renders them, and CI pixel-compares every reminder
+`MEETING_CARD_COACH_CHIP=on|listening|paused|muted` (that chip on the card), `MEETING_CARD_COACH_SHOTS=<dir>` (write glow,
+Settings, Settings with Use Zoom/Meet controls on, onboarding and menu PNGs, then quit). `scripts/snapshots.sh` renders them, and CI pixel-compares every reminder
 card at the base and head revisions (`scripts/compare-snapshots.py`).
 
 Call coach (opt-in, off by default): `App/Coach*.swift` (controller, chip, Settings, copy) on top of ListenMoreKit.
 Design tokens in `Core/Theme.swift`: `CardStyle` holds the reminder card's typography, color roles, radii, spacing, strokes, material and light/dark values. The card reads it, and every coach surface (chip, glow, Settings, onboarding, status menu) derives from it through `Theme`; the Kit gets its glow colors and shape as a `CoachStyle` built from these tokens. `scripts/snapshots.sh coach` also writes `packet-*.png`: the card beside each coach surface, light and dark.
-Needs Microphone, System Audio Recording and Screen Recording only once the user turns the coach on.
+Needs Microphone, System Audio Recording and Screen Recording only once the user turns the coach on. "Use Zoom/Meet
+controls" (off by default) adds Accessibility (Zoom) and Automation (Chrome, Dia), asked for only when that toggle is
+turned on (or from its Request access button).
 
 Snapshots (`docs/`): `card-{meet,zoom,multilink,countdown,nolink,nextup}-{light,dark}.png`, made with
 `scripts/show-fixture.sh <fixture> <light|dark> 2 --snapshot docs/...` (countdown/nolink with `SHIFT=90`, others `SHIFT=none`).

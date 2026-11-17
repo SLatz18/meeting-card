@@ -37,7 +37,7 @@ case "${1:-}" in
     ;;
   coach)
     OUT="$(mkdir -p "$2" && cd "$2" && pwd)"
-    for chip in on listening paused; do
+    for chip in on listening paused muted; do
       for a in light dark; do
         shot "$HERE" meet "$a" "$OUT/coach-chip-$chip-$a.png" MEETING_CARD_COACH_CHIP="$chip"
       done

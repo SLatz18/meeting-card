@@ -22,7 +22,24 @@ final class CoachWiringTests: XCTestCase {
             let s = try read(f)
             XCTAssertTrue(s.contains("NSMicrophoneUsageDescription"), f)
             XCTAssertTrue(s.contains("NSAudioCaptureUsageDescription"), f)
+            XCTAssertTrue(s.contains("NSAppleEventsUsageDescription"), f)
         }
+    }
+
+    /// "Use Zoom/Meet controls" is off until the user turns it on, feeds the service's call state,
+    /// and asks for permissions only from that toggle.
+    func testCallControlsAreOptInAndFeedTheService() throws {
+        let src = try read("App/CoachController.swift")
+        XCTAssertTrue(src.contains("static let callControls = \"coach.callControls\""))
+        XCTAssertTrue(src.contains("var callControlsOn: Bool { defaults.bool(forKey: Keys.callControls) }"), "false until set")
+        XCTAssertTrue(src.contains("callControls.isEnabled = callControlsOn"))
+        XCTAssertTrue(src.contains("keys: keyGate, callState: callControls"))
+        let body = try XCTUnwrap(src.components(separatedBy: "func setCallControls(_ on: Bool)").dropFirst().first?
+            .components(separatedBy: "func requestCallControlsAccess").first)
+        XCTAssertTrue(body.contains("if on { requestCallControlsAccess() }"), "asks in context, only when turned on")
+        let settings = try read("App/CoachSettingsWindow.swift")
+        XCTAssertTrue(settings.contains("coach.setCallControls(sender.state == .on)"))
+        XCTAssertTrue(settings.contains("Theme.Settings.rowFont") && settings.contains("CoachCopy.callControlsToggle"))
     }
 
     func testOptInIsOffByDefault() throws {
