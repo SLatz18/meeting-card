@@ -155,6 +155,10 @@ final class ThemeTests: XCTestCase {
         let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
         let copy = try String(contentsOf: app.appendingPathComponent("CoachCopy.swift"), encoding: .utf8)
         XCTAssertTrue(copy.contains("\"Meet Call Coach\""))
+        // Approved copy: the toggle help and onboarding screen 1 describe the card nudge, not the glow.
+        XCTAssertTrue(copy.contains("static let toggleHelp = \"A small card turns red when you interrupt or talk over someone, and amber when you miss a question. Only you see it. Off by default.\""))
+        XCTAssertTrue(copy.contains("body: \"A quiet nudge on your calls. A small card shows a short tip. It turns red if you interrupt or talk over someone, and amber if you miss a question. Only you see it.\""))
+        XCTAssertFalse(copy.contains("screen-edge glow") || copy.contains("edge of your screen glows"))
         XCTAssertFalse(copy.contains("\"Meet Call coach\""))
         let window = try String(contentsOf: app.appendingPathComponent("CoachSettingsWindow.swift"), encoding: .utf8)
         XCTAssertTrue(window.contains("let primary = Self.cardButton(s.primary"))
