@@ -26,6 +26,34 @@ jobs:
       - name: Test (app + ListenMoreKit) + Release build (ad-hoc signed)
         working-directory: swift
         run: ./scripts/build.sh build
+      - name: Default build keeps the shipping identity
+        working-directory: swift
+        run: |
+          app=build/dd/Build/Products/Release/MeetingCardSwift.app
+          for k in CFBundleIdentifier CFBundleDisplayName CFBundleName; do
+            echo "$k=$(plutil -extract $k raw "$app/Contents/Info.plist")"
+          done
+          test "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" = "com.slatz.meetingcard.swift"
+          test "$(plutil -extract CFBundleDisplayName raw "$app/Contents/Info.plist")" = "MeetingCardSwift"
+          test "$(plutil -extract CFBundleName raw "$app/Contents/Info.plist")" = "MeetingCardSwift"
+          codesign -d --verbose=2 "$app" 2>&1 | grep -x "Identifier=com.slatz.meetingcard.swift"
+      # The Mac hand checks' build (docs/MAC_DEMO_CHECKS.md); Kit tests already ran above.
+      - name: Test-id build (build.sh build --test-id)
+        working-directory: swift
+        env:
+          SKIP_KIT_TESTS: "1"
+        run: ./scripts/build.sh build --test-id
+      - name: Test-id build has the test identity
+        working-directory: swift
+        run: |
+          app=build/dd-test/Build/Products/Release/MeetingCardSwift.app
+          for k in CFBundleIdentifier CFBundleDisplayName CFBundleName; do
+            echo "$k=$(plutil -extract $k raw "$app/Contents/Info.plist")"
+          done
+          test "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" = "com.slatz.meetingcard.swift.test"
+          test "$(plutil -extract CFBundleDisplayName raw "$app/Contents/Info.plist")" = "MeetingCard (Test)"
+          test "$(plutil -extract CFBundleName raw "$app/Contents/Info.plist")" = "MeetingCard (Test)"
+          codesign -d --verbose=2 "$app" 2>&1 | grep -x "Identifier=com.slatz.meetingcard.swift.test"
       - name: Kit test summary
         working-directory: swift
         run: grep -E "Executed [0-9]+ tests" build/kit-test.log | tail -1
@@ -47,6 +75,14 @@ jobs:
         with:
           name: MeetingCardSwift-app
           path: MeetingCardSwift-app.zip
+      - name: Package the test-id .app (for the Mac hand checks)
+        run: |
+          ditto swift/build/dd-test/Build/Products/Release/MeetingCardSwift.app "$RUNNER_TEMP/MeetingCardSwift-Test.app"
+          ditto -c -k --keepParent "$RUNNER_TEMP/MeetingCardSwift-Test.app" "$GITHUB_WORKSPACE/MeetingCardSwift-Test-app.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeetingCardSwift-Test-app
+          path: MeetingCardSwift-Test-app.zip
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -88,6 +124,17 @@ jobs:
               -scheme MeetingCardSwift -configuration Release -derivedDataPath build/dd build >"$RUNNER_TEMP/build-$rev.log" 2>&1) \
               || { grep -E "error:" "$RUNNER_TEMP/build-$rev.log" | head -40; exit 1; }
           done
+      - name: Default Info.plist vs base (report only)
+        continue-on-error: true
+        run: |
+          p=swift/build/dd/Build/Products/Release/MeetingCardSwift.app/Contents/Info.plist
+          if cmp "base/$p" "head/$p"; then
+            echo "Default Info.plist: byte-identical to base" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Default Info.plist: differs from base" | tee -a "$GITHUB_STEP_SUMMARY"
+            diff <(plutil -p "base/$p") <(plutil -p "head/$p") || true
+            exit 1
+          fi
       - name: Render reminder cards (base vs head)
         run: head/swift/scripts/snapshots.sh cards base/swift head/swift "$RUNNER_TEMP/shots/cards"
       - name: Render coach UI (head)
