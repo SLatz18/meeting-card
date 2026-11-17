@@ -152,7 +152,7 @@ enum UISnapshots {
 
     @MainActor
     static func coachCardShots(dir: String, card: Card, controller: Controller) {
-        let suite = "com.slatz.meetingcard.swift.snapshots"
+        let suite = AppIdentity.current.scoped("snapshots")
         guard let defaults = UserDefaults(suiteName: suite) else { return }
         defaults.removePersistentDomain(forName: suite)
         let tag = card.isDark ? "dark" : "light"

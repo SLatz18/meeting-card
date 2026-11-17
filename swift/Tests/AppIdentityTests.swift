@@ -80,7 +80,8 @@ final class AppIdentityTests: XCTestCase {
         XCTAssertTrue(controller.contains("let identity = AppIdentity.current\n"))
         XCTAssertTrue(controller.contains("home: home, identity: identity)"))
         XCTAssertTrue(controller.contains("DispatchQueue(label: AppIdentity.current.scoped(\"gws\")"))
-        XCTAssertEqual(try read("App/UISnapshots.swift").components(separatedBy: "AppIdentity.current.scoped(\"snapshots\")").count, 3)
+        XCTAssertEqual(try read("App/UISnapshots.swift").components(separatedBy: "AppIdentity.current.scoped(\"snapshots\")").count, 4,
+                       "menu, Settings and coach card shots")
     }
 
     /// Only AppIdentity names the shipping id or the app's file names; only AppPaths builds ~/Library paths.

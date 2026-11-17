@@ -83,6 +83,10 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(panel.contains("CoachPlacement.display(call:"))
         XCTAssertTrue(panel.contains("safeAreaTop: Double(s.safeAreaInsets.top), builtIn: CGDisplayIsBuiltin(n) != 0"))
         XCTAssertTrue(panel.contains("defaults.set([o.dx, o.dy], forKey: positionKey)"), "a drag is remembered")
+        // Remembered in the app's own defaults domain (its bundle id, so per AppIdentity), never a named suite.
+        XCTAssertTrue(try read("App/CoachController.swift").contains("CoachCardPresenter(defaults: defaults, positionKey: Keys.cardPosition"))
+        XCTAssertTrue(try read("App/UISnapshots.swift").contains("let suite = AppIdentity.current.scoped(\"snapshots\")\n        guard let defaults = UserDefaults(suiteName: suite) else { return }\n        defaults.removePersistentDomain(forName: suite)\n        let tag"))
+        for f in Self.cardFiles { XCTAssertFalse(code(try read(f)).contains("UserDefaults("), "\(f) opens its own defaults") }
         let theme = try read("Core/Theme.swift")
         XCTAssertTrue(theme.contains("public static let callBarClearance: Double = 52"))
         let comment = try XCTUnwrap(theme.components(separatedBy: "public static let callBarClearance").first?
