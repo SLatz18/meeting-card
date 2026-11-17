@@ -668,6 +668,16 @@ final class LocalLayerMicMuteTests: XCTestCase {
         XCTAssertEqual(cues(run(8, me: me, others: others, mutes: [(0, true), (1.0, false)])), [.interrupt], "past the grace second")
     }
 
+    /// The grace is the rules' `local.unmute_grace_s` (1 s by default), not a constant in the layer.
+    func testUnmuteGraceComesFromTheRules() {
+        XCTAssertEqual(config.local.unmuteGraceS, 1.0)
+        let me: [(Double, Double)] = [(3.0, 6.0)], others: [(Double, Double)] = [(1.0, 5.5)]
+        config.local.unmuteGraceS = 0
+        XCTAssertEqual(cues(run(8, me: me, others: others, mutes: [(0, true), (2.9, false)])), [.interrupt], "no grace")
+        config.local.unmuteGraceS = 2.5
+        XCTAssertEqual(cues(run(8, me: me, others: others, mutes: [(0, true), (1.0, false)])), [], "a longer grace")
+    }
+
     /// While muted the user's speech is not heard at all: no onset, no cut-in.
     func testMutedSpeechIsNotHeard() {
         let evs = run(8, me: [(3.0, 6.0)], others: [(1.0, 5.5)], mutes: [(0, true)])

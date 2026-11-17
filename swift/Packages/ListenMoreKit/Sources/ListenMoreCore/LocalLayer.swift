@@ -75,10 +75,6 @@ public final class LocalLayer {
     static let speakingTailS = 0.06
     /// The other side must keep talking through a cut-in's opening overlap, bar VAD flicker this short.
     static let overlapGapS = 0.1
-    /// After the mic comes back on, an onset of the user's this soon neither opens a cut-in nor counts
-    /// as a speaker switch: the host's echo canceller restarts with the mic and can let call audio
-    /// through while it settles, which would read as the user talking over the other side.
-    static let unmuteGraceS = 1.0
 
     struct CutIn {
         var onset: TimeInterval
@@ -99,6 +95,7 @@ public final class LocalLayer {
     private let prosodyEnabled: Bool
     private let cutOverlap, cutContinue, cutBackchannel, cutPause, cutMidPause, cutAfterTalkOver: Double
     private let cutTrailingOverlap, cutTrailingWindow, cutTrailingYield: Double
+    private let unmuteGrace: Double
     private let toSwitches: Int
     private let toWindow, toOverlap, toHold: Double
     private let monoSoft, monoStrong, relFactor, relMinS, relMinRunS, howWhyRaise, monoFloor, monoGap: Double
@@ -145,6 +142,7 @@ public final class LocalLayer {
         cutTrailingOverlap = l.cutInTrailingMinOverlapMs / 1000
         cutTrailingWindow = l.cutInTrailingWindowS
         cutTrailingYield = l.cutInTrailingYieldS
+        unmuteGrace = l.unmuteGraceS
         toSwitches = l.talkOverSwitches
         toWindow = l.talkOverWindowS
         toOverlap = l.talkOverMinOverlapMs / 1000
@@ -177,7 +175,7 @@ public final class LocalLayer {
     /// pending cut-in is dropped and the talk-over switch log starts over, so nothing measured across
     /// the gap can fire. While off, the user's VAD isn't run: they read as silent, which is what the
     /// call heard, so talk share keeps counting the other side and the gap can only lower the user's
-    /// share. Back on, the first `unmuteGraceS` seconds open no cut-in and log no switch.
+    /// share. Back on, the first `local.unmute_grace_s` seconds open no cut-in and log no switch.
     public func setMicMuted(_ muted: Bool) {
         guard muted != micMuted else { return }
         micMuted = muted
@@ -200,7 +198,7 @@ public final class LocalLayer {
         var ev: [LocalEvent] = []
         if unmutePending {
             unmutePending = false
-            unmuteGraceUntil = t + Self.unmuteGraceS
+            unmuteGraceUntil = t + unmuteGrace
         }
         let s = micMuted ? VadState(raw: false, active: false, onset: nil, offset: nil, dbfs: AudioMath.rmsDbfs(mic))
                          : me.process(tEnd: t, frame: mic)
