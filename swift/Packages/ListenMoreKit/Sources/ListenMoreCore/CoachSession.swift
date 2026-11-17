@@ -7,7 +7,8 @@ public protocol MicSource: AnyObject {
     func start(sampleRate: Int, handler: @escaping @Sendable ([Float]) -> Void) throws
     func stop()
     /// Muted closes the input device (no audio, the device released) and keeps the handler; unmuting
-    /// reopens it. Call capture is unaffected. `stop()` clears it.
+    /// reopens it. Muted before `start`, `start` opens nothing until unmuted. Call capture is
+    /// unaffected. `stop()` clears it.
     func setMuted(_ muted: Bool)
 }
 
@@ -112,8 +113,9 @@ public final class CoachSession {
     private var timer: Timer?
     private var callTask: Task<Void, Never>?
     private var bridge: EngineDelegateBridge?
-    /// The mic was released because the session's app reported its call ended (see `syncMic`).
-    public private(set) var micReleasedForCallEnd = false
+    /// The mic device is closed (`MicSource.setMuted(true)`) while capture runs: the session's app
+    /// reported its call ended (see `syncMic`).
+    public private(set) var micDeviceOff = false
 
     public init(config: ListenMoreConfig, engine: CoachEngine, mic: MicSource, call: CallSource, signal: CallSignal,
                 keys: APIKeyProvider, renderer: CueRenderer, settings: TriggerSettings, enabled: Bool = true,
@@ -201,11 +203,11 @@ public final class CoachSession {
         micMuted = muted
         if isCapturing {
             if muted {
-                setMicDevice(on: false)
+                syncMic()
                 engine.setMicMuted(true)
             } else {
                 engine.setMicMuted(false)
-                setMicDevice(on: true)
+                syncMic()
             }
         }
         changed()
@@ -213,12 +215,16 @@ public final class CoachSession {
 
     /// The one place Mute reaches the mic device: it stops and restarts capture through `MicSource`.
     /// A host mic with its own mute API (the ducking work owns `MicCapture`) swaps in here alone.
+    /// Through `syncMic`, for Mute and call end alike: the mic stays started with the session's
+    /// handler, and only its gate and `MicSource.setMuted` change. Off pauses the gate first, so a
+    /// buffer the device was already delivering is dropped; on resumes the same gate for that handler.
     private func setMicDevice(on: Bool) {
         if on {
-            startMic()
+            micGate.resume()
+            mic.setMuted(false)
         } else {
-            micGate.close()
-            mic.stop()
+            micGate.pause()
+            mic.setMuted(true)
         }
     }
 
@@ -349,8 +355,13 @@ public final class CoachSession {
             }
             gateGeneration = gate.openNew()
             engine.start(config: config, apiKey: key)
-            micReleasedForCallEnd = trigger.callEndPending
-            if micMuted { engine.setMicMuted(true) } else if !micReleasedForCallEnd { startMic() }
+            // Muted before it starts (the user's Mute or a pending call end), so the device never
+            // opens even briefly; the gate stays closed until `setMicDevice(on: true)` reopens it.
+            micDeviceOff = micShouldBeOff
+            if micMuted { engine.setMicMuted(true) }
+            if micDeviceOff { mic.setMuted(true) }
+            startMic()
+            if micDeviceOff { micGate.pause() }
         }
         let level = callLevel
         let call = call
@@ -395,20 +406,19 @@ public final class CoachSession {
         }
     }
 
-    /// A call-end report releases the mic at once (and with it voice processing's ducking and any
-    /// Bluetooth headset hold), ahead of the session's own end; the engine and call capture keep
-    /// running, so a report that flips back only reopens the mic, and never while the user has Mute
-    /// on. Without a report for the session's app, the mic runs until the session ends.
+    /// The device is closed while capture runs for the user's Mute or a call-end report.
+    private var micShouldBeOff: Bool { micMuted || trigger.callEndPending }
+
+    /// A call-end report closes the mic device at once (and with it voice processing's ducking and
+    /// any Bluetooth headset hold), ahead of the session's own end; the engine and call capture keep
+    /// running, so a report that flips back only reopens the device, and never while the user has
+    /// Mute on. The mic stays started with the session's handler throughout. Without a report for the
+    /// session's app, the mic runs until the session ends.
     @discardableResult
     private func syncMic() -> Bool {
-        guard isCapturing, micReleasedForCallEnd != trigger.callEndPending else { return false }
-        micReleasedForCallEnd = trigger.callEndPending
-        if micReleasedForCallEnd {
-            micGate.close()
-            mic.stop()
-        } else if !micMuted {
-            startMic()
-        }
+        guard isCapturing, micDeviceOff != micShouldBeOff else { return false }
+        micDeviceOff = micShouldBeOff
+        setMicDevice(on: !micDeviceOff)
         return true
     }
 
@@ -421,8 +431,8 @@ public final class CoachSession {
         captureStage = .parentApps
         let previous = callTask
         previous?.cancel()
-        if !micReleasedForCallEnd { mic.stop() }
-        micReleasedForCallEnd = false
+        mic.stop()
+        micDeviceOff = false
         let call = call
         callTask = Task {
             await previous?.value
@@ -528,6 +538,19 @@ final class AudioGate: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return open && gen == generation
+    }
+
+    /// Closes without retiring the generation, so `resume()` admits the same handler again.
+    func pause() {
+        lock.lock()
+        open = false
+        lock.unlock()
+    }
+
+    func resume() {
+        lock.lock()
+        open = true
+        lock.unlock()
     }
 }
 

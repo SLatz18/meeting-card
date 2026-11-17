@@ -21,10 +21,19 @@ final class FakeMic: MicSource {
     func stop() {
         stopped += 1
         handler = nil
+        isMuted = false
     }
 
+    /// Every `setMuted` call, in order.
     var muted: [Bool] = []
-    func setMuted(_ muted: Bool) { self.muted.append(muted) }
+    private(set) var isMuted = false
+    /// Started and not muted: the device would be open.
+    var isOpen: Bool { handler != nil && !isMuted }
+
+    func setMuted(_ muted: Bool) {
+        self.muted.append(muted)
+        isMuted = muted
+    }
 }
 
 final class FakeCall: CallSource, @unchecked Sendable {
