@@ -175,22 +175,26 @@ public final class CaptionView: NSView {
         return out
     }
 
-    /// A label's full width, cell padding included. Measured on a plain label: one set up to truncate
-    /// reports less than its text needs.
+    /// A plain label's full width, cell padding included.
     public static func labelWidth(_ s: String, _ font: NSFont) -> CGFloat {
         let f = NSTextField(labelWithString: s)
         f.font = font
         return f.intrinsicContentSize.width.rounded(.up)
     }
 
-    private func label(_ s: String, _ font: NSFont, _ color: NSColor, truncateHead: Bool = false) -> NSTextField {
+    /// Labels sized to `labelWidth` keep the plain label's clipping mode (a truncating label needs
+    /// more than its measured width and would cut its own text); only text that can run long
+    /// truncates, in a frame wider than it usually needs.
+    private func label(_ s: String, _ font: NSFont, _ color: NSColor, truncate: NSLineBreakMode? = nil) -> NSTextField {
         let f = NSTextField(labelWithString: s)
         f.font = font
         f.textColor = color
-        f.maximumNumberOfLines = 1
-        f.usesSingleLineMode = true
-        f.lineBreakMode = truncateHead ? .byTruncatingHead : .byTruncatingTail
-        f.cell?.lineBreakMode = f.lineBreakMode
+        if let truncate {
+            f.maximumNumberOfLines = 1
+            f.usesSingleLineMode = true
+            f.lineBreakMode = truncate
+            f.cell?.lineBreakMode = truncate
+        }
         return f
     }
 
@@ -248,7 +252,7 @@ public final class CaptionView: NSView {
         let inner = s.width - 2 * s.padding.width
         top = h - s.padding.height
         if content.lines.isEmpty, let note = content.note {
-            let n = label(note, s.noteFont, s.noteColor)
+            let n = label(note, s.noteFont, s.noteColor, truncate: .byTruncatingTail)
             n.frame = NSRect(x: s.padding.width, y: top - row, width: inner, height: row)
             box.addSubview(n)
             stripLabels = [n]
@@ -258,7 +262,7 @@ public final class CaptionView: NSView {
         let column = min(inner / 2, content.lines.map { Self.labelWidth($0.speaker, s.speakerFont) }.max() ?? 0)
         for (line, name) in zip(content.lines, speakers) {
             name.frame = NSRect(x: s.padding.width, y: top - row, width: column, height: row)
-            let text = label(line.text, s.textFont, s.textColor, truncateHead: true)
+            let text = label(line.text, s.textFont, s.textColor, truncate: .byTruncatingHead)
             let x = s.padding.width + column + s.speakerGap
             text.frame = NSRect(x: x, y: top - row, width: s.width - s.padding.width - x, height: row)
             box.addSubview(name)
