@@ -49,8 +49,8 @@ enum UISnapshots {
         return ctx.makeImage()
     }
 
-    /// The caption feed (CaptionFeedView at the card's width on the card surface: lines, lines with
-    /// the saving indicator, the cost-cap note, the indicator alone), then the one-time notice and
+    /// The caption feed (CaptionFeedView at the card's width on the card surface: lines, lines while
+    /// saving, before anyone talks, the cost-cap note, the indicator alone), then the one-time notice and
     /// the Settings group with captions and saving on during a call. The feed has no window and
     /// renders directly; the notice and Settings are shown briefly so AppKit draws them.
     @MainActor
@@ -60,16 +60,22 @@ enum UISnapshots {
         guard let defaults = UserDefaults(suiteName: suite) else { return done() }
         defaults.removePersistentDomain(forName: suite)
         let live = LiveTranscript(settings: .init(captions: true, saving: true, folder: FileTranscriptStore.defaultFolder(), keyUsable: true),
-                                  store: MemoryTranscriptStore(), captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines))
+                                  store: MemoryTranscriptStore(), captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines),
+                                  labels: CoachTranscript.speakerLabels)
         live.callStarted()
         demoCaptions.forEach { live.receive($0) }
         let feed = CaptionFeedModel()
         CoachTranscript.update(feed, from: live)
         live.callEnded()
+        let header = CoachCopy.captionsHeader
         let feeds: [(String, CaptionFeedModel)] = [
-            ("caption-feed", CaptionFeedModel(lines: feed.lines)),
-            ("caption-feed-saving", CaptionFeedModel(lines: feed.lines, savingLabel: feed.savingLabel)),
-            ("caption-feed-stopped", CaptionFeedModel(note: CoachCopy.captionsStopped)),
+            ("caption-feed", CaptionFeedModel(header: header, lines: feed.lines, footnote: CoachCopy.captionsNote)),
+            ("caption-feed-saving", CaptionFeedModel(header: header, lines: feed.lines, footnote: feed.footnote,
+                                                     savingLabel: feed.savingLabel)),
+            ("caption-feed-empty", CaptionFeedModel(header: header, placeholder: CoachCopy.captionsEmpty,
+                                                    footnote: CoachCopy.captionsNote)),
+            ("caption-feed-stopped", CaptionFeedModel(header: header, note: CoachCopy.captionsStopped,
+                                                      footnote: CoachCopy.captionsNote)),
             ("saving-indicator", CaptionFeedModel(savingLabel: CoachCopy.savingNow)),
         ]
         for (name, model) in feeds {

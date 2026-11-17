@@ -525,11 +525,11 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         folderPath.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         transcriptStatus.preferredMaxLayoutWidth = Self.innerWidth / 2
         for (field, speaker) in [(youField, Speaker.me), (themField, Speaker.others)] {
-            field.placeholderString = SpeakerLabels().label(speaker)
+            field.placeholderString = CoachTranscript.speakerLabels.label(speaker)
             field.font = Theme.font(Theme.Settings.itemFont)
             field.target = self
             field.action = #selector(speakerNamed(_:))
-            field.setAccessibilityLabel("\(CoachCopy.speakerNames): \(SpeakerLabels().label(speaker))")
+            field.setAccessibilityLabel("\(CoachCopy.speakerNames): \(CoachTranscript.speakerLabels.label(speaker))")
         }
 
         let heading = Self.text(CoachCopy.transcriptSection, font: Theme.Settings.rowFont)

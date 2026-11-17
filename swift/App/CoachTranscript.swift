@@ -27,7 +27,7 @@ final class CoachTranscript {
     init(defaults: UserDefaults, store: TranscriptStore = FileTranscriptStore()) {
         self.defaults = defaults
         live = LiveTranscript(settings: .init(folder: FileTranscriptStore.defaultFolder()), store: store,
-                              captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines))
+                              captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines), labels: Self.speakerLabels)
         live.update(settings(keyUsable: false))
     }
 
@@ -112,26 +112,44 @@ final class CoachTranscript {
 
     // MARK: feed
 
-    /// The feed's lines, note and saving label for the current state.
+    /// You and Them in MeetingCard's copy.
+    static let speakerLabels = SpeakerLabels(defaults: [.me: CoachCopy.captionsYou, .others: CoachCopy.captionsThem])
+
+    /// The feed for the current state. While captions show (live or stopped at the cap): the
+    /// header, the lines or the placeholder (or the stopped note), and the footnote, which says a
+    /// transcript is being saved only while the Save transcripts switch is on. The saving indicator
+    /// shows while the file is being written, with or without captions.
     static func update(_ feed: CaptionFeedModel, from live: LiveTranscript) {
+        var header: String?
         var lines: [CaptionFeedModel.Line] = []
         var note: String?
+        var placeholder: String?
+        var footnote: String?
+        let footer = live.settings.saving ? CoachCopy.captionsNoteSaving : CoachCopy.captionsNote
         switch live.captionState {
         case .live:
+            header = CoachCopy.captionsHeader
             lines = live.captions.lines.compactMap { c in
                 let text = c.text
                 return text.isEmpty ? nil : .init(speaker: live.labels.label(c.speaker), text: text, own: c.speaker == .me)
             }
+            if lines.isEmpty { placeholder = CoachCopy.captionsEmpty }
+            footnote = footer
         case .stopped(let reason):
+            header = CoachCopy.captionsHeader
             switch reason {
             case .budgetCap: note = CoachCopy.captionsStopped
             case .error: note = CoachCopy.captionsStoppedError
             }
+            footnote = footer
         case .off, .unavailable, .waiting: break
         }
         let saving = live.recorder.isSaving ? CoachCopy.savingNow : nil
+        if feed.header != header { feed.header = header }
         if feed.lines != lines { feed.lines = lines }
         if feed.note != note { feed.note = note }
+        if feed.placeholder != placeholder { feed.placeholder = placeholder }
+        if feed.footnote != footnote { feed.footnote = footnote }
         if feed.savingLabel != saving { feed.savingLabel = saving }
     }
 

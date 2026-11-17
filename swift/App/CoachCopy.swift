@@ -78,6 +78,17 @@ enum CoachCopy {
         return "Judging stopped for this call: \(why)\(code).\(advice) The transcript rules and on-device cues still run."
     }
 
+    // MARK: Final copy (VP Comms): onboarding privacy and the caption feed
+
+    static let onboardingPrivacyBody = "While the coach is on, call audio goes to OpenAI on your own API key. Nothing is saved unless you choose to. Live captions are optional and stay in memory only. Saving a transcript is a separate choice. Your key stays in the Keychain."
+    static let captionsYou = "You"
+    static let captionsThem = "Them"
+    static let captionsHeader = "Live captions"
+    static let captionsEmpty = "Captions will show here once someone talks."
+    static let captionsNote = "Kept in memory only. Not saved."
+    /// Only while the Save transcripts switch is on.
+    static let captionsNoteSaving = "Saving a transcript for this call."
+
     // MARK: DRAFT: captions and saved transcripts (not yet copy-reviewed; edit before release)
 
     /// Set while any string below is still a draft; the notice sheet shows a draft marker while true.
@@ -126,7 +137,7 @@ enum CoachCopy {
                body: "A quiet nudge on your calls. A small card shows a short tip. It turns red if you interrupt or talk over someone, and amber if you miss a question. Only you see it.",
                primary: "Next", secondary: nil),
         Screen(title: "Your audio stays yours",
-               body: "While the coach is on, call audio goes to OpenAI on your own API key. Nothing is saved: no transcripts, no stats, no recaps. Your key stays in the Keychain.",
+               body: CoachCopy.onboardingPrivacyBody,
                primary: "Next", secondary: nil),
         Screen(title: "Turn it on",
                body: "Turn it on and allow mic and system audio access. Add your OpenAI API key for GPT cues; without one, the on-device cues still run. The coach starts by itself when a call starts, and you can pause it anytime from the coach chip on the meeting card or the coach menu in the menu bar.",
