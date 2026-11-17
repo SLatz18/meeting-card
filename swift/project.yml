@@ -31,7 +31,7 @@ settings:
       ONLY_ACTIVE_ARCH: NO
       DEBUG_INFORMATION_FORMAT: dwarf
       STRIP_INSTALLED_PRODUCT: YES
-# The call coach engine, vendored from listen-more (see Packages/ListenMoreKit/README.md).
+# The call coach (its single source; see Packages/ListenMoreKit/README.md).
 packages:
   ListenMoreKit:
     path: Packages/ListenMoreKit

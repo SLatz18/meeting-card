@@ -26,7 +26,7 @@ XCODEGEN="${XCODEGEN:-$(command -v xcodegen || echo "$HOME/.local/bin/xcodegen")
 xcodebuild -project MeetingCardSwift.xcodeproj -scheme MeetingCardSwift -derivedDataPath "$DD" test \
   >build/test.log 2>&1 || { grep -E "error:|failed" build/test.log | head -40; echo "TESTS FAILED (build/test.log)"; exit 1; }
 grep -E "Executed [0-9]+ tests" build/test.log | tail -1
-# The vendored call-coach Kit (its live OpenAI tests skip unless LISTEN_MORE_LIVE=1).
+# The call-coach Kit (its live OpenAI tests skip unless LISTEN_MORE_LIVE=1).
 if [[ "${SKIP_KIT_TESTS:-0}" != 1 ]]; then
   (cd Packages/ListenMoreKit && swift test --scratch-path ../../build/kit) >build/kit-test.log 2>&1 \
     || { grep -E "error:|failed" build/kit-test.log | head -40; echo "KIT TESTS FAILED (build/kit-test.log)"; exit 1; }
