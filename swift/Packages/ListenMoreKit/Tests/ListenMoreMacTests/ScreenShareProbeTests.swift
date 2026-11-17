@@ -122,17 +122,16 @@ final class ScreenShareProbeTests: XCTestCase {
         let ours = content.windows.filter { glowIDs.contains($0.windowID) || $0.windowID == CGWindowID(chip.windowNumber) }
         let excluded = try await capture(SCContentFilter(display: display, excludingWindows: ours), display: display)
 
-        func present(_ img: CGImage, _ rect: NSRect, _ rgb: (r: Double, g: Double, b: Double)) -> Bool {
-            Self.fraction(img, screenRect: rect, screen: sf, rgb: rgb) > 0.5
+        // Each window has its own pure color, so presence is a whole-image pixel count. The capture's
+        // scale and placement differ between runners and Macs, so screen rects aren't mapped.
+        func present(_ img: CGImage, _ rgb: (r: Double, g: Double, b: Double)) -> Bool {
+            Self.fraction(img, rgb: rgb) > 0.005
         }
-        // The outer 16 pt of the 120 pt gradient band (alpha above ~0.85).
-        let band = NSRect(x: sf.minX + 200, y: sf.minY + 2, width: sf.width - 400, height: 16)
-        let chipProbe = chipFrame.insetBy(dx: 20, dy: 20)
-        result.controlInPixels = present(plain, controlFrame.insetBy(dx: 20, dy: 20), Self.controlRGB)
-        result.glowInPixels = present(plain, band, Self.glowRGB)
-        result.chipInPixels = present(plain, chipProbe, Self.chipRGB)
-        result.glowInPixelsWithExplicitExclusion = present(excluded, band, Self.glowRGB)
-        result.chipInPixelsWithExplicitExclusion = present(excluded, chipProbe, Self.chipRGB)
+        result.controlInPixels = present(plain, Self.controlRGB)
+        result.glowInPixels = present(plain, Self.glowRGB)
+        result.chipInPixels = present(plain, Self.chipRGB)
+        result.glowInPixelsWithExplicitExclusion = present(excluded, Self.glowRGB)
+        result.chipInPixelsWithExplicitExclusion = present(excluded, Self.chipRGB)
         if result.controlInPixels != true {
             result.note = "inconclusive: the control window is not in the capture"
         } else if result.glowInPixels == true || result.chipInPixels == true {
@@ -146,32 +145,28 @@ final class ScreenShareProbeTests: XCTestCase {
 
     func capture(_ filter: SCContentFilter, display: SCDisplay) async throws -> CGImage {
         let c = SCStreamConfiguration()
-        c.width = display.width * 2
-        c.height = display.height * 2
+        c.width = display.width
+        c.height = display.height
         c.showsCursor = false
         c.capturesAudio = false
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: c)
     }
 
-    /// Fraction of pixels in `screenRect` (Cocoa points) that match `rgb` within a tolerance.
-    static func fraction(_ img: CGImage, screenRect: NSRect, screen: NSRect, rgb: (r: Double, g: Double, b: Double)) -> Double {
+    /// Fraction of the image's pixels that match `rgb` within a tolerance.
+    static func fraction(_ img: CGImage, rgb: (r: Double, g: Double, b: Double)) -> Double {
         let w = img.width, h = img.height
         var buf = [UInt8](repeating: 0, count: w * h * 4)
         guard let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
         ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
-        let sx = Double(w) / screen.width, sy = Double(h) / screen.height
-        // CGContext memory is top-row first; Cocoa y grows upward from the screen's bottom.
-        let x0 = Int((screenRect.minX - screen.minX) * sx), x1 = Int((screenRect.maxX - screen.minX) * sx)
-        let yTop = Int((screen.maxY - screenRect.maxY) * sy), yBottom = Int((screen.maxY - screenRect.minY) * sy)
         var hit = 0, total = 0
-        for y in stride(from: max(0, yTop), to: min(h, yBottom), by: 4) {
-            for x in stride(from: max(0, x0), to: min(w, x1), by: 4) {
+        for y in stride(from: 0, to: h, by: 2) {
+            for x in stride(from: 0, to: w, by: 2) {
                 let i = (y * w + x) * 4
                 let r = Double(buf[i]) / 255, g = Double(buf[i + 1]) / 255, b = Double(buf[i + 2]) / 255
                 total += 1
-                if abs(r - rgb.r) < 0.2 && abs(g - rgb.g) < 0.2 && abs(b - rgb.b) < 0.2 { hit += 1 }
+                if abs(r - rgb.r) < 0.12 && abs(g - rgb.g) < 0.12 && abs(b - rgb.b) < 0.12 { hit += 1 }
             }
         }
         return total > 0 ? Double(hit) / Double(total) : 0

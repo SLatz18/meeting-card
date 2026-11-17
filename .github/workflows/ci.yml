@@ -94,9 +94,11 @@ jobs:
         run: head/swift/scripts/snapshots.sh coach "$RUNNER_TEMP/shots/coach"
       - name: Reminder cards are pixel-identical
         run: |
+          rc=0
           "$RUNNER_TEMP/venv/bin/python" head/swift/scripts/compare-snapshots.py \
-            "$RUNNER_TEMP/shots/cards/base" "$RUNNER_TEMP/shots/cards/head" "$RUNNER_TEMP/shots/compare"
+            "$RUNNER_TEMP/shots/cards/base" "$RUNNER_TEMP/shots/cards/head" "$RUNNER_TEMP/shots/compare" 12 || rc=$?
           cat "$RUNNER_TEMP/shots/compare/report.md" >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
       - uses: actions/upload-artifact@v4
         if: always()
         with:

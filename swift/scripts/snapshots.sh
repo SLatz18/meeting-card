@@ -21,8 +21,8 @@ case "${1:-}" in
     BASE="$(cd "$2" && pwd)"; HEAD="$(cd "$3" && pwd)"; OUT="$(mkdir -p "$4" && cd "$4" && pwd)"
     mkdir -p "$OUT/base" "$OUT/head"
     cases=()
-    for f in meet zoom multilink nolink teams; do for a in light dark; do cases+=("$f:$a:card-$f-$a:"); done; done
-    for a in light dark; do cases+=("meet:$a:card-meet-nextup-$a:NEXT=nextup"); done
+    for f in meet zoom multilink nolink teams; do for a in light dark; do cases+=("${f}:${a}:card-${f}-${a}:"); done; done
+    for a in light dark; do cases+=("meet:${a}:card-meet-nextup-${a}:NEXT=nextup"); done
     for c in "${cases[@]}"; do
       IFS=: read -r f a name extra <<<"$c"
       envs=(); [[ -n "$extra" ]] && envs=("$extra")
