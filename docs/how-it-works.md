@@ -29,7 +29,7 @@ A cue is a glow at the edge of your screen:
 - **Red:** interrupt, talk-over, or aggression.
 - **Amber:** not listening, a missed question, a monologue, or high talk share.
 
-A cue from the judge model only fires when its confidence is 0.7 or higher. The glow plays once over about 3 s: a quick rise, a short hold, then a slow fade (with Reduce Motion on, it appears and fades over 2 s). It shows on the display with the call app's window. Each cue type has a 20 s cooldown, so you won't see the same nudge twice in a row.
+A cue from the judge model only fires when its confidence is 0.7 or higher. In MeetingCard, not listening nudges are off by default, and while they are off the judge isn't called at all. Each cue also tints the coach card (or its pill) amber or rose for 4.5 s with a few words saying what it was, so color is never the only cue, and VoiceOver reads it. The glow plays once over about 3 s: a quick rise, a short hold, then a slow fade (with Reduce Motion on, it appears and fades over 2 s). It shows on the display with the call app's window. Each cue type has a 20 s cooldown, so you won't see the same nudge twice in a row.
 
 ## Starting and stopping
 
