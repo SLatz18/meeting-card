@@ -9,7 +9,7 @@ let testCaptionStyle = CaptionStyle(
     surface: NSColor(srgbRed: 0.2, green: 0.4, blue: 0.6, alpha: 1), textColor: .black, speakerColor: .gray,
     ownSpeakerColor: .blue, noteColor: .darkGray,
     textFont: .systemFont(ofSize: 13.5), speakerFont: .systemFont(ofSize: 14, weight: .medium), noteFont: .systemFont(ofSize: 12.5),
-    indicatorHeight: 33, indicatorRadius: 9, indicatorPadding: 8, indicatorFont: .systemFont(ofSize: 12.5),
+    indicatorHeight: 33, indicatorRadius: 9, indicatorPadding: 8, indicatorGap: 4, indicatorFont: .systemFont(ofSize: 12.5),
     hairline: .gray, hairlineWidth: 0.5, dot: .red, dotDiameter: 8, stackGap: 8, margin: 14, trailingReserve: 428)
 
 @MainActor

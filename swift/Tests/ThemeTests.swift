@@ -268,6 +268,9 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(c.trailingReserve, Theme.Metrics.cardWidth + Theme.Metrics.cardMargin)
         XCTAssertEqual(c.ownSpeaker, .accent)
         XCTAssertEqual(c.dotColor, CardStyle.criticalColor)
+        XCTAssertEqual(c.indicatorGap, Theme.Coach.glyphGap, "dot to label, like the chip's glyph to label")
+        XCTAssertEqual(c.costFont, CardStyle.Typography.caption)
+        XCTAssertEqual(c.cost, .secondary)
         let n = Theme.Notice.self
         XCTAssertEqual(n.width, Theme.Metrics.cardWidth)
         XCTAssertEqual(n.titleFont, Theme.Fonts.title)

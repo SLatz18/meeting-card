@@ -53,7 +53,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let deleteButton = NSButton(title: CoachCopy.deleteTranscript, target: nil, action: nil)
     private let youField = NSTextField()
     private let themField = NSTextField()
-    private let costLabel = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let costLabel = CoachSettingsWindow.text("", font: Theme.Captions.costFont, color: CoachSettingsWindow.color(Theme.Captions.cost))
     private var notice: CoachNotice?
     /// Snapshots: the Captions and transcript group on its own.
     private(set) var transcriptGroupView: NSView?

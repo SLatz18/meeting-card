@@ -538,7 +538,12 @@ public enum Theme {
         public static let indicatorRadius = CardStyle.Radius.control
         public static let indicatorPadding = CardStyle.Spacing.control
         public static let indicatorFont = CardStyle.Typography.caption
+        /// Dot to label, like the chip's glyph gap.
+        public static let indicatorGap = CardStyle.Spacing.control / 2
         public static let dotDiameter = CardStyle.Spacing.control
+        /// The cost meter's line in Settings: caption type in the secondary text role.
+        public static let costFont = CardStyle.Typography.caption
+        public static let cost = CardStyle.Text.secondary
         public static let hairlineWidth = CardStyle.Stroke.hairline
         /// Indicator to strip.
         public static let stackGap = CardStyle.Spacing.control

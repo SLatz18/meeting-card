@@ -23,6 +23,8 @@ public struct CaptionStyle {
     public var indicatorHeight: CGFloat
     public var indicatorRadius: CGFloat
     public var indicatorPadding: CGFloat
+    /// Dot to label.
+    public var indicatorGap: CGFloat
     public var indicatorFont: NSFont
     public var hairline: NSColor
     public var hairlineWidth: CGFloat
@@ -39,7 +41,8 @@ public struct CaptionStyle {
     public init(width: CGFloat, radius: CGFloat, padding: NSSize, lineGap: CGFloat, speakerGap: CGFloat,
                 surface: NSColor, textColor: NSColor, speakerColor: NSColor, ownSpeakerColor: NSColor, noteColor: NSColor,
                 textFont: NSFont, speakerFont: NSFont, noteFont: NSFont,
-                indicatorHeight: CGFloat, indicatorRadius: CGFloat, indicatorPadding: CGFloat, indicatorFont: NSFont,
+                indicatorHeight: CGFloat, indicatorRadius: CGFloat, indicatorPadding: CGFloat, indicatorGap: CGFloat,
+                indicatorFont: NSFont,
                 hairline: NSColor, hairlineWidth: CGFloat, dot: NSColor, dotDiameter: CGFloat,
                 stackGap: CGFloat, margin: CGFloat, trailingReserve: CGFloat, level: NSWindow.Level = GlowPanel.overlayLevel) {
         self.width = width
@@ -58,6 +61,7 @@ public struct CaptionStyle {
         self.indicatorHeight = indicatorHeight
         self.indicatorRadius = indicatorRadius
         self.indicatorPadding = indicatorPadding
+        self.indicatorGap = indicatorGap
         self.indicatorFont = indicatorFont
         self.hairline = hairline
         self.hairlineWidth = hairlineWidth
@@ -212,7 +216,7 @@ public final class CaptionView: NSView {
         if let saving = content.saving {
             let text = label(saving, s.indicatorFont, s.textColor)
             let textW = Self.labelWidth(saving, s.indicatorFont)
-            let w = s.indicatorPadding + s.dotDiameter + s.indicatorPadding / 2 + textW + s.indicatorPadding
+            let w = s.indicatorPadding + s.dotDiameter + s.indicatorGap + textW + s.indicatorPadding
             let pill = NSView(frame: NSRect(x: 0, y: top - s.indicatorHeight, width: w, height: s.indicatorHeight))
             pill.wantsLayer = true
             pill.layer?.backgroundColor = cg(s.surface)
@@ -227,7 +231,7 @@ public final class CaptionView: NSView {
             dot.layer?.cornerRadius = s.dotDiameter / 2
             pill.addSubview(dot)
             let th = text.intrinsicContentSize.height
-            text.frame = NSRect(x: s.indicatorPadding + s.dotDiameter + s.indicatorPadding / 2,
+            text.frame = NSRect(x: s.indicatorPadding + s.dotDiameter + s.indicatorGap,
                                 y: (s.indicatorHeight - th) / 2, width: textW, height: th)
             pill.addSubview(text)
             pill.setAccessibilityElement(true)

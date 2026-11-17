@@ -172,7 +172,8 @@ final class CoachTranscript {
             ownSpeakerColor: color(c.ownSpeaker), noteColor: color(c.note),
             textFont: Theme.font(c.textFont), speakerFont: Theme.font(c.speakerFont), noteFont: Theme.font(c.noteFont),
             indicatorHeight: Theme.cg(c.indicatorHeight), indicatorRadius: Theme.cg(c.indicatorRadius),
-            indicatorPadding: Theme.cg(c.indicatorPadding), indicatorFont: Theme.font(c.indicatorFont),
+            indicatorPadding: Theme.cg(c.indicatorPadding), indicatorGap: Theme.cg(c.indicatorGap),
+            indicatorFont: Theme.font(c.indicatorFont),
             hairline: color(c.hairline(style:)), hairlineWidth: Theme.cg(c.hairlineWidth),
             dot: CardStyle.dynamic(c.dotColor) { base, _ in base }, dotDiameter: Theme.cg(c.dotDiameter),
             stackGap: Theme.cg(c.stackGap), margin: Theme.cg(c.margin), trailingReserve: Theme.cg(c.trailingReserve))
