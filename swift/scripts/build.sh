@@ -3,6 +3,12 @@
 #   scripts/build.sh          test + build + sign + install to ~/Applications/MeetingCardSwift.app
 #   scripts/build.sh test     xcodegen + xcodebuild test only
 #   scripts/build.sh build    test + build + sign (no install)
+#   --test-id (with any mode, e.g. scripts/build.sh build --test-id): the test identity. Bundle id
+#     com.slatz.meetingcard.swift.test, named "MeetingCard (Test)" (permission prompts, System
+#     Settings), so its UserDefaults domain, Keychain item (com.slatz.meetingcard.swift.test.openai)
+#     and privacy grants are its own. Release build in build/dd-test; installs to
+#     ~/Applications/MeetingCardSwift-Test.app, which is never registered as a login item.
+#     Mac hand checks use it (docs/MAC_DEMO_CHECKS.md).
 # Tests include the ListenMoreKit package (swift test); SKIP_KIT_TESTS=1 skips them.
 # Never launches the app.
 # Signing: $SIGN_IDENTITY if set, else a Keychain identity named "Local Self-Signed" if present,
@@ -13,12 +19,26 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build   # fresh checkouts have no build/ (gitignored); the test log below lives in it
-MODE="${1:-install}"
+TEST_ID=0; ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --test-id) TEST_ID=1 ;;
+    -*) echo "unknown option: $a" >&2; exit 2 ;;
+    *) ARGS+=("$a") ;;
+  esac
+done
+MODE="${ARGS[1]:-install}"
 if [[ -n "${SIGN_IDENTITY:-}" ]]; then ID="$SIGN_IDENTITY"
 elif [[ "$(security find-identity -v -p codesigning 2>/dev/null || true)" == *'"Local Self-Signed"'* ]]; then ID="Local Self-Signed"
 else ID="-"; fi
 DEST="$HOME/Applications/MeetingCardSwift.app"
 DD="build/dd"
+RELEASE_DD="$DD"; IDENTITY=()
+if (( TEST_ID )); then
+  DEST="$HOME/Applications/MeetingCardSwift-Test.app"
+  RELEASE_DD="build/dd-test"
+  IDENTITY=(MEETINGCARD_APP_ID=com.slatz.meetingcard.swift.test "MEETINGCARD_APP_NAME=MeetingCard (Test)")
+fi
 XCODEGEN="${XCODEGEN:-$(command -v xcodegen || echo "$HOME/.local/bin/xcodegen")}"
 [[ -x "$XCODEGEN" ]] || { echo "xcodegen not found: brew install xcodegen (or set XCODEGEN)" >&2; exit 1; }
 
@@ -35,8 +55,8 @@ fi
 [[ "$MODE" == test ]] && exit 0
 
 xcodebuild -project MeetingCardSwift.xcodeproj -scheme MeetingCardSwift -configuration Release \
-  -derivedDataPath "$DD" build >build/build.log 2>&1 || { grep -E "error:" build/build.log | head -40; exit 1; }
-APP="$DD/Build/Products/Release/MeetingCardSwift.app"
+  -derivedDataPath "$RELEASE_DD" build "${IDENTITY[@]}" >build/build.log 2>&1 || { grep -E "error:" build/build.log | head -40; exit 1; }
+APP="$RELEASE_DD/Build/Products/Release/MeetingCardSwift.app"
 # Inside-out: framework first, then the app (no --deep).
 codesign -f -s "$ID" "$APP/Contents/Frameworks/MeetingCardCore.framework"
 codesign -f -s "$ID" "$APP"
@@ -44,8 +64,8 @@ codesign --verify --strict --verbose=2 "$APP"
 plutil -lint "$APP/Contents/Info.plist"
 [[ "$MODE" == build ]] && { echo "built $APP (signed: $ID)"; exit 0; }
 
-if pgrep -f "MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift" >/dev/null; then
-  echo "MeetingCardSwift is running; quit it first (this script never kills it)." >&2
+if pgrep -f "${DEST:t}/Contents/MacOS/MeetingCardSwift" >/dev/null; then
+  echo "${DEST:t:r} is running; quit it first (this script never kills it)." >&2
   exit 1
 fi
 mkdir -p "$HOME/Applications"
