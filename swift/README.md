@@ -17,14 +17,15 @@ never launches anything). `scripts/build.sh test` = tests only; `scripts/build.s
 `--test-id` (any mode) builds the test identity: bundle id `com.slatz.meetingcard.swift.test`, named "MeetingCard (Test)",
 Release in `build/dd-test`, install to `~/Applications/MeetingCardSwift-Test.app`. It overrides the `MEETINGCARD_APP_ID` /
 `MEETINGCARD_APP_NAME` build settings; the Keychain service and other bundle-scoped names come from
-`Bundle.main.bundleIdentifier` (`Core/AppIdentity.swift`), so it never touches the real app's Keychain item, defaults
-or privacy grants. Mac hand checks use it ([MAC_DEMO_CHECKS.md](../docs/MAC_DEMO_CHECKS.md)).
+`Bundle.main.bundleIdentifier` (`Core/AppIdentity.swift`): Keychain service, defaults suites, log and Application Support
+names (`MeetingCardSwift-Test`), and the login item (only the shipping identity registers). It never touches the real
+app's Keychain item, defaults, files or privacy grants. Mac hand checks use it ([MAC_DEMO_CHECKS.md](../docs/MAC_DEMO_CHECKS.md)).
 
 Signing: `$SIGN_IDENTITY`, else a `Local Self-Signed` Keychain identity if present, else ad-hoc. No hardened runtime,
 no sandbox (it must exec `gws`; no TCC grants needed unless the call coach is turned on).
 
 Paths: log `~/Library/Logs/MeetingCardSwift.log`, state `~/Library/Application Support/MeetingCardSwift/last-card.json`
-. `--fixture` runs use `MeetingCardSwift-fixture.log` / `MeetingCardSwift-fixture/` instead. Fixture cards stack from the screen's bottom-LEFT corner (live cards: bottom-right) and their title is prefixed `DEMO · `, so a demo card never sits in, or passes for, the live slot. Tests use temp dirs; Core refuses the production paths under XCTest.
+. `--fixture` runs use `MeetingCardSwift-fixture.log` / `MeetingCardSwift-fixture/` instead. A `--test-id` build uses `MeetingCardSwift-Test` (and `MeetingCardSwift-Test-fixture`) in place of `MeetingCardSwift`. Fixture cards stack from the screen's bottom-LEFT corner (live cards: bottom-right) and their title is prefixed `DEMO · `, so a demo card never sits in, or passes for, the live slot. Tests use temp dirs; Core refuses the production paths under XCTest.
 
 Seams: `--fixture <json>`, `--no-poll`, `--no-recheck`, `--snapshot <png>` (CALayer `render(in:)`), `--appearance light|dark`,
 `MEETING_CARD_APPEARANCE_FLIP=1` (fixture: flip appearance 0.4s after show),

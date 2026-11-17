@@ -5,9 +5,10 @@
 #   scripts/build.sh build    test + build + sign (no install)
 #   --test-id (with any mode, e.g. scripts/build.sh build --test-id): the test identity. Bundle id
 #     com.slatz.meetingcard.swift.test, named "MeetingCard (Test)" (permission prompts, System
-#     Settings), so its UserDefaults domain, Keychain item (com.slatz.meetingcard.swift.test.openai)
-#     and privacy grants are its own. Release build in build/dd-test; installs to
-#     ~/Applications/MeetingCardSwift-Test.app, which is never registered as a login item.
+#     Settings), so its UserDefaults domain, Keychain item (com.slatz.meetingcard.swift.test.openai),
+#     privacy grants, log and Application Support dir (MeetingCardSwift-Test) are its own. Release
+#     build in build/dd-test; installs to ~/Applications/MeetingCardSwift-Test.app, which is never
+#     registered as a login item.
 #     Mac hand checks use it (docs/MAC_DEMO_CHECKS.md).
 # Tests include the ListenMoreKit package (swift test); SKIP_KIT_TESTS=1 skips them.
 # Never launches the app.

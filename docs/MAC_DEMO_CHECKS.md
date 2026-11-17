@@ -16,15 +16,22 @@ The test build has its own identity, and nothing else changes:
 | Name in permission prompts and System Settings | MeetingCardSwift | MeetingCard (Test) |
 | UserDefaults domain | `com.slatz.meetingcard.swift` | `com.slatz.meetingcard.swift.test` |
 | Keychain service (account `OPENAI_API_KEY`) | `com.slatz.meetingcard.swift.openai` | `com.slatz.meetingcard.swift.test.openai` |
+| Log | `~/Library/Logs/MeetingCardSwift.log` | `~/Library/Logs/MeetingCardSwift-Test.log` |
+| State | `~/Library/Application Support/MeetingCardSwift/` | `~/Library/Application Support/MeetingCardSwift-Test/` |
+| Login item | `~/Applications/MeetingCardSwift.app` only | never |
 
 macOS asks for Microphone and Screen & System Audio Recording again for "MeetingCard (Test)"; grant them there.
-The test build is never registered as a login item. Quit the real app while checking: both builds read the same
-calendar (so both would show cards), and they share the log `~/Library/Logs/MeetingCardSwift.log`.
+
+**Quit the real app before checking** (`pkill -f MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift`; it doesn't
+match the test build). Both builds read the same calendar, so both would show cards, and with the coach on in both,
+both would react to the same call. The coach's unified-log entries (`com.listenmore.kit`, K1) also come from a
+process named `MeetingCardSwift` in either build.
 
 Clean up after the demo (only the test identity; the real app is untouched):
 `tccutil reset Microphone com.slatz.meetingcard.swift.test` (likewise `AudioCapture`, `ScreenCapture`),
 `defaults delete com.slatz.meetingcard.swift.test`,
-`security delete-generic-password -s com.slatz.meetingcard.swift.test.openai -a OPENAI_API_KEY`.
+`security delete-generic-password -s com.slatz.meetingcard.swift.test.openai -a OPENAI_API_KEY`,
+`rm -rf ~/Library/Logs/MeetingCardSwift-Test.log ~/Library/Application\ Support/MeetingCardSwift-Test`.
 
 ## Checks
 Prereqs: the test build (above);
