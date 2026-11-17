@@ -7,15 +7,15 @@ import MeetingCardCore
 /// they render UI only: no audio, no service, no network).
 ///   MEETING_CARD_COACH_CHIP=on|listening|paused|muted  put that chip on the fixture card
 ///   MEETING_CARD_COACH_CHIP_LABEL=<text>         a longer chip label (shows the icon-only collapse)
-///   MEETING_CARD_COACH_SHOTS=<dir>               write glow, Settings, onboarding and menu PNGs,
-///                                                 plus the design packet, then quit
+///   MEETING_CARD_COACH_SHOTS=<dir>               write glow, Settings, onboarding, menu and
+///                                                 feedback-notice PNGs, plus the design packet, then quit
 ///   MEETING_CARD_COACH_CARD_SHOTS=<dir>          write the coach card and pill in each state
 ///                                                 (`coachCardShotNames`), then morph the fixture card
 ///                                                 into the coach card and collapse it, writing both
 ///                                                 end states, then quit
 /// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
 /// surface (chip, the Muted chip, glow, Settings, Settings with Use Zoom/Meet controls on, onboarding,
-/// status menu off / listening / muted) for a side-by-side design review.
+/// status menu off / listening / muted, feedback notice) for a side-by-side design review.
 enum UISnapshots {
     static func demoChip(_ env: [String: String]) -> CoachChip? {
         let label = env["MEETING_CARD_COACH_CHIP_LABEL"]
@@ -86,7 +86,7 @@ enum UISnapshots {
                         }
                         settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                             menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
-                            NSApp.terminate(nil)
+                            noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
                         }
                     }
                 }
@@ -327,15 +327,44 @@ enum UISnapshots {
         let menus = NSApp.windows.filter { $0.isVisible && String(describing: type(of: $0)).contains("Menu") }
         log("coach menu windows: \(menus.map { String(describing: type(of: $0)) })")
         guard let w = menus.max(by: { $0.frame.height < $1.frame.height }) else { return nil }
+        return screenImage(w, name: "menu", log: log)
+    }
+
+    /// The public-issue notice before the browser opens: the real NSAlert, shown without running it
+    /// modally, captured from the screen like the menus.
+    @MainActor
+    static func noticeShot(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
+                           done: @escaping () -> Void) {
+        let alert = FeedbackAction.noticeAlert()
+        alert.window.appearance = NSApp.effectiveAppearance
+        alert.window.hidesOnDeactivate = false
+        alert.layout()
+        alert.window.center()
+        alert.window.orderFrontRegardless()
+        controller.schedule(0.5, repeats: false) {
+            MainActor.assumeIsolated {
+                let img = screenImage(alert.window, name: "notice", log: controller.log)
+                let ok = img.map { Card.writePNG($0, "\(dir)/feedback-notice-\(tag).png") } ?? false
+                controller.log("coach shot feedback-notice-\(tag) ok=\(ok)")
+                packet("feedback-notice", img)
+                alert.window.orderOut(nil)
+                done()
+            }
+        }
+    }
+
+    /// A visible window captured with `screencapture`; without screen-recording access, its layer render.
+    @MainActor
+    static func screenImage(_ w: NSWindow, name surface: String, log: (String) -> Void) -> CGImage? {
         let f = w.frame
         let top = (NSScreen.screens.first?.frame.height ?? f.maxY) - f.maxY
-        log("coach menu frame: \(Int(f.minX)),\(Int(top)) \(Int(f.width))x\(Int(f.height)) number=\(w.windowNumber)")
+        log("coach \(surface) frame: \(Int(f.minX)),\(Int(top)) \(Int(f.width))x\(Int(f.height)) number=\(w.windowNumber)")
         let attempts: [(String, [String])] = [
             ("window", ["-x", "-o", "-l\(w.windowNumber)"]),
             ("rect", ["-x", "-R\(Int(f.minX)),\(Int(top)),\(Int(f.width)),\(Int(f.height))"]),
         ]
         for (name, args) in attempts {
-            let path = NSTemporaryDirectory() + "coach-menu-\(UUID().uuidString).png"
+            let path = NSTemporaryDirectory() + "coach-\(surface)-\(UUID().uuidString).png"
             defer { try? FileManager.default.removeItem(atPath: path) }
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
@@ -344,15 +373,15 @@ enum UISnapshots {
             p.waitUntilExit()
             guard p.terminationStatus == 0, let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
                   let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
-                log("coach menu capture \(name): failed status=\(p.terminationStatus)")
+                log("coach \(surface) capture \(name): failed status=\(p.terminationStatus)")
                 continue
             }
             let drawn = hasContent(img)
-            log("coach menu capture \(name): \(img.width)x\(img.height) content=\(drawn)")
+            log("coach \(surface) capture \(name): \(img.width)x\(img.height) content=\(drawn)")
             if drawn { return img }
         }
         let img = windowImage(w)
-        log("coach menu capture render: content=\(img.map(hasContent) ?? false)")
+        log("coach \(surface) capture render: content=\(img.map(hasContent) ?? false)")
         return img
     }
 
@@ -379,13 +408,15 @@ enum UISnapshots {
         return viewImage(view, in: window)
     }
 
-    /// Settings / onboarding as on screen: the groups, cropped to the scrolled-to-top window height.
+    /// Settings / onboarding as on screen: the groups, cropped to the window height scrolled to the
+    /// top (or, with `atEnd`, to the bottom).
     @MainActor
-    static func settingsImage(_ w: CoachSettingsWindow) -> CGImage? {
+    static func settingsImage(_ w: CoachSettingsWindow, atEnd: Bool = false) -> CGImage? {
         let (view, visible) = w.snapshotContent
         guard let full = viewImage(view, in: w.window) else { return nil }
         let scale = CGFloat(full.width) / max(view.bounds.width, 1)
-        return full.cropping(to: CGRect(x: 0, y: 0, width: CGFloat(full.width), height: min(CGFloat(full.height), visible * scale)))
+        let h = min(CGFloat(full.height), visible * scale)
+        return full.cropping(to: CGRect(x: 0, y: atEnd ? CGFloat(full.height) - h : 0, width: CGFloat(full.width), height: h))
     }
 
     @MainActor
@@ -408,9 +439,10 @@ enum UISnapshots {
         return ctx.makeImage()
     }
 
-    /// Settings (toggles off, the default), Settings local-only, Settings with "Use Zoom/Meet controls"
-    /// on (its permission explainer: CI grants nothing), the TypeSafe cue judge without its key and
-    /// after judging stopped on an auth failure, and the three onboarding screens, from scratch defaults.
+    /// Settings (toggles off, the default), Settings scrolled to its end (the feedback row), Settings
+    /// local-only, Settings with "Use Zoom/Meet controls" on (its permission explainer: CI grants
+    /// nothing), the TypeSafe cue judge without its key and after judging stopped on an auth
+    /// failure, and the three onboarding screens, from scratch defaults.
     /// Each window is shown briefly so AppKit draws it, captured, then closed.
     @MainActor
     static func settingsShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
@@ -419,38 +451,44 @@ enum UISnapshots {
         guard let defaults = UserDefaults(suiteName: suite) else { return done() }
         defaults.removePersistentDomain(forName: suite)
         let keychain = KeychainStore(service: suite, account: "none")
-        let onboarding: [(String, () -> CoachSettingsWindow?)] = (0..<CoachCopy.onboarding.count).map { i in
-            ("onboarding-\(i + 1)", {
+        typealias Shot = (name: String, atEnd: Bool, make: () -> CoachSettingsWindow?)
+        let onboarding: [Shot] = (0..<CoachCopy.onboarding.count).map { i in
+            ("onboarding-\(i + 1)", false, {
                 guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
                 return CoachSettingsWindow(coach: coach, onboardingScreen: i)
             })
         }
-        let shots: [(String, () -> CoachSettingsWindow?)] = onboarding + [("settings", {
+        let shots: [Shot] = onboarding + [("settings", false, {
             defaults.set(true, forKey: CoachController.Keys.onboarded)
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
-        }), ("settings-scrolls", {
+        }), ("settings-scrolls", false, {
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
             let w = CoachSettingsWindow(coach: coach, visibleHeightOverride: 480)
             w.update()
             return w
-        }), ("settings-local-only", {
+        }), ("settings-feedback", true, {
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            let w = CoachSettingsWindow(coach: coach, visibleHeightOverride: 480)
+            w.update()
+            return w
+        }), ("settings-local-only", false, {
             defaults.set(true, forKey: CoachController.Keys.enabled)
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
             coach.service?.setEnabled(false)
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
-        }), ("settings-call-controls", {
+        }), ("settings-call-controls", false, {
             defaults.set(false, forKey: CoachController.Keys.enabled)
             defaults.set(true, forKey: CoachController.Keys.callControls)
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
-        }), ("settings-judge-typesafe", {
+        }), ("settings-judge-typesafe", false, {
             defaults.set(false, forKey: CoachController.Keys.enabled)
             defaults.set(JudgeProviderKind.typesafe.rawValue, forKey: CoachController.Keys.judgeProvider)
             defaults.set(false, forKey: CoachController.Keys.callControls)
@@ -458,7 +496,7 @@ enum UISnapshots {
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
-        }), ("settings-judge-stopped", {
+        }), ("settings-judge-stopped", false, {
             defaults.set(JudgeProviderKind.typesafe.rawValue, forKey: CoachController.Keys.judgeProvider)
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
             coach.typeSafeKeyStored = true
@@ -472,7 +510,7 @@ enum UISnapshots {
                 defaults.removePersistentDomain(forName: suite)
                 return done()
             }
-            let (name, make) = shots[i]
+            let (name, atEnd, make) = shots[i]
             // Each shot starts from the defaults (Use Zoom/Meet controls off, the GPT cue judge); a shot
             // about either sets it itself, so no shot depends on the one before it.
             defaults.set(false, forKey: CoachController.Keys.callControls)
@@ -485,7 +523,7 @@ enum UISnapshots {
             w.update()
             controller.schedule(0.5, repeats: false) {
                 MainActor.assumeIsolated {
-                    let img = settingsImage(w)
+                    let img = settingsImage(w, atEnd: atEnd)
                     let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
                     controller.log("coach shot \(name)-\(tag) ok=\(ok)")
                     packet(name, img)
