@@ -1,201 +1,599 @@
+import Foundation
 import XCTest
 @testable import ListenMoreCore
 
-/// Ports of the reference engine's tests/test_cues_gpt.py (GPT parts), plus wire-format checks.
-final class GptLayerTests: XCTestCase {
+final class GptClientTests: XCTestCase {
     var config: ListenMoreConfig!
 
     override func setUpWithError() throws {
         config = try TestConfig.load()
     }
 
-    func testRollingTranscriptPrunes() {
-        var r = RollingTranscript(windowS: 90)
-        r.add(t: 0, speaker: .others, text: "token-a")
-        r.add(t: 50, speaker: .me, text: "token-b")
-        r.add(t: 100, speaker: .others, text: "token-c")
-        let text = r.render(now: 100)
-        XCTAssertFalse(text.contains("token-a"))
-        XCTAssertTrue(text.contains("ME: token-b"))
-        r.clear()
-        XCTAssertTrue(r.lines.isEmpty)
+    func testJudgeRequestUsesAliasStoreFalseAndStrictSchema() async throws {
+        let http = FakeHTTP()
+        http.reply = ("aggressive", 0.92)
+        let judge = LiveJudge(config: config, key: APIKey("sk-test-judge")!, http: http)
+        let (res, usage) = try await judge.judge(prompt: "TRANSCRIPT")
+        XCTAssertEqual(res, JudgeResult(cue: "aggressive", confidence: 0.92, shortReason: "test reason"))
+        XCTAssertEqual(usage, JudgeUsage(inputTokens: 1000, cachedTokens: 200, outputTokens: 30))
+        let req = try XCTUnwrap(http.requests.first)
+        XCTAssertEqual(req.url.absoluteString, "https://api.openai.com/v1/responses")
+        XCTAssertEqual(req.headers["Authorization"], "Bearer sk-test-judge")
+        XCTAssertEqual(req.timeout, config.gpt.judgeTimeoutS)
+        XCTAssertEqual(req.body["model"] as? String, "gpt-6-luna")
+        XCTAssertEqual(req.body["store"] as? Bool, false)
+        XCTAssertEqual(req.body["max_output_tokens"] as? Int, 200)
+        XCTAssertEqual(req.body["input"] as? String, "TRANSCRIPT")
+        XCTAssertEqual(req.body["instructions"] as? String, GptJudgeSpec.instructions)
+        XCTAssertEqual((req.body["reasoning"] as? [String: Any])?["effort"] as? String, "none")
+        let format = (req.body["text"] as? [String: Any])?["format"] as? [String: Any]
+        XCTAssertEqual(format?["type"] as? String, "json_schema")
+        XCTAssertEqual(format?["strict"] as? Bool, true)
+        let props = (format?["schema"] as? [String: Any])?["properties"] as? [String: Any]
+        XCTAssertEqual((props?["cue"] as? [String: Any])?["enum"] as? [String], GptJudgeSpec.labels)
     }
 
-    func testCostAndBudget() {
-        var c = CostTracker(prices: config.gpt.pricesUsd, budgetUsd: 0.05)
-        c.addAudio(seconds: 60)
-        XCTAssertEqual(c.transcribeUsd, 0.017, accuracy: 1e-9)
+    func testJudgeUsesConfiguredAlias() async throws {
+        var c = config!
+        c.gpt.judgeModel = "gpt-7-terra"
+        c.gpt.judgeReasoningEffort = nil
+        let http = FakeHTTP()
+        _ = try await LiveJudge(config: c, key: APIKey("k")!, http: http).judge(prompt: "x")
+        XCTAssertEqual(http.requests.first?.body["model"] as? String, "gpt-7-terra")
+        XCTAssertNil(http.requests.first?.body["reasoning"])
+    }
+
+    func testJudgeHttpErrorCarriesStatusOnly() async {
+        let http = FakeHTTP()
+        http.status = 401
+        do {
+            _ = try await LiveJudge(config: config, key: APIKey("sk-secret-value")!, http: http).judge(prompt: "x")
+            XCTFail("expected error")
+        } catch {
+            XCTAssertEqual(GptError.safe(error), "HTTP 401")
+            XCTAssertFalse(String(describing: error).contains("sk-secret-value"))
+        }
+    }
+
+    func testIncorrectHostnameRetriesOnceOnTheRegionalHostAndKeepsIt() async throws {
+        let http = FakeHTTP()
+        http.queued = [(401, Self.hostError("Use the regional host EU.api.openai.com for this project."))]
+        let judge = LiveJudge(config: config, key: APIKey("sk-test-host")!, http: http)
+        _ = try await judge.judge(prompt: "x")
+        XCTAssertEqual(http.requests.map { $0.url.host }, ["api.openai.com", "eu.api.openai.com"])
+        XCTAssertEqual(judge.currentURL, "https://eu.api.openai.com/v1/responses")
+        _ = try await judge.judge(prompt: "y")
+        XCTAssertEqual(http.requests.last?.url.host, "eu.api.openai.com")
+        XCTAssertEqual(http.requests.count, 3)
+    }
+
+    func testIncorrectHostnameFailingTwiceNamesBothHostsOnly() async {
+        let http = FakeHTTP()
+        http.queued = [(401, Self.hostError("use eu.api.openai.com")), (401, Data())]
+        do {
+            _ = try await LiveJudge(config: config, key: APIKey("sk-secret-value")!, http: http).judge(prompt: "x")
+            XCTFail("expected error")
+        } catch {
+            XCTAssertEqual(error as? GptError, .hostRejected(first: "api.openai.com", regional: "eu.api.openai.com", inner: "HTTP 401"))
+            XCTAssertFalse(GptError.safe(error).contains("sk-secret-value"))
+            XCTAssertFalse(GptError.isTransient(error))
+        }
+    }
+
+    func testIncorrectHostnameIgnoresNonOpenAIHostsAndOtherCodes() async {
+        for body in [Self.hostError("use api.example.com"), Data(#"{"error":{"code":"invalid_api_key","message":"eu.api.openai.com"}}"#.utf8)] {
+            let http = FakeHTTP()
+            http.queued = [(401, body)]
+            do {
+                _ = try await LiveJudge(config: config, key: APIKey("k")!, http: http).judge(prompt: "x")
+                XCTFail("expected error")
+            } catch {
+                XCTAssertEqual(error as? GptError, .http(401))
+                XCTAssertEqual(http.requests.count, 1)
+            }
+        }
+    }
+
+    static func hostError(_ message: String) -> Data {
+        try! JSONSerialization.data(withJSONObject: ["error": ["code": "incorrect_hostname", "message": message]])
+    }
+
+    func testParseRejectsMalformedReplies() {
+        XCTAssertThrowsError(try LiveJudge.parse(Data("{}".utf8)))
+        XCTAssertThrowsError(try LiveJudge.parse(Data("not json".utf8)))
+    }
+
+    func testSafeErrorNeverIncludesMessageText() {
+        struct Leaky: Error, CustomStringConvertible { var description: String { "Bearer sk-leak" } }
+        XCTAssertEqual(GptError.safe(Leaky()), "Leaky")
+        XCTAssertEqual(GptError.safe(URLError(.timedOut)), "URLError -1001")
+    }
+
+    func testTranscriberSessionUpdateAndMessages() async throws {
+        let connector = FakeConnector()
+        let events = EventBox()
+        let tx = LiveTranscriber(config: config, key: APIKey("sk-test-rt")!, speaker: .others, connector: connector) { events.append($0) }
+        try await tx.start()
+        let conn = try XCTUnwrap(connector.connections.first)
+        XCTAssertEqual(conn.url.absoluteString, "wss://api.openai.com/v1/realtime?intent=transcription")
+        XCTAssertEqual(conn.headers["Authorization"], "Bearer sk-test-rt")
+        let update = try XCTUnwrap(conn.socket.sent.first.flatMap { try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] })
+        XCTAssertEqual(update["type"] as? String, "session.update")
+        let session = update["session"] as? [String: Any]
+        XCTAssertEqual(session?["type"] as? String, "transcription")
+        let input = (session?["audio"] as? [String: Any])?["input"] as? [String: Any]
+        XCTAssertEqual((input?["format"] as? [String: Any])?["rate"] as? Int, 24000)
+        XCTAssertEqual((input?["transcription"] as? [String: Any])?["model"] as? String, "gpt-live-transcribe")
+        XCTAssertTrue(input?["turn_detection"] is NSNull)
+
+        try await tx.sendAudio(Data([1, 2, 3, 4]))
+        try await tx.commit(refT: 4.2)
+        XCTAssertTrue(conn.socket.sent[1].contains("input_audio_buffer.append"))
+        XCTAssertTrue(conn.socket.sent[1].contains(Data([1, 2, 3, 4]).base64EncodedString()))
+        XCTAssertTrue(conn.socket.sent[2].contains("input_audio_buffer.commit"))
+
+        conn.socket.push(#"{"type":"input_audio_buffer.committed","item_id":"i1"}"#)
+        conn.socket.push(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"i1","transcript":"can you send it?","usage":{"type":"duration","seconds":2.5}}"#)
+        let gotText = await eventually { events.texts.count == 1 }
+        XCTAssertTrue(gotText)
+        XCTAssertEqual(events.texts.first?.0, .others)
+        XCTAssertEqual(events.texts.first?.1, "can you send it?")
+        XCTAssertEqual(events.texts.first?.2, 4.2)
+        XCTAssertEqual(events.usage.first?.0, .others)
+        XCTAssertEqual(events.usage.first?.1, 2.5)
+
+        conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"bad_key"}}"#)
+        let gotError = await eventually { !events.errors.isEmpty }
+        XCTAssertTrue(gotError)
+        XCTAssertEqual(events.errors.first, "realtime error invalid_request_error/bad_key")
+        await tx.close()
+        do {
+            try await tx.sendAudio(Data([0]))
+            XCTFail("closed transcriber must not send")
+        } catch {
+            XCTAssertEqual(error as? GptError, .notConnected)
+        }
+    }
+
+    func testBilledMeterRoundsEachSegmentUpAndPrefersApiSeconds() {
+        var c = CostTracker(prices: config.gpt.pricesUsd, budget: nil)
+        c.addAudio(seconds: 0.5, speaker: .me)
+        c.commit(speaker: .me)
+        XCTAssertEqual(c.estimatedUnreportedS, 1)
+        c.addAudio(seconds: 2.2, speaker: .others)
+        XCTAssertEqual(c.billedAudioS, 4)
+        c.addApiAudio(seconds: 0.6, speaker: .me)
+        XCTAssertEqual(c.billedAudioS, 3.6, accuracy: 1e-12)
+        c.commit(speaker: .others)
+        XCTAssertEqual(c.segments, 2)
+        XCTAssertEqual(c.audioS, 2.7, accuracy: 1e-12)
+        XCTAssertEqual(c.transcribeUsd, 3.6 / 60 * 0.017, accuracy: 1e-12)
+    }
+
+    func testCostTrackerBudgetAndTranscript() {
+        var c = CostTracker(prices: config.gpt.pricesUsd, budget: 0.05)
+        c.addAudio(seconds: 60, speaker: .me)
+        XCTAssertEqual(c.transcribeUsd, 0.017, accuracy: 1e-12)
         XCTAssertFalse(c.exhausted)
-        c.addAudio(seconds: 180)
+        c.addAudio(seconds: 180, speaker: .me)
         XCTAssertTrue(c.exhausted)
+        c.addJudge(JudgeUsage(inputTokens: 1_000_000, cachedTokens: 0, outputTokens: 0))
+        XCTAssertEqual(c.judgeUsd, 0.10, accuracy: 1e-12)
+
+        var r = RollingTranscript(windowS: 90)
+        r.add(t: 0, speaker: .others, text: "hello")
+        r.add(t: 50, speaker: .me, text: "hi")
+        r.add(t: 100, speaker: .others, text: "  still there?  ")
+        r.add(t: 100, speaker: .me, text: "   ")
+        XCTAssertEqual(r.render(now: 100), "[-50.0s] ME: hi\n[- 0.0s] OTHERS: still there?")
+    }
+}
+
+final class EventBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _texts: [(Speaker, String, TimeInterval)] = []
+    private var _errors: [String] = []
+    private var _usage: [(Speaker, Double)] = []
+
+    var texts: [(Speaker, String, TimeInterval)] { lock.withLock { _texts } }
+    var errors: [String] { lock.withLock { _errors } }
+    var usage: [(Speaker, Double)] { lock.withLock { _usage } }
+
+    func append(_ e: TranscriptEvent) {
+        lock.withLock {
+            switch e {
+            case let .text(s, t, ref): _texts.append((s, t, ref))
+            case let .usage(s, sec): _usage.append((s, sec))
+            case let .error(m): _errors.append(m)
+            }
+        }
+    }
+}
+
+final class OfferBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _offers: [(label: String, t: TimeInterval, refT: TimeInterval, confidence: Double)] = []
+    var offers: [(label: String, t: TimeInterval, refT: TimeInterval, confidence: Double)] { lock.withLock { _offers } }
+
+    func add(_ label: String, _ t: TimeInterval, _ refT: TimeInterval, _ c: Double) {
+        lock.withLock { _offers.append((label, t, refT, c)) }
+    }
+}
+
+/// Voiced/silent frames and VAD states for driving the GPT layer by hand.
+enum GptFrames {
+    static let voiced = [Float](repeating: 0.1, count: 480)
+    static let silent = [Float](repeating: 0, count: 480)
+
+    static func vad(raw: Bool, onset: TimeInterval? = nil, offset: TimeInterval? = nil) -> VadState {
+        VadState(raw: raw, active: raw, onset: onset, offset: offset, dbfs: raw ? -20 : -90)
     }
 
-    func testJudgeCost() {
-        var c = CostTracker(prices: config.gpt.pricesUsd, budgetUsd: 1)
-        c.addJudge(JudgeUsage(inputTokens: 1_000_000, cachedTokens: 500_000, outputTokens: 100_000))
-        XCTAssertEqual(c.judgeUsd, 0.05 + 0.005 + 0.05, accuracy: 1e-9)
-        XCTAssertEqual(c.judgeCalls, 1)
+    static let quiet = vad(raw: false)
+}
+
+final class GptCoreTests: XCTestCase {
+    var config: ListenMoreConfig!
+    let v = GptFrames.voiced, z = GptFrames.silent
+    let frameS = 0.02
+
+    override func setUpWithError() throws {
+        config = try TestConfig.load()
     }
 
-    func testSchemaAndStoreFalse() throws {
-        XCTAssertEqual(OpenAIWire.judgeLabels, ["none", "interrupting", "aggressive", "not_listening", "missed_question"])
-        XCTAssertFalse(config.gpt.store)
-        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: OpenAIWire.judgeBody(config.gpt, prompt: "p")) as? [String: Any])
-        XCTAssertEqual(body["store"] as? Bool, false)
-        XCTAssertEqual(body["model"] as? String, "gpt-6-luna")
-        XCTAssertEqual((body["reasoning"] as? [String: Any])?["effort"] as? String, "none")
-        let format = try XCTUnwrap((body["text"] as? [String: Any])?["format"] as? [String: Any])
-        XCTAssertEqual(format["type"] as? String, "json_schema")
-        XCTAssertEqual(format["strict"] as? Bool, true)
-    }
-
-    func testStoreTrueIsRejected() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lm-\(UUID().uuidString).json")
-        try Data(#"{"gpt": {"store": true}}"#.utf8).write(to: url)
-        defer { try? FileManager.default.removeItem(at: url) }
-        XCTAssertThrowsError(try ListenMoreConfig.load(overrideURL: url))
-    }
-
-    func testSessionUpdateIsTranscriptionWithoutServerVad() throws {
-        let s = try XCTUnwrap(JSONSerialization.jsonObject(with: OpenAIWire.sessionUpdate(config.gpt, sampleRate: 24000)) as? [String: Any])
-        XCTAssertEqual(s["type"] as? String, "session.update")
-        let session = try XCTUnwrap(s["session"] as? [String: Any])
-        XCTAssertEqual(session["type"] as? String, "transcription")
-        let input = try XCTUnwrap((session["audio"] as? [String: Any])?["input"] as? [String: Any])
-        XCTAssertTrue(input["turn_detection"] is NSNull)
-        XCTAssertEqual((input["format"] as? [String: Any])?["rate"] as? Int, 24000)
-        XCTAssertEqual((input["transcription"] as? [String: Any])?["model"] as? String, "gpt-live-transcribe")
-    }
-
-    func testAppendAudioIsBase64Pcm16() throws {
-        let pcm = PCM.pcm16([0, 1, -1])
-        XCTAssertEqual(pcm.count, 6)
-        let m = try XCTUnwrap(JSONSerialization.jsonObject(with: OpenAIWire.appendAudio(pcm)) as? [String: Any])
-        XCTAssertEqual(m["type"] as? String, "input_audio_buffer.append")
-        XCTAssertEqual(Data(base64Encoded: m["audio"] as? String ?? ""), pcm)
-    }
-
-    func testParseRealtimeEvents() {
-        XCTAssertEqual(OpenAIWire.parseRealtime(Data(#"{"type":"input_audio_buffer.committed","item_id":"a"}"#.utf8)), .committed(itemId: "a"))
-        XCTAssertEqual(OpenAIWire.parseRealtime(Data(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"a","transcript":"token","usage":{"type":"duration","seconds":1.5}}"#.utf8)),
-                       .transcript(itemId: "a", text: "token", audioSeconds: 1.5))
-        XCTAssertEqual(OpenAIWire.parseRealtime(Data(#"{"type":"error","error":{"code":"x"}}"#.utf8)), .error)
-        XCTAssertEqual(OpenAIWire.parseRealtime(Data("not json".utf8)), .other)
-    }
-
-    func testParseJudge() throws {
-        let resp = #"{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"cue\":\"aggressive\",\"confidence\":0.82,\"short_reason\":\"x\"}"}]}],"usage":{"input_tokens":120,"output_tokens":9,"input_tokens_details":{"cached_tokens":100}}}"#
-        let (r, u) = try OpenAIWire.parseJudge(Data(resp.utf8))
-        XCTAssertEqual(r, JudgeResult(cue: "aggressive", confidence: 0.82))
-        XCTAssertEqual(u, JudgeUsage(inputTokens: 120, cachedTokens: 100, outputTokens: 9))
-        XCTAssertThrowsError(try OpenAIWire.parseJudge(Data(#"{"output":[]}"#.utf8)))
-        let bad = #"{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"cue\":\"shout\",\"confidence\":1}"}]}]}"#
-        XCTAssertThrowsError(try OpenAIWire.parseJudge(Data(bad.utf8)))
-    }
-
-    /// Port of test_safe_err_never_has_headers: errors carry a kind and a status, nothing else.
-    func testErrorsNeverCarryContent() {
-        let e = GptError(.judgeHTTP, httpStatus: 401)
-        XCTAssertEqual(e.description, "judgeHTTP(401)")
-        XCTAssertEqual(String(describing: GptError(.budgetCap)), "budgetCap")
-        var dumped = ""
-        dump(e, to: &dumped)
-        XCTAssertFalse(dumped.contains("Bearer"))
-    }
-
-    func testMockJudge() {
-        XCTAssertEqual(MockJudge.decide("[-1.0s] ME: token \(MockJudge.hostileMarker)").cue, "aggressive")
-        XCTAssertEqual(MockJudge.decide("PENDING_QUESTION: yes ME_ANSWERED_SINCE: no").cue, "missed_question")
-        XCTAssertEqual(MockJudge.decide("[-1.0s] ME: token").cue, "none")
-    }
-
-    // MARK: GptLayer
-
-    final class FailingJudge: Judge {
-        func judge(prompt: String, completion: @escaping (Result<(JudgeResult, JudgeUsage), GptError>) -> Void) {
-            completion(.failure(GptError(.judgeHTTP, httpStatus: 401)))
+    func sent(_ actions: [GptCore.TxAction]) -> Int {
+        actions.reduce(0) { n, a in
+            if case let .send(_, s) = a { return n + s.count }
+            return n
         }
     }
 
-    func makeLayer(judge: Judge, budget: Double = 1, now: Double = 10, queue: DispatchQueue,
-                   offers: @escaping (String) -> Void = { _ in }, disabled: @escaping (GptErrorKind) -> Void = { _ in }) -> (GptLayer, [Speaker: MockTranscriber]) {
-        var c = config!
-        c.gpt.judgeMinIntervalS = 0
-        c.gpt.budgetUsdPerCall = budget
-        let tx: [Speaker: MockTranscriber] = [.me: MockTranscriber(script: [], speaker: .me), .others: MockTranscriber(script: [], speaker: .others)]
-        let layer = GptLayer(config: c, queue: queue, now: { now }, transcribers: tx, judge: judge,
-                             offer: { label, _, _, _ in offers(label) }, onDisabled: disabled)
-        return (layer, tx)
+    func commits(_ actions: [GptCore.TxAction]) -> [TimeInterval] {
+        actions.compactMap { if case let .commit(_, ref) = $0 { return ref } else { return nil } }
     }
 
-    func testPromptCarriesProsodyAndOverlapFlags() {
-        let q = DispatchQueue(label: "t")
-        let (layer, _) = makeLayer(judge: MockJudge(), queue: q)
-        q.sync {
-            layer.onLocal(LocalEvent(kind: .prosody, t: 9, onset: 9,
-                                     prosody: ProsodyFlags(t: 9, baselineReady: true, flagged: true, loudnessJumpDb: 6.2, rateJumpPct: 31.5)))
-            layer.onLocal(LocalEvent(kind: .interrupt, t: 8, onset: 7.5))
-            let p = layer.buildPrompt(.init(refT: 10, reason: "me_turn"))
-            XCTAssertTrue(p.contains("prosody_flagged=yes loudness_jump_db=6.2 rate_jump_pct=31.5"), p)
-            XCTAssertTrue(p.contains("recent_overlaps=interrupt@-2.5s"), p)
-            XCTAssertTrue(p.contains("TRIGGER: me_turn"))
+    func testSendsOnlyVoicedAudioWithPreroll() {
+        let core = GptCore(config: config)
+        var actions: [GptCore.TxAction] = []
+        for i in 0..<10 { actions += core.feed(.me, frame: v, vad: GptFrames.quiet, now: Double(i) * frameS) }
+        XCTAssertEqual(sent(actions), 0)
+        actions = core.feed(.me, frame: v, vad: GptFrames.vad(raw: true, onset: 0.2), now: 0.22)
+        XCTAssertEqual(sent(actions), 3600 + 480, "150 ms pre-roll + the onset frame")
+        actions = []
+        for i in 0..<3 { actions += core.feed(.me, frame: z, vad: GptFrames.vad(raw: false), now: 0.24 + Double(i) * frameS) }
+        XCTAssertEqual(sent(actions), 0, "a pause inside the utterance is held")
+        actions = core.feed(.me, frame: v, vad: GptFrames.vad(raw: true), now: 0.30)
+        XCTAssertEqual(sent(actions), 4 * 480, "speech resumed: the held pause goes out with it")
+        actions = []
+        for i in 0..<4 { actions += core.feed(.me, frame: z, vad: GptFrames.vad(raw: false), now: 0.32 + Double(i) * frameS) }
+        actions += core.feed(.me, frame: z, vad: GptFrames.vad(raw: false, offset: 0.30), now: 0.40)
+        XCTAssertEqual(sent(actions), 0, "the VAD hangover never goes out")
+        XCTAssertEqual(commits(actions), [0.30])
+        XCTAssertEqual(core.cost.audioS, Double(3600 + 5 * 480) / 24000, accuracy: 1e-9)
+    }
+
+    func testCommitGapSharesOneCommitAcrossCloseUtterances() {
+        config.gpt.transcribeCommitGapMs = 300
+        let core = GptCore(config: config)
+        _ = core.feed(.others, frame: v, vad: GptFrames.vad(raw: true, onset: 0.5), now: 0.52)
+        XCTAssertEqual(commits(core.feed(.others, frame: z, vad: GptFrames.vad(raw: false, offset: 1.0), now: 1.0)), [])
+        XCTAssertEqual(commits(core.feed(.others, frame: z, vad: GptFrames.quiet, now: 1.1)), [])
+        _ = core.feed(.others, frame: v, vad: GptFrames.vad(raw: true, onset: 1.2), now: 1.2)
+        XCTAssertEqual(commits(core.feed(.others, frame: z, vad: GptFrames.quiet, now: 1.3)), [], "speech resumed inside the gap")
+        XCTAssertEqual(commits(core.feed(.others, frame: z, vad: GptFrames.vad(raw: false, offset: 2.0), now: 2.0)), [])
+        XCTAssertEqual(commits(core.feed(.others, frame: z, vad: GptFrames.quiet, now: 2.28)), [])
+        XCTAssertEqual(commits(core.feed(.others, frame: z, vad: GptFrames.quiet, now: 2.30)), [2.0])
+        XCTAssertEqual(core.cost.segments, 1)
+    }
+
+    func testLongSegmentCommitsAtItsNextPause() {
+        config.gpt.transcribeCommitGapMs = 300
+        config.gpt.transcribeMaxSegmentS = 1
+        let core = GptCore(config: config)
+        _ = core.feed(.me, frame: v, vad: GptFrames.vad(raw: true, onset: 0), now: 0.02)
+        for i in 2...60 { _ = core.feed(.me, frame: v, vad: GptFrames.vad(raw: true), now: Double(i) * frameS) }
+        XCTAssertEqual(commits(core.feed(.me, frame: z, vad: GptFrames.vad(raw: false, offset: 1.2), now: 1.22)), [1.2])
+    }
+
+    func testBudgetCapStopsCleanly() {
+        config.gpt.budgetUsdPerCall = 0.0001
+        let core = GptCore(config: config)
+        XCTAssertGreaterThan(sent(core.feed(.me, frame: v, vad: GptFrames.vad(raw: true, onset: 0), now: 0.02)), 0)
+        XCTAssertTrue(core.cost.exhausted, "one open second is billed as a whole second")
+        XCTAssertEqual(core.feed(.me, frame: v, vad: GptFrames.vad(raw: true), now: 0.04), [])
+        XCTAssertFalse(core.enabled)
+        XCTAssertEqual(core.stopReason, .budgetCap)
+        XCTAssertTrue(core.closeTranscribersRequested)
+        XCTAssertEqual(core.errors, ["budget cap reached"])
+        XCTAssertEqual(core.feed(.others, frame: v, vad: GptFrames.vad(raw: true, onset: 0), now: 0.06), [])
+        XCTAssertNil(core.request(GptCore.JudgeRequest(refT: 0, reason: "me_reply")))
+    }
+
+    func testBudgetCapCheckedBeforeAJudgeCall() {
+        config.gpt.budgetUsdPerCall = 0.0001
+        let core = GptCore(config: config)
+        let req = GptCore.JudgeRequest(refT: 1, reason: "me_reply")
+        XCTAssertEqual(core.request(req), req)
+        core.addApiAudio(seconds: 1, speaker: .me)
+        XCTAssertNil(core.beginJudge(req, now: 2))
+        XCTAssertEqual(core.stopReason, .budgetCap)
+    }
+
+    func testJudgesOnlyMyFirstLineAfterASubstantiveOtherTurn() {
+        let core = GptCore(config: config)
+        XCTAssertNil(core.onText(.others, text: "sure okay", refT: 1, now: 1.5).start)
+        XCTAssertNil(core.onText(.me, text: "so the plan is", refT: 2, now: 2.5).start, "short acknowledgements don't count")
+        XCTAssertNil(core.onText(.others, text: "how would that work in practice", refT: 3, now: 3.5).start)
+        let r = core.onText(.me, text: "it depends", refT: 4, now: 4.5)
+        XCTAssertEqual(r.start, GptCore.JudgeRequest(refT: 4, reason: "me_reply"))
+        XCTAssertEqual(r.refT, 4)
+        _ = core.judgeEnded()
+        XCTAssertNil(core.onText(.me, text: "and another thing", refT: 5, now: 5.5).start, "only the first line of the reply")
+        XCTAssertEqual(core.onText(.others, text: "x", refT: -1, now: 6).refT, 6, "a missing reference time falls back to arrival")
+    }
+
+    func testNoJudgeMidMonologue() {
+        let core = GptCore(config: config)
+        core.setMeRun(config.gpt.judgeSkipRunS)
+        _ = core.onText(.others, text: "could you say more about that", refT: 1, now: 1)
+        XCTAssertNil(core.onText(.me, text: "right so", refT: 2, now: 2).start)
+    }
+
+    func testNotListeningNeedsHighConfidenceAndNeverDuringAMonologue() {
+        let core = GptCore(config: config)
+        let req = GptCore.JudgeRequest(refT: 3, reason: "me_reply")
+        let usage = JudgeUsage(inputTokens: 10, cachedTokens: 0, outputTokens: 2)
+        XCTAssertNil(core.finishJudge(req, result: .success((JudgeResult(cue: "not_listening", confidence: 0.84, shortReason: ""), usage)), now: 4))
+        XCTAssertEqual(core.droppedVerdicts, 1)
+        let offer = core.finishJudge(req, result: .success((JudgeResult(cue: "not_listening", confidence: 0.85, shortReason: ""), usage)), now: 4)
+        XCTAssertEqual(offer, GptCore.Offer(label: "not_listening", t: 4, refT: 3, confidence: 0.85))
+        XCTAssertNil(core.finishJudge(req, result: .success((JudgeResult(cue: "none", confidence: 0.99, shortReason: ""), usage)), now: 4))
+        core.setMeRun(config.gpt.judgeSkipRunS + 1)
+        XCTAssertNil(core.finishJudge(req, result: .success((JudgeResult(cue: "not_listening", confidence: 0.99, shortReason: ""), usage)), now: 4))
+        XCTAssertEqual(core.droppedVerdicts, 2)
+        XCTAssertEqual(core.cost.judgeCalls, 4)
+    }
+
+    func testTransientJudgeErrorsSkipUntilTheLimit() {
+        let core = GptCore(config: config)
+        let req = GptCore.JudgeRequest(refT: 1, reason: "me_reply")
+        XCTAssertNil(core.finishJudge(req, result: .failure(GptError.http(429)), now: 2))
+        XCTAssertNil(core.finishJudge(req, result: .failure(URLError(.timedOut)), now: 3))
+        XCTAssertTrue(core.enabled)
+        XCTAssertEqual(core.transientErrors, 2)
+        _ = core.finishJudge(req, result: .failure(GptError.http(503)), now: 4)
+        XCTAssertFalse(core.enabled)
+        XCTAssertEqual(core.stopReason, .error)
+    }
+
+    func testHardJudgeErrorStopsAtOnce() {
+        let core = GptCore(config: config)
+        _ = core.finishJudge(GptCore.JudgeRequest(refT: 1, reason: "me_reply"), result: .failure(GptError.http(401)), now: 2)
+        XCTAssertFalse(core.enabled)
+        XCTAssertEqual(core.errors, ["judge: HTTP 401"])
+    }
+
+    func testOneJudgeInFlightKeepsOnlyTheLatestQueued() {
+        let core = GptCore(config: config)
+        let a = GptCore.JudgeRequest(refT: 1, reason: "me_reply")
+        let b = GptCore.JudgeRequest(refT: 2, reason: "me_reply")
+        let c = GptCore.JudgeRequest(refT: 3, reason: "me_reply")
+        XCTAssertEqual(core.request(a), a)
+        XCTAssertNil(core.request(b))
+        XCTAssertNil(core.request(c))
+        XCTAssertEqual(core.judgeEnded(), c)
+        XCTAssertNil(core.judgeEnded())
+    }
+
+    func testPromptCarriesTranscriptFlagsAndTrigger() {
+        let core = GptCore(config: config)
+        core.onLocal(LocalEvent(kind: .prosody, t: 9, onset: 9,
+                                prosody: ProsodyReading(t: 9, baselineReady: true, flagged: true, loudnessJumpDb: 6.2, rateJumpPct: 3.0)))
+        core.onLocal(LocalEvent(kind: .interrupt, t: 8, onset: 7.5))
+        _ = core.onText(.others, text: "what do you think about the option", refT: 8, now: 8)
+        _ = core.onText(.me, text: "anyway the other thing", refT: 9, now: 9.5)
+        let prompt = core.buildPrompt(GptCore.JudgeRequest(refT: 9, reason: "me_reply"), now: 10)
+        XCTAssertTrue(prompt.contains("OTHERS: what do you think about the option"))
+        XCTAssertTrue(prompt.contains("ME: anyway the other thing"))
+        XCTAssertTrue(prompt.contains("prosody_enabled=yes prosody_flagged=yes loudness_jump_db=6.2 rate_jump_pct=3.0"))
+        XCTAssertTrue(prompt.contains("recent_overlaps=interrupt@-2.5s"))
+        XCTAssertTrue(prompt.hasSuffix("TRIGGER: me_reply"))
+        core.clearTranscript()
+        XCTAssertFalse(core.buildPrompt(GptCore.JudgeRequest(refT: 9, reason: "me_reply"), now: 10).contains("anyway"))
+    }
+}
+
+final class StopBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _reasons: [GptStopReason] = []
+    var reasons: [GptStopReason] { lock.withLock { _reasons } }
+    func add(_ r: GptStopReason) { lock.withLock { _reasons.append(r) } }
+}
+
+final class SegmentBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _segments: [(Speaker, String, TimeInterval)] = []
+    var segments: [(Speaker, String, TimeInterval)] { lock.withLock { _segments } }
+    func add(_ s: Speaker, _ t: String, _ r: TimeInterval) { lock.withLock { _segments.append((s, t, r)) } }
+}
+
+final class GptLayerTests: XCTestCase {
+    var config: ListenMoreConfig!
+    let clock = ManualClock(0)
+    let offers = OfferBox()
+    let stops = StopBox()
+    let segments = SegmentBox()
+    var transcribers: [Speaker: FakeTranscriber] = [:]
+    let v = GptFrames.voiced, z = GptFrames.silent
+
+    override func setUpWithError() throws {
+        config = try TestConfig.load()
+        config.gpt.judgeMinIntervalS = 0
+    }
+
+    func makeLayer(me: [String] = [], others: [String] = [], billed: Double? = nil, judge: FakeJudge,
+                   scheduler: InstantScheduler = InstantScheduler()) -> GptLayer {
+        let clock = clock, offers = offers, stops = stops, segments = segments
+        var made: [Speaker: FakeTranscriber] = [:]
+        let layer = GptLayer(config: config, now: { clock.now() }, offer: { offers.add($0, $1, $2, $3) },
+                             onSegment: { s, t, r, _ in segments.add(s, t, r) }, onStopped: { stops.add($0) },
+                             judge: judge, scheduler: scheduler) { speaker, onEvent in
+            let t = FakeTranscriber(speaker: speaker, script: speaker == .me ? me : others, onEvent: onEvent)
+            t.billedPerCommit = billed
+            made[speaker] = t
+            return t
+        }
+        transcribers = made
+        layer.start()
+        return layer
+    }
+
+    func utterance(_ layer: GptLayer, _ speaker: Speaker, onset: TimeInterval, offset: TimeInterval) {
+        let on = GptFrames.vad(raw: true, onset: onset), off = GptFrames.vad(raw: false, offset: offset)
+        if speaker == .me {
+            layer.feed(me: v, meVad: on, others: z, othersVad: GptFrames.quiet, meRunS: 0)
+            layer.feed(me: z, meVad: off, others: z, othersVad: GptFrames.quiet, meRunS: 0)
+        } else {
+            layer.feed(me: z, meVad: GptFrames.quiet, others: v, othersVad: on, meRunS: 0)
+            layer.feed(me: z, meVad: GptFrames.quiet, others: z, othersVad: off, meRunS: 0)
         }
     }
 
-    func testPrerollThenStreamThenCommit() {
-        let q = DispatchQueue(label: "t")
-        let (layer, tx) = makeLayer(judge: MockJudge(), queue: q)
-        let frame = [Float](repeating: 0.1, count: 480)
-        q.sync {
-            for _ in 0..<30 { layer.feed(.me, frame: frame[...], onset: nil, offset: nil) }
-            XCTAssertEqual(tx[.me]?.audioBytes, 0, "nothing is sent before speech starts")
-            layer.feed(.me, frame: frame[...], onset: 1.0, offset: nil)
-            // 300 ms pre-roll (7200 samples) + the onset frame, as 16-bit PCM.
-            XCTAssertEqual(tx[.me]?.audioBytes, (7200 + 480) * 2)
-            layer.feed(.me, frame: frame[...], onset: nil, offset: 1.5)
-            layer.feed(.me, frame: frame[...], onset: nil, offset: nil)
-            XCTAssertEqual(tx[.me]?.audioBytes, (7200 + 480 * 2) * 2, "stops streaming after the offset")
-        }
+    func testMyReplyAfterTheirTurnIsJudgedAndSegmentsReachTheTextRules() async {
+        clock.set(12)
+        let judge = FakeJudge(answers: [JudgeResult(cue: "not_listening", confidence: 0.9, shortReason: "changed topic")])
+        let layer = makeLayer(me: ["Anyway, about the other thing."], others: ["How would we roll this out?"], judge: judge)
+        utterance(layer, .others, onset: 9, offset: 10)
+        utterance(layer, .me, onset: 11, offset: 11.5)
+        let offered = await eventually { self.offers.offers.count == 1 }
+        XCTAssertTrue(offered)
+        XCTAssertEqual(offers.offers.first?.label, "not_listening")
+        XCTAssertEqual(offers.offers.first?.refT, 11.5)
+        XCTAssertTrue(judge.prompts[0].contains("OTHERS: How would we roll this out?"))
+        XCTAssertTrue(judge.prompts[0].contains("ME: Anyway, about the other thing."))
+        XCTAssertTrue(judge.prompts[0].contains("TRIGGER: me_reply"))
+        XCTAssertEqual(segments.segments.map { $0.0 }, [.others, .me])
+        XCTAssertEqual(segments.segments.map { $0.2 }, [10, 11.5])
+        await layer.close()
+        XCTAssertTrue(transcribers[.me]!.closed)
+        XCTAssertTrue(transcribers[.others]!.closed)
     }
 
-    func testJudgeFailureDisablesLayer() {
-        let q = DispatchQueue(label: "t")
-        let done = expectation(description: "disabled")
-        let (layer, _) = makeLayer(judge: FailingJudge(), queue: q, disabled: { kind in
-            XCTAssertEqual(kind, .judgeHTTP)
-            done.fulfill()
-        })
-        q.async { layer.onText(.me, "token", 9) }
-        wait(for: [done], timeout: 2)
-        q.sync { XCTAssertFalse(layer.enabled) }
+    func testOnlyVoicedFramesAreSent() async {
+        let layer = makeLayer(judge: FakeJudge())
+        for _ in 0..<5 { layer.feed(me: v, meVad: GptFrames.quiet, others: z, othersVad: GptFrames.quiet, meRunS: 0) }
+        utterance(layer, .others, onset: 1, offset: 1.2)
+        _ = await layer.snapshot()
+        XCTAssertEqual(transcribers[.me]!.bytesSent, 0)
+        XCTAssertEqual(transcribers[.others]!.bytesSent, (5 * 480 + 480) * 2, "pre-roll + the onset frame; the silent offset frame is held")
+        XCTAssertEqual(transcribers[.others]!.commits, [1.2])
+        await layer.close()
     }
 
-    func testBudgetCapStopsStreaming() {
-        let q = DispatchQueue(label: "t")
-        let done = expectation(description: "disabled")
-        let (layer, tx) = makeLayer(judge: MockJudge(), budget: 0.0001, queue: q, disabled: { kind in
-            XCTAssertEqual(kind, .budgetCap)
-            done.fulfill()
-        })
-        let frame = [Float](repeating: 0.1, count: 480)
-        q.async {
-            layer.feed(.me, frame: frame[...], onset: 0, offset: nil)
-            for _ in 0..<50 { layer.feed(.me, frame: frame[...], onset: nil, offset: nil) }
-        }
-        wait(for: [done], timeout: 2)
-        q.sync { XCTAssertLessThan(tx[.me]?.audioBytes ?? 0, 51 * 960 + 7200 * 2) }
+    func testApiReportedSecondsFeedTheMeter() async {
+        let layer = makeLayer(billed: 1.5, judge: FakeJudge())
+        utterance(layer, .me, onset: 1, offset: 2)
+        utterance(layer, .others, onset: 3, offset: 4)
+        let billed = await eventually { await layer.snapshot().billedAudioSeconds == 3.0 }
+        XCTAssertTrue(billed)
+        await layer.close()
     }
 
-    func testMissedQuestionAfterDeadline() {
-        let q = DispatchQueue(label: "t")
-        var c = config!
-        c.gpt.questionWaitS = 0.1
-        c.gpt.judgeMinIntervalS = 0
-        let got = expectation(description: "missed_question")
-        let judge = MockJudge()
-        let layer = GptLayer(config: c, queue: q, now: { 10 }, transcribers: [:], judge: judge,
-                             offer: { label, _, _, _ in if label == "missed_question" { got.fulfill() } }, onDisabled: { _ in })
-        q.async { layer.onText(.others, "can you send it today?", 10) }
-        wait(for: [got], timeout: 3)
+    func testBudgetCapClosesTranscribersAndReportsOnce() async {
+        config.gpt.budgetUsdPerCall = 0.0001
+        let layer = makeLayer(judge: FakeJudge())
+        utterance(layer, .me, onset: 1, offset: 2)
+        for _ in 0..<5 { layer.feed(me: v, meVad: GptFrames.vad(raw: true, onset: 3), others: z, othersVad: GptFrames.quiet, meRunS: 0) }
+        let snap = await layer.snapshot()
+        XCTAssertFalse(snap.enabled)
+        XCTAssertTrue(snap.budgetExhausted)
+        XCTAssertEqual(snap.errors, ["budget cap reached"])
+        XCTAssertTrue(transcribers[.me]!.closed)
+        XCTAssertTrue(transcribers[.others]!.closed)
+        XCTAssertEqual(stops.reasons, [.budgetCap])
+        await layer.close()
+    }
+
+    func testJudgeErrorStopsWithStatusOnly() async {
+        let judge = FakeJudge()
+        judge.fail = true
+        let layer = makeLayer(me: ["anything at all"], others: ["what do you all think here"], judge: judge)
+        utterance(layer, .others, onset: 1, offset: 2)
+        utterance(layer, .me, onset: 3, offset: 4)
+        let stopped = await eventually { await !layer.snapshot().enabled }
+        XCTAssertTrue(stopped)
+        let snap = await layer.snapshot()
+        XCTAssertEqual(snap.errors, ["judge: HTTP 401"])
+        XCTAssertEqual(stops.reasons, [.error])
+        await layer.close()
+    }
+
+    func testTransientJudgeErrorSkipsOneVerdict() async {
+        let judge = FakeJudge()
+        judge.errors = [URLError(.timedOut)]
+        let layer = makeLayer(me: ["one", "two"], others: ["what do you all think here", "and what about the rest"], judge: judge)
+        utterance(layer, .others, onset: 1, offset: 2)
+        utterance(layer, .me, onset: 3, offset: 4)
+        _ = await eventually { await layer.snapshot().transientErrors == 1 }
+        utterance(layer, .others, onset: 5, offset: 6)
+        utterance(layer, .me, onset: 7, offset: 8)
+        let judged = await eventually { judge.prompts.count == 1 }
+        XCTAssertTrue(judged)
+        let snap = await layer.snapshot()
+        XCTAssertTrue(snap.enabled)
+        XCTAssertEqual(snap.transientErrors, 1)
+        await layer.close()
+    }
+
+    func testSendFailureStops() async {
+        let layer = makeLayer(judge: FakeJudge())
+        transcribers[.others]!.failSend = true
+        layer.feed(me: z, meVad: GptFrames.quiet, others: v, othersVad: GptFrames.vad(raw: true, onset: 1), meRunS: 0)
+        let snap = await layer.snapshot()
+        XCTAssertEqual(snap.errors, ["realtime send: URLError -1005"])
+        await layer.close()
+    }
+
+    func testMinIntervalSleepsBeforeTheNextJudge() async {
+        config.gpt.judgeMinIntervalS = 1.5
+        let scheduler = InstantScheduler()
+        let judge = FakeJudge()
+        let layer = makeLayer(me: ["one", "two"], others: ["what do you all think here", "and what about the rest"],
+                              judge: judge, scheduler: scheduler)
+        utterance(layer, .others, onset: 1, offset: 2)
+        utterance(layer, .me, onset: 3, offset: 4)
+        _ = await eventually { judge.prompts.count == 1 }
+        utterance(layer, .others, onset: 5, offset: 6)
+        utterance(layer, .me, onset: 7, offset: 8)
+        let second = await eventually { judge.prompts.count == 2 }
+        XCTAssertTrue(second)
+        XCTAssertTrue(scheduler.sleeps.contains { abs($0 - 1.5) < 1e-9 })
+        await layer.close()
+    }
+
+    func testProductionInitUsesTransports() async throws {
+        let http = FakeHTTP(), connector = FakeConnector()
+        let layer = GptLayer(config: config, key: APIKey("sk-test-prod")!,
+                             transports: GptTransports(http: http, webSocket: connector, scheduler: InstantScheduler()),
+                             now: { 0 }, offer: { _, _, _, _ in })
+        layer.start()
+        let both = await eventually { connector.connections.count == 2 }
+        XCTAssertTrue(both)
+        XCTAssertTrue(connector.connections.allSatisfy { $0.headers["Authorization"] == "Bearer sk-test-prod" })
+        await layer.close()
+    }
+
+    func testConnectFailureStops() async {
+        let connector = FakeConnector()
+        connector.fail = true
+        let stops = stops
+        let layer = GptLayer(config: config, key: APIKey("k")!,
+                             transports: GptTransports(http: FakeHTTP(), webSocket: connector, scheduler: InstantScheduler()),
+                             now: { 0 }, offer: { _, _, _, _ in }, onStopped: { stops.add($0) })
+        layer.start()
+        let snap = await layer.snapshot()
+        XCTAssertEqual(snap.errors, ["realtime connect: URLError -1004"])
+        XCTAssertEqual(stops.reasons, [.error])
+        await layer.close()
     }
 }

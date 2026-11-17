@@ -1,130 +1,178 @@
 import XCTest
 @testable import ListenMoreCore
 
-/// Ports of the reference engine's tests/test_local_layer.py, same scenarios and tolerances, on
-/// generated audio.
+/// Transcript answers for the local layer, set per test.
+final class StubTextContext: LocalTextContext {
+    var howWhy = false
+    var updateTurn = false
+    var isReadback = false
+
+    func howWhyBefore(_ t: TimeInterval) -> Bool { howWhy }
+    func updateTurnBefore(_ t: TimeInterval) -> Bool { updateTurn }
+    func readback(from t0: TimeInterval, now: TimeInterval) -> Bool { isReadback }
+}
+
+/// Each local rule on synthetic two-stream audio (mic = the user, call = everyone else). Thresholds
+/// are scaled down where a rule would otherwise need minutes of audio.
 final class LocalLayerTests: XCTestCase {
     var config: ListenMoreConfig!
-    typealias S = Synthetic
+    let meF0 = 120.0, othersF0 = 210.0
 
     override func setUpWithError() throws {
         config = try TestConfig.load()
     }
 
-    func testVadOnsetOffset() {
-        let x = [Float](repeating: 0, count: S.sr) + S.speechish(2) + [Float](repeating: 0, count: S.sr)
-        let v = StreamVAD(config: config)
-        var on: [Double] = [], off: [Double] = []
-        for i in 0..<(x.count / 480) {
-            let s = v.process(tEnd: Double(i + 1) * 0.02, frame: x[(i * 480)..<((i + 1) * 480)])
-            if let o = s.onset { on.append(o) }
-            if let o = s.offset { off.append(o) }
+    func run(_ total: Double, me: [(Double, Double)], others: [(Double, Double)], participants: Int = 2,
+             context: LocalTextContext? = nil) -> [LocalEvent] {
+        Synthetic.runLocal(config, mic: Synthetic.track(total, me, f0: meF0), call: Synthetic.track(total, others, f0: othersF0),
+                           participants: participants, context: context)
+    }
+
+    func kinds(_ evs: [LocalEvent]) -> [LocalEvent.Kind] { evs.map(\.kind) }
+
+    // MARK: cut-in
+
+    func testCutInNeedsTheOverlapAndThemContinuing() throws {
+        let evs = run(8, me: [(3.0, 6.0)], others: [(1.0, 5.5)])
+        XCTAssertEqual(kinds(evs), [.interrupt])
+        let cut = try XCTUnwrap(evs.first)
+        XCTAssertEqual(cut.onset, 3.0, accuracy: 0.05)
+        XCTAssertGreaterThanOrEqual(cut.t - cut.onset, 0.6 + 0.5 - 0.05, "600 ms overlap, then 500 ms of them continuing")
+        XCTAssertEqual(cut.othersActive, true)
+        XCTAssertFalse(cut.trailing)
+    }
+
+    func testBackchannelIsNotACutIn() {
+        XCTAssertEqual(kinds(run(7, me: [(3.0, 3.6)], others: [(1.0, 6.0)])), [])
+    }
+
+    func testThemCuttingInOnTheUserIsNotTheUsersCutIn() {
+        XCTAssertFalse(kinds(run(8, me: [(1.0, 5.5)], others: [(3.0, 6.0)])).contains(.interrupt))
+    }
+
+    func testShortOverlapAsTheyFinishIsATrailingCandidate() throws {
+        let evs = run(8, me: [(3.0, 6.5)], others: [(1.0, 3.45)])
+        let cut = try XCTUnwrap(evs.first { $0.kind == .interrupt })
+        XCTAssertTrue(cut.trailing, "300-600 ms of overlap that ends with them stopping: needs their words to judge")
+        XCTAssertEqual(cut.othersActive, false)
+        XCTAssertGreaterThanOrEqual(cut.t - cut.onset, config.local.cutInTrailingYieldS - 1e-9)
+        XCTAssertEqual(cut.othersLastSpeech ?? 0, 3.45, accuracy: 0.1)
+    }
+
+    func testTinyOverlapAsTheyFinishIsNothing() {
+        XCTAssertEqual(kinds(run(8, me: [(3.0, 6.5)], others: [(1.0, 3.15)])), [])
+    }
+
+    func testTrailingCandidateDropsWhenTheyComeBackIn() {
+        XCTAssertFalse(kinds(run(9, me: [(3.0, 7.0)], others: [(1.0, 3.45), (4.2, 5.0)])).contains(.interrupt))
+    }
+
+    // MARK: talk-over
+
+    let talkOverMe: [(Double, Double)] = [(1.0, 2.0), (2.4, 6.0)]
+    let talkOverOthers: [(Double, Double)] = [(0.5, 1.4), (1.8, 2.6)]
+
+    func testTalkOverNeedsSwitchesOverlapAndTheUserHoldingTheFloor() throws {
+        let evs = run(8, me: talkOverMe, others: talkOverOthers)
+        XCTAssertEqual(kinds(evs), [.talkOver])
+        let to = try XCTUnwrap(evs.first)
+        XCTAssertGreaterThanOrEqual(to.switches ?? 0, config.local.talkOverSwitches)
+        XCTAssertGreaterThanOrEqual(to.t - to.onset, config.local.talkOverHoldFloorMs / 1000 - 1e-9)
+    }
+
+    func testNumberReadBackIsNotATalkOver() {
+        let ctx = StubTextContext()
+        ctx.isReadback = true
+        XCTAssertEqual(kinds(run(8, me: talkOverMe, others: talkOverOthers, context: ctx)), [])
+    }
+
+    func testNoCutInRightAfterATalkOver() {
+        let me = talkOverMe + [(10.0, 13.0)], others = talkOverOthers + [(9.0, 13.5)]
+        XCTAssertEqual(kinds(run(15, me: me, others: others)), [.talkOver])
+        config.local.cutInAfterTalkOverS = 0
+        XCTAssertEqual(kinds(run(15, me: me, others: others)), [.talkOver, .interrupt])
+    }
+
+    // MARK: monologue
+
+    func scaledMonologue() {
+        config.local.monologueSoftS = 4
+        config.local.monologueStrongS = 6
+        config.local.monologueRelativeMinRuns = 1000
+    }
+
+    func testMonologueSoftThenStrong() throws {
+        scaledMonologue()
+        let evs = run(9, me: [(1.0, 8.5)], others: [])
+        XCTAssertEqual(kinds(evs), [.monologue, .monologue])
+        XCTAssertEqual(evs.map(\.level), [.soft, .strong])
+        XCTAssertEqual(evs[0].onset, 1.0 + 4, accuracy: 0.05)
+        XCTAssertEqual(evs[1].onset, 1.0 + 6, accuracy: 0.05)
+    }
+
+    func testShortPausesDoNotResetTheRunButLongOnesDo() {
+        scaledMonologue()
+        config.local.monologueStrongS = 100
+        // The run counts until the user has been quiet for monologue_me_gap_reset_s.
+        XCTAssertEqual(kinds(run(8, me: [(1.0, 2.0), (3.0, 4.5)], others: [])), [.monologue], "a 1 s pause keeps the run going")
+        XCTAssertEqual(kinds(run(10, me: [(1.0, 2.0), (5.5, 6.5)], others: [])), [], "a pause past the gap reset starts a new run")
+    }
+
+    func testTheOtherSideTakingTheFloorEndsTheRun() {
+        scaledMonologue()
+        config.local.monologueStrongS = 100
+        XCTAssertEqual(kinds(run(10, me: [(1.0, 3.5), (5.0, 6.0)], others: [])), [.monologue])
+        XCTAssertEqual(kinds(run(10, me: [(1.0, 3.5), (5.0, 6.0)], others: [(3.6, 4.9)])), [])
+    }
+
+    func testRelativeMonologueFiresEarlierThanTheAbsoluteOne() throws {
+        config.local.monologueRelativeMinS = 3
+        config.local.monologueMeGapResetS = 1.5
+        let shortRuns: [(Double, Double)] = [(1.0, 2.2), (5.0, 6.2), (9.0, 10.2), (13.0, 14.2)]
+        let evs = run(24, me: shortRuns + [(17.0, 23.0)], others: [])
+        let mono = try XCTUnwrap(evs.first { $0.kind == .monologue })
+        XCTAssertEqual(mono.level, .soft)
+        let into = mono.onset - 17.0
+        XCTAssertGreaterThanOrEqual(into, 3 - 0.05, "never under monologue_relative_min_s")
+        XCTAssertLessThan(into, 5, "2.5 x the user's median run, far under the absolute threshold")
+    }
+
+    func testHowWhyQuestionRaisesBothThresholds() throws {
+        scaledMonologue()
+        let ctx = StubTextContext()
+        ctx.howWhy = true
+        let evs = run(11, me: [(1.0, 10.5)], others: [], context: ctx)
+        XCTAssertEqual(evs.map(\.level), [.soft])
+        XCTAssertEqual(evs.first?.onset ?? 0, 1.0 + 4 * config.local.monologueHowWhyRaise, accuracy: 0.05)
+    }
+
+    func testUpdateTurnInARoundIsExempt() {
+        scaledMonologue()
+        let ctx = StubTextContext()
+        ctx.updateTurn = true
+        XCTAssertEqual(kinds(run(9, me: [(1.0, 8.5)], others: [], participants: 4, context: ctx)), [])
+    }
+
+    func testRunLengthIsExposedForTheJudgeGate() {
+        let layer = LocalLayer(config: config)
+        let mic = Synthetic.track(3, [(0.5, 3.0)], f0: meF0), call = [Float](repeating: 0, count: mic.count)
+        let hop = config.frameSamples
+        for i in 0..<(mic.count / hop) {
+            _ = layer.step(t: Double(i + 1) * config.frameS, mic: mic[(i * hop)..<((i + 1) * hop)], call: call[(i * hop)..<((i + 1) * hop)])
         }
-        XCTAssertEqual(on.count, 1)
-        XCTAssertEqual(on.first ?? -1, 1.0, accuracy: 0.1)
-        XCTAssertEqual(off.count, 1)
-        XCTAssertEqual(off.first ?? -1, 3.0, accuracy: 0.15)
+        XCTAssertEqual(layer.meRunS(at: 3.0), 2.5, accuracy: 0.1)
     }
 
-    func testVadRejectsNoise() {
-        let x = S.noise(3, dbfs: -25)
-        let v = StreamVAD(config: config)
-        var onsets = 0
-        for i in 0..<(x.count / 480) {
-            let frame = x[(i * 480)..<((i + 1) * 480)]
-            let tEnd = Double(i + 1) * 0.02
-            if v.process(tEnd: tEnd, frame: frame).onset != nil { onsets += 1 }
-        }
-        XCTAssertEqual(onsets, 0)
-    }
+    // MARK: talk share
 
-    func testVadRejectsQuietSpeech() {
-        let x = S.speechish(2).map { $0 * 0.001 }
-        let v = StreamVAD(config: config)
-        var anyVoice = false
-        for i in 0..<(x.count / 480) {
-            let frame = x[(i * 480)..<((i + 1) * 480)]
-            let tEnd = Double(i + 1) * 0.02
-            if v.process(tEnd: tEnd, frame: frame).raw { anyVoice = true }
-        }
-        XCTAssertFalse(anyVoice)
-    }
-
-    func testInterruptFiresUnder500ms() {
-        let call = S.track(8, [(1.0, 5.0)], f0: 210)     // other person talks 1-5 s
-        let mic = S.track(8, [(3.0, 6.5)], f0: 120)      // I cut in at 3.0 s
-        let ev = S.runLocal(config, mic: mic, call: call).filter { $0.kind == .interrupt }
-        XCTAssertEqual(ev.count, 1)
-        XCTAssertEqual(ev.first?.onset ?? -1, 3.0, accuracy: 0.1)
-        XCTAssertLessThan((ev.first?.t ?? 99) - 3.0, 0.5)
-    }
-
-    func testBackchannelDoesNotFire() {
-        let call = S.track(8, [(1.0, 6.0)], f0: 210)
-        let mic = S.track(8, [(3.0, 3.2)], f0: 120)      // 200 ms "yeah"
-        XCTAssertEqual(S.runLocal(config, mic: mic, call: call).filter { $0.kind == .interrupt }, [])
-    }
-
-    func testTurnTakingIsNotAnInterrupt() {
-        let call = S.track(8, [(1.0, 3.0)], f0: 210)
-        let mic = S.track(8, [(3.15, 5.0)], f0: 120)     // 150 ms gap after the other person stops
-        XCTAssertEqual(S.runLocal(config, mic: mic, call: call), [])
-    }
-
-    func testTalkOverWhenIKeepTalking() throws {
-        let mic = S.track(10, [(1.0, 8.0)], f0: 120)     // I'm talking
-        let call = S.track(10, [(3.0, 5.5)], f0: 210)    // someone tries to come in, I don't yield
-        let ev = S.runLocal(config, mic: mic, call: call)
-        let kinds = ev.map(\.kind)
-        XCTAssertTrue(kinds.contains(.talkOver))
-        XCTAssertFalse(kinds.contains(.interrupt))
-        let to = try XCTUnwrap(ev.first { $0.kind == .talkOver })
-        XCTAssertEqual(to.onset, 3.0, accuracy: 0.1)
-        XCTAssertGreaterThanOrEqual(to.t - to.onset, 0.95)
-        XCTAssertLessThan(to.t - to.onset, 1.3)
-    }
-
-    func testMonologueFallback() {
-        let spans: [(Double, Double)] = (0..<20).map { (i: Int) -> (Double, Double) in
-            let s = 1 + Double(i) * 4.3
-            return (s, s + 4.0)
-        }   // ~86 s, 300 ms pauses
-        let ev = S.runLocal(config, mic: S.track(90, spans, f0: 120), call: S.track(90, [], f0: 210))
-        let mono = ev.filter { $0.kind == .monologue }
-        XCTAssertEqual(mono.count, 1)
-        XCTAssertEqual(mono.first?.t ?? -1, 76.0, accuracy: 0.5)
-    }
-
-    func testTalkShareFallback() {
-        var me: [(Double, Double)] = [], others: [(Double, Double)] = []
-        var t = 0.5
-        while t < 200 {
-            me.append((t, t + 14)); t += 14.5
-            others.append((t, t + 6)); t += 6.5
-        }
-        let ev = S.runLocal(config, mic: S.track(220, me, f0: 120), call: S.track(220, others, f0: 210))
-        XCTAssertEqual(ev.filter { $0.kind == .talkShare }.count, 1)
-        XCTAssertFalse(ev.contains { $0.kind == .monologue })
-    }
-
-    func testProsodyFlagsLoudnessJump() {
-        let p = Prosody(config: config)
-        for _ in 0..<4 {   // 8 s of baseline at -30 dB
-            for _ in 0..<100 { p.onFrame(active: true, db: -30) }
-            XCTAssertEqual(p.onUtteranceEnd(t: 0)?.flagged, false)
-        }
-        XCTAssertNotNil(p.baseline)
-        for _ in 0..<100 { p.onFrame(active: true, db: -22) }
-        let f = p.onUtteranceEnd(t: 10)
-        XCTAssertEqual(f?.flagged, true)
-        XCTAssertEqual(f?.loudnessJumpDb ?? 0, 8, accuracy: 0.01)
-        for _ in 0..<10 { p.onFrame(active: true, db: -10) }
-        XCTAssertNil(p.onUtteranceEnd(t: 11), "utterances under 0.8 s are ignored")
-    }
-
-    func testPeakRateCountsSyllables() {
-        // 4 Hz envelope peaks for 2 s at 20 ms frames -> ~4 peaks/s.
-        let db = (0..<100).map { -30 + 10 * sin(2 * Double.pi * 4 * Double($0) * 0.02) }
-        XCTAssertEqual(Prosody.peakRate(db, frameS: 0.02), 4, accuracy: 0.6)
+    func testTalkShareLimitDependsOnTheCallSize() throws {
+        config.local.talkShareMinSpeechS = 3
+        config.local.talkShareMaxOneOnOne = 1.0
+        config.local.talkShareMaxGroup = 0.6
+        config.local.monologueRelativeMinRuns = 1000
+        XCTAssertEqual(kinds(run(8, me: [(0.5, 7.5)], others: [], participants: 2)), [])
+        let evs = run(8, me: [(0.5, 7.5)], others: [], participants: 3)
+        XCTAssertEqual(kinds(evs), [.talkShare])
+        XCTAssertGreaterThan(evs.first?.share ?? 0, 0.6)
     }
 }

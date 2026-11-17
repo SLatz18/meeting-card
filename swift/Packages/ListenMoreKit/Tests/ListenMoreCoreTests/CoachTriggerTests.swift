@@ -28,7 +28,7 @@ final class CoachTriggerTests: XCTestCase {
     }
 
     func makeMonitor(anyApp: Bool, enabled: Bool = true) -> CoachMonitor {
-        let s = TriggerSettings(config: config, anyApp: anyApp, ownPid: Self.ownPid, ownBundleId: "com.slatz.meetingcard.swift")
+        let s = TriggerSettings(config: config, anyApp: anyApp, ownPid: Self.ownPid, ownBundleId: "com.example.hostapp")
         return CoachMonitor(provider: audio, trigger: CoachTrigger(settings: s, enabled: enabled))
     }
 
@@ -44,7 +44,7 @@ final class CoachTriggerTests: XCTestCase {
         return out
     }
 
-    func starts(_ a: [(Double, TriggerAction)]) -> [(Double, CoachSession)] {
+    func starts(_ a: [(Double, TriggerAction)]) -> [(Double, TriggerSession)] {
         a.compactMap { if case .start(let s) = $0.1 { return ($0.0, s) } else { return nil } }
     }
 
@@ -123,7 +123,7 @@ final class CoachTriggerTests: XCTestCase {
 
     func testNeverTriggersOnSelfOrListenMore() {
         monitor = makeMonitor(anyApp: true)
-        audio.set(Self.proc("com.slatz.meetingcard.swift", pid: 1),
+        audio.set(Self.proc("com.example.hostapp", pid: 1),
                   Self.proc("com.listenmore.mac", pid: 2),
                   Self.proc("com.listenmore.mac.helper", pid: 3),
                   Self.proc(nil, pid: Self.ownPid))
@@ -139,7 +139,7 @@ final class CoachTriggerTests: XCTestCase {
         audio.set(Self.proc("us.zoom.xos"))
         run(0, 3)
         // The call ends, but our own mic capture keeps the input device running.
-        audio.set(Self.proc("com.slatz.meetingcard.swift", pid: Self.ownPid))
+        audio.set(Self.proc("com.example.hostapp", pid: Self.ownPid))
         XCTAssertEqual(stops(run(3.5, 40)).first?.1, .audioEnded)
     }
 

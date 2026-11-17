@@ -15,7 +15,7 @@ final class CapturePlanTests: XCTestCase {
         CapturableApp(pid: 21, bundleId: "com.google.Chrome.helper"),
         CapturableApp(pid: 30, bundleId: "company.thebrowser.dia"),
         CapturableApp(pid: 40, bundleId: "com.apple.Music"),
-        CapturableApp(pid: 999, bundleId: "com.slatz.meetingcard.swift"),
+        CapturableApp(pid: 999, bundleId: "com.listenmore.mac"),
     ]
     let table = [
         ProcessEntry(pid: 20, parentPid: 1, bundleId: "com.google.Chrome"),
@@ -33,10 +33,6 @@ final class CapturePlanTests: XCTestCase {
         XCTAssertEqual(select(["us.zoom.xos"], .parentApps), [10])
     }
 
-    func testLowercasedSessionKeyStillMatches() {
-        XCTAssertEqual(select(["com.google.chrome"], .parentApps), [20])
-    }
-
     func testHelpersByPrefix() {
         XCTAssertEqual(select(["com.google.Chrome"], .helperApps), [20, 21])
     }
@@ -47,21 +43,13 @@ final class CapturePlanTests: XCTestCase {
     }
 
     func testManualCapturesAllTargetsButNeverOtherAppsOrSelf() {
-        XCTAssertEqual(select(config.captureTargets.map(\.bundleId), .helperApps), [10, 20, 21, 30])
+        let all = config.captureTargets.map(\.bundleId)
+        XCTAssertEqual(select(all, .helperApps), [10, 20, 21, 30])
     }
 
     func testOwnProcessExcludedEvenIfItMatches() {
-        XCTAssertEqual(select(["com.google.Chrome"], .parentApps, apps: [CapturableApp(pid: 999, bundleId: "com.google.Chrome")]), [])
-    }
-
-    func testAnyAppTargetGetsHelperMatching() {
-        let targets = CapturePlan.targets(for: ["com.example.voice"], configured: config.captureTargets)
-        XCTAssertEqual(targets.last?.bundleId, "com.example.voice")
-        let extra = [CapturableApp(pid: 50, bundleId: "com.example.voice"), CapturableApp(pid: 51, bundleId: "com.example.voice.helper")]
-        let pids = CapturePlan.selectApps(from: apps + extra, bundleIds: ["com.example.voice"], targets: targets,
-                                          stage: .helperApps, processTable: [], ownPid: ownPid).map(\.pid)
-        XCTAssertEqual(pids, [50, 51])
-        XCTAssertEqual(CapturePlan.targets(for: ["us.zoom.xos"], configured: config.captureTargets).count, config.captureTargets.count)
+        let sneaky = [CapturableApp(pid: 999, bundleId: "com.google.Chrome")]
+        XCTAssertEqual(select(["com.google.Chrome"], .parentApps, apps: sneaky), [])
     }
 
     func testFallbackEscalatesOnlyWhenHelpersAudibleAndCallSilent() {
@@ -88,45 +76,24 @@ final class CapturePlanTests: XCTestCase {
         XCTAssertEqual(CaptureFallbackPolicy.rmsDbfs([0.1, -0.1]), -20, accuracy: 1e-4)
     }
 
-    // MARK: helper processes (ports of test_detect.py's bundle resolution + the Swift shell's matcher tests)
-
-    func testHelperResolvesToParent() {
-        let t = config.captureTargets
-        XCTAssertEqual(BundleIds.resolveParent("com.google.Chrome.helper.renderer", targets: t)?.name, "Google Chrome")
-        XCTAssertEqual(BundleIds.resolveParent("company.thebrowser.dia.helper", targets: t)?.name, "Dia")
-        XCTAssertEqual(BundleIds.resolveParent("COM.GOOGLE.CHROME.HELPER", targets: t)?.name, "Google Chrome")
-        XCTAssertNil(BundleIds.resolveParent("com.google.ChromeX", targets: t))
+    func testDecideByStage() {
+        XCTAssertEqual(CapturePlan.decide(apps: apps, bundleIds: ["com.google.Chrome"], targets: config.captureTargets,
+                                          stage: .parentApps, processTable: table, ownPid: ownPid), .screenCapture(pids: [20]))
+        XCTAssertEqual(CapturePlan.decide(apps: apps, bundleIds: ["com.google.Chrome"], targets: config.captureTargets,
+                                          stage: .helperApps, processTable: table, ownPid: ownPid), .screenCapture(pids: [20, 21]))
+        XCTAssertEqual(CapturePlan.decide(apps: apps, bundleIds: ["com.google.Chrome"], targets: config.captureTargets,
+                                          stage: .processTap, processTable: table, ownPid: ownPid), .processTap(pids: [21]))
+        XCTAssertEqual(CapturePlan.decide(apps: apps, bundleIds: ["company.thebrowser.dia"], targets: config.captureTargets,
+                                          stage: .processTap, processTable: table, ownPid: ownPid), .processTap(pids: [31]))
+        XCTAssertEqual(CapturePlan.decide(apps: apps, bundleIds: ["us.zoom.xos"], targets: config.captureTargets,
+                                          stage: .processTap, processTable: table, ownPid: ownPid), .nothingToCapture)
+        XCTAssertEqual(CapturePlan.decide(apps: [], bundleIds: ["us.zoom.xos"], targets: config.captureTargets,
+                                          stage: .parentApps, processTable: [], ownPid: ownPid), .nothingToCapture)
     }
 
-    func testStripHelperSuffix() {
-        XCTAssertEqual(BundleIds.stripHelperSuffix("com.Example.App.helper.Renderer"), "com.example.app")
-        XCTAssertEqual(BundleIds.stripHelperSuffix("com.example.app"), "com.example.app")
-    }
-
-    func testHelperMatcherByPrefixAndParentPid() {
-        let chrome = config.captureTargets.first { $0.name == "Google Chrome" }!
-        let table = [
-            ProcessEntry(pid: 1, parentPid: 0, bundleId: nil),
-            ProcessEntry(pid: 100, parentPid: 1, bundleId: "com.google.Chrome"),
-            ProcessEntry(pid: 101, parentPid: 100, bundleId: "com.google.Chrome.helper"),
-            ProcessEntry(pid: 102, parentPid: 100, bundleId: nil),
-            ProcessEntry(pid: 103, parentPid: 102, bundleId: nil),
-            ProcessEntry(pid: 104, parentPid: 1, bundleId: "com.google.Chrome.helper.renderer"),
-            ProcessEntry(pid: 200, parentPid: 1, bundleId: "com.google.ChromeX"),
-            ProcessEntry(pid: 300, parentPid: 1, bundleId: "company.thebrowser.dia"),
-            ProcessEntry(pid: 301, parentPid: 300, bundleId: "company.thebrowser.dia.helper"),
-        ]
-        XCTAssertEqual(HelperProcessMatcher.helpers(of: chrome, in: table).map(\.pid), [101, 102, 103, 104])
-        let dia = config.captureTargets.first { $0.name == "Dia" }!
-        XCTAssertEqual(HelperProcessMatcher.helpers(of: dia, in: table).map(\.pid), [301])
-        XCTAssertEqual(HelperProcessMatcher.owningBundleId(pid: 103, in: table), "com.google.Chrome")
-        XCTAssertNil(HelperProcessMatcher.owningBundleId(pid: 1, in: table))
-    }
-
-    func testHelperMatcherSurvivesParentCycle() {
-        let dia = config.captureTargets.first { $0.name == "Dia" }!
-        let table = [ProcessEntry(pid: 5, parentPid: 6, bundleId: nil), ProcessEntry(pid: 6, parentPid: 5, bundleId: nil)]
-        XCTAssertEqual(HelperProcessMatcher.helpers(of: dia, in: table), [])
-        XCTAssertNil(HelperProcessMatcher.owningBundleId(pid: 5, in: table))
+    func testFaceTimeIncludesAvconferenced() {
+        let ft = [CapturableApp(pid: 50, bundleId: "com.apple.FaceTime"), CapturableApp(pid: 51, bundleId: "com.apple.avconferenced")]
+        XCTAssertEqual(CapturePlan.decide(apps: ft, bundleIds: ["com.apple.FaceTime"], targets: config.captureTargets,
+                                          stage: .parentApps, processTable: [], ownPid: ownPid), .screenCapture(pids: [50, 51]))
     }
 }

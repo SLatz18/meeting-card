@@ -6,11 +6,13 @@ import Security
 /// data protection keychain when the build is entitled to it (a signed app with a team ID), where
 /// `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is enforced: readable only while the Mac is
 /// unlocked and never migrated to another device. Ad-hoc and self-signed builds get
-/// `errSecMissingEntitlement` there, so the key goes to the login keychain instead, which ignores
-/// accessibility classes. Values never appear in errors, descriptions or logs; errors carry the
-/// OSStatus or an attribute name, never the key.
-public struct KeychainStore {
-    public static let defaultService = "com.slatz.meetingcard.swift.openai"
+/// `errSecMissingEntitlement` (-34018) there, so the key goes to the login keychain instead, which
+/// ignores accessibility classes (see docs/SIGNING_PLAN.md). Values never appear in errors,
+/// descriptions or logs; errors carry the OSStatus or an attribute name, never the key.
+///
+/// The service name is the host's: the Kit default is generic, and each app passes its own.
+public struct KeychainStore: APIKeyProvider {
+    public static let defaultService = "com.listenmore.mac.openai"
     public static let defaultAccount = "OPENAI_API_KEY"
     public static let accessibility = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
@@ -26,21 +28,30 @@ public struct KeychainStore {
 
     public let service: String
     public let account: String
+    /// Team-prefixed keychain access group for the data protection keychain (e.g. `ABCDE12345.com.example.app`);
+    /// nil uses the app's default group.
+    public let accessGroup: String?
 
-    public init(service: String = KeychainStore.defaultService, account: String = KeychainStore.defaultAccount) {
+    public init(service: String = KeychainStore.defaultService, account: String = KeychainStore.defaultAccount,
+                accessGroup: String? = nil) {
         self.service = service
         self.account = account
+        self.accessGroup = accessGroup
     }
 
     func baseQuery(_ location: Location) -> [String: Any] {
         var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                 kSecAttrService as String: service,
                                 kSecAttrAccount as String: account]
-        if location == .dataProtection { q[kSecUseDataProtectionKeychain as String] = true }
+        if location == .dataProtection {
+            q[kSecUseDataProtectionKeychain as String] = true
+            if let accessGroup { q[kSecAttrAccessGroup as String] = accessGroup }
+        }
         return q
     }
 
-    /// The add query (exposed for tests): value + ThisDeviceOnly accessibility, never synchronizable.
+    /// The add query: value + ThisDeviceOnly accessibility, never synchronizable. Login-keychain items
+    /// do not echo `kSecAttrAccessible` back, so tests assert this dictionary rather than a read-back.
     func addQuery(_ data: Data, _ location: Location = .dataProtection) -> [String: Any] {
         var add = baseQuery(location)
         add[kSecValueData as String] = data

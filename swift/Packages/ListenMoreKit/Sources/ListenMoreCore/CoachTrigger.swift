@@ -1,8 +1,10 @@
 import Foundation
 
 // Auto-on trigger: the coach starts when one app (counting its helper processes) has audio input
-// AND output running continuously for ~3 s, and stops when either stays off for ~30 s. Detection
-// reads only Core Audio "is running" state; no audio is captured to detect a call.
+// AND output running continuously for `startAfterS`, and stops when either stays off for
+// `stopAfterS`. Detection reads only Core Audio "is running" state; no audio is captured to detect a
+// call. Any other per-app "a call is live" signal (e.g. window titles) can drive the same machine
+// through `tick(liveApps:inputRunning:now:)`.
 
 /// Core Audio process object state (macOS 14.4+: kAudioProcessPropertyIsRunningInput/Output).
 public struct AudioProcessState: Equatable, Sendable {
@@ -43,7 +45,7 @@ public struct TriggerSettings: Equatable, Sendable {
     public var allowlist: [String]
     /// "Coach any app" option: any app with input + output counts, not just the allowlist.
     public var anyApp: Bool
-    /// Never trigger on these (MeetingCard itself, the listen-more prototype), in any mode.
+    /// Never trigger on these (the host app itself, other coach apps), in any mode.
     public var excludedBundleIds: [String]
     public var ownPid: Int32
     public var startAfterS: Double
@@ -59,10 +61,12 @@ public struct TriggerSettings: Equatable, Sendable {
         self.stopAfterS = stopAfterS
     }
 
-    /// `allowlist` is the user's edited list from Settings; nil means the config's call apps.
-    public init(config: ListenMoreConfig, anyApp: Bool, ownPid: Int32, ownBundleId: String?, allowlist: [String]? = nil) {
+    /// `allowlist` is the user's edited list; nil means the config's call apps. Self-exclusion is the
+    /// host's own PID and bundle ID, `excludedBundleIds` from the host, and the config's list.
+    public init(config: ListenMoreConfig, anyApp: Bool, ownPid: Int32, ownBundleId: String?,
+                excludedBundleIds: [String] = [], allowlist: [String]? = nil) {
         self.init(allowlist: allowlist ?? config.captureTargets.map(\.bundleId), anyApp: anyApp,
-                  excludedBundleIds: config.trigger.excludeBundleIds + [ownBundleId].compactMap { $0 },
+                  excludedBundleIds: config.trigger.excludeBundleIds + excludedBundleIds + [ownBundleId].compactMap { $0 },
                   ownPid: ownPid, startAfterS: config.trigger.startAfterS, stopAfterS: config.trigger.stopAfterS)
     }
 
@@ -119,7 +123,8 @@ public enum CoachStopReason: String, Equatable, Sendable {
     case disabled
 }
 
-public struct CoachSession: Equatable, Sendable {
+/// One coaching session as the trigger sees it (no audio, no text).
+public struct TriggerSession: Equatable, Sendable {
     public var reason: CoachStartReason
     /// The app being coached (lowercased bundle ID); nil for a manual start until an app qualifies.
     public var appKey: String?
@@ -129,8 +134,9 @@ public struct CoachSession: Equatable, Sendable {
     public var paused = false
 }
 
-/// The coach chip's state. Hidden unless the coach is pre-warmed or running; a session ends (and
-/// the chip hides) `stopAfterS` (~30 s) after the call app's input or output goes off.
+/// What a host shows for the coach (MeetingCard: the chip on the card; the standalone app: the menu
+/// bar). Hidden unless the coach is pre-warmed or running; a session ends (and the indicator hides)
+/// `stopAfterS` after the call app's input or output goes off.
 public enum CoachIndicator: String, Equatable, Sendable {
     case hidden
     /// Enabled and pre-warmed, not streaming yet.
@@ -142,7 +148,7 @@ public enum CoachIndicator: String, Equatable, Sendable {
 }
 
 public enum TriggerAction: Equatable, Sendable {
-    case start(CoachSession)
+    case start(TriggerSession)
     case stop(CoachStopReason)
     case pause(Bool)
 }
@@ -152,14 +158,14 @@ public struct CoachTrigger: Sendable {
     public var settings: TriggerSettings
     /// The opt-in setting. Off (the default) means no session ever starts.
     public private(set) var enabled: Bool
-    public private(set) var session: CoachSession?
+    public private(set) var session: TriggerSession?
     private var qualifyingSince: [String: Double] = [:]
     /// Apps that must stop qualifying before they may auto-start again (after a manual or
     /// event-end stop), so a still-running call does not restart the coach 3 s later.
     public private(set) var suppressed: Set<String> = []
     private var offSince: Double?
     private var hintEndsAt: Double?
-    private var lastGroups: [String: TriggerSettings.AppAudio] = [:]
+    private var lastLive: Set<String> = []
 
     public init(settings: TriggerSettings, enabled: Bool = false) {
         self.settings = settings
@@ -187,16 +193,22 @@ public struct CoachTrigger: Sendable {
         return end(.disabled)
     }
 
-    /// Feed one poll. Returns at most one start or stop.
+    /// Feed one Core Audio poll. Returns at most one start or stop.
     public mutating func tick(_ snap: AudioStateSnapshot, now: Double) -> [TriggerAction] {
+        let live = Set(settings.group(snap).filter { $0.value.both }.keys)
+        return tick(liveApps: live, inputRunning: snap.defaultInputRunning, now: now)
+    }
+
+    /// Feed one poll of any call signal: the app keys (lowercased bundle IDs) with a live call, and
+    /// whether the default input device is running. Returns at most one start or stop.
+    public mutating func tick(liveApps live: Set<String>, inputRunning: Bool, now: Double) -> [TriggerAction] {
         guard enabled else { return session == nil ? [] : end(.disabled) }
-        let groups = settings.group(snap)
-        lastGroups = groups
-        for (key, a) in groups where a.both && snap.defaultInputRunning {
+        lastLive = live
+        for key in live where inputRunning {
             if qualifyingSince[key] == nil { qualifyingSince[key] = now }
         }
-        qualifyingSince = qualifyingSince.filter { groups[$0.key]?.both == true && snap.defaultInputRunning }
-        suppressed = suppressed.filter { groups[$0]?.both == true }
+        qualifyingSince = qualifyingSince.filter { live.contains($0.key) && inputRunning }
+        suppressed = suppressed.filter { live.contains($0) }
         if let h = hintEndsAt, now >= h { hintEndsAt = nil }
 
         if var s = session {
@@ -208,7 +220,7 @@ public struct CoachTrigger: Sendable {
                 session = s
             }
             guard let key = s.appKey else { return [] }
-            if groups[key]?.both == true {
+            if live.contains(key) {
                 offSince = nil
             } else {
                 let since = offSince ?? now
@@ -218,7 +230,7 @@ public struct CoachTrigger: Sendable {
             return []
         }
         guard let key = qualified(now: now) else { return [] }
-        let s = CoachSession(reason: .audio, appKey: key, startedAt: now, endsAt: hintEndsAt)
+        let s = TriggerSession(reason: .audio, appKey: key, startedAt: now, endsAt: hintEndsAt)
         session = s
         offSince = nil
         return [.start(s)]
@@ -240,7 +252,7 @@ public struct CoachTrigger: Sendable {
             return [.pause(false)]
         }
         let key = qualified(now: now)
-        let s = CoachSession(reason: .manual, appKey: key, startedAt: now, endsAt: nil)
+        let s = TriggerSession(reason: .manual, appKey: key, startedAt: now, endsAt: nil)
         session = s
         offSince = nil
         return [.start(s)]
@@ -258,15 +270,15 @@ public struct CoachTrigger: Sendable {
         return [.pause(on)]
     }
 
-    /// Pause while pre-warmed (chip "On", no session yet): skip this call. Clears the Join hint
-    /// and suppresses apps already in the start debounce until their audio stops.
+    /// Pause while pre-warmed (indicator `.on`, no session yet): skip this call. Clears the Join
+    /// hint and suppresses apps already in the start debounce until their call signal stops.
     public mutating func dismissPrewarm() {
         guard session == nil else { return }
         hintEndsAt = nil
         for key in qualifyingSince.keys { suppressed.insert(key) }
     }
 
-    /// The user clicked Join on a card: remember the event's end. An audio session that is running
+    /// The user joined a calendar event (MeetingCard: Join on a card): remember the event's end. An audio session that is running
     /// (or starts before the end) stops at that time. Never starts anything by itself.
     public mutating func joinHint(endsAt: Double, now: Double) {
         guard endsAt > now else { return }
@@ -280,7 +292,7 @@ public struct CoachTrigger: Sendable {
     private mutating func end(_ reason: CoachStopReason, suppress: Bool = false) -> [TriggerAction] {
         if suppress {
             if let key = session?.appKey { suppressed.insert(key) }
-            for (key, a) in lastGroups where a.both { suppressed.insert(key) }
+            suppressed.formUnion(lastLive)
         }
         session = nil
         offSince = nil

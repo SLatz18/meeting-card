@@ -1,33 +1,37 @@
 import AVFoundation
+import ListenMoreCore
 
-/// The user's microphone via AVAudioEngine with Apple voice processing enabled, so call audio
-/// coming out of the speakers is echo-cancelled and not attributed to the user.
-public final class MicCapture {
+/// The user's microphone via AVAudioEngine with Apple voice processing enabled (echo cancellation), so
+/// call audio coming out of the speakers is not attributed to the user.
+public final class MicCapture: MicSource {
     private let engine = AVAudioEngine()
-    private let resampler: MonoResampler
     public private(set) var isRunning = false
 
-    public init(sampleRate: Double) {
-        resampler = MonoResampler(sampleRate: sampleRate)
-    }
+    public init() {}
 
     public var voiceProcessingEnabled: Bool {
         engine.inputNode.isVoiceProcessingEnabled
     }
 
-    /// `handler` runs on an audio thread with mono Float32 at the configured rate.
-    public func start(handler: @escaping ([Float]) -> Void) throws {
+    /// `handler` runs on an audio thread with mono Float32 at `sampleRate`.
+    public func start(sampleRate: Int, handler: @escaping @Sendable ([Float]) -> Void) throws {
         guard !isRunning else { return }
         let input = engine.inputNode
         try input.setVoiceProcessingEnabled(true)
         let format = input.outputFormat(forBus: 0)
-        let resampler = resampler
+        let resampler = MonoResampler(sampleRate: Double(sampleRate))
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { buffer, _ in
             let samples = resampler.convert(buffer)
             if !samples.isEmpty { handler(samples) }
         }
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            try? input.setVoiceProcessingEnabled(false)
+            throw error
+        }
         isRunning = true
         Log.capture.info("mic started, voice processing \(input.isVoiceProcessingEnabled, privacy: .public)")
     }

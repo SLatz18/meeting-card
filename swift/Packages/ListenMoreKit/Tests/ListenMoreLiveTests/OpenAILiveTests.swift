@@ -1,11 +1,11 @@
 import Foundation
 import XCTest
 import ListenMoreCore
-@testable import ListenMoreMac
+import ListenMoreMac
 
 /// Paid, opt-in checks against the real OpenAI API. Skipped unless LISTEN_MORE_LIVE=1 and a key is
-/// in the environment (only the workflow_dispatch "live-openai" workflow sets these). Inputs are
-/// synthetic and content-free: counting words, as a scripted prompt and as macOS `say` speech. Nothing is printed except pass/fail.
+/// in the environment. Inputs are synthetic and content-free: counting words, as a scripted prompt
+/// and as macOS `say` speech. Nothing is printed except pass/fail.
 final class OpenAILiveTests: XCTestCase {
     var key: APIKey!
     var config: ListenMoreConfig!
@@ -28,8 +28,8 @@ final class OpenAILiveTests: XCTestCase {
         XCTAssertEqual(empty, .empty)
     }
 
-    func testJudgeReturnsSchemaConformingCue() {
-        let judge = ResponsesJudge(config: config, key: key)
+    func testJudgeReturnsSchemaConformingCue() async throws {
+        let judge = LiveJudge(config: config, key: key, http: URLSessionHTTPTransport())
         let prompt = """
         TRANSCRIPT (oldest first):
         [-12.0s] OTHERS: one two three?
@@ -39,38 +39,35 @@ final class OpenAILiveTests: XCTestCase {
         PENDING_QUESTION: yes ME_ANSWERED_SINCE: no
         TRIGGER: me_turn
         """
-        let done = expectation(description: "judge")
-        judge.judge(prompt: prompt) { result in
-            switch result {
-            case .success(let (r, usage)):
-                XCTAssertTrue(OpenAIWire.judgeLabels.contains(r.cue))
-                XCTAssertGreaterThan(usage.inputTokens, 0)
-            case .failure(let e):
-                XCTFail("judge failed: \(e)")
-            }
-            done.fulfill()
-        }
-        wait(for: [done], timeout: 30)
+        let (r, usage) = try await judge.judge(prompt: prompt)
+        XCTAssertTrue(GptJudgeSpec.labels.contains(r.cue))
+        XCTAssertGreaterThan(usage.inputTokens, 0)
     }
 
-    func testRealtimeTranscribesSyntheticSpeech() throws {
+    func testRealtimeTranscribesSyntheticSpeech() async throws {
         let samples = try Self.say("One two three four five six seven eight nine ten.", sampleRate: config.audio.sampleRate)
-        let tx = RealtimeTranscriber(config: config, key: key)
-        let got = expectation(description: "transcript")
-        var text = ""
-        tx.start(onText: { t, ref in
-            text = t
-            XCTAssertEqual(ref ?? -1, 9.5, accuracy: 0.001)
-            got.fulfill()
-        }, onError: { e in XCTFail("realtime error: \(e)") })
-        Thread.sleep(forTimeInterval: 1)
-        for i in stride(from: 0, to: samples.count, by: 2400) {
-            tx.sendAudio(PCM.pcm16(samples[i..<min(i + 2400, samples.count)]))
+        let box = TextBox()
+        let tx = LiveTranscriber(config: config, key: key, speaker: .others, connector: URLSessionWebSocketConnector()) { ev in
+            if case .text(_, let t, let ref) = ev { box.set(t, ref) }
         }
-        tx.commit(refT: 9.5)
-        wait(for: [got], timeout: 30)
-        tx.close()
-        XCTAssertTrue(text.lowercased().contains("five"))
+        try await tx.start()
+        for i in stride(from: 0, to: samples.count, by: 2400) {
+            try await tx.sendAudio(AudioMath.pcm16Data(samples[i..<min(i + 2400, samples.count)]))
+        }
+        try await tx.commit(refT: 9.5)
+        let deadline = Date().addingTimeInterval(30)
+        while box.get() == nil && Date() < deadline { try await Task.sleep(nanoseconds: 100_000_000) }
+        await tx.close()
+        let got = try XCTUnwrap(box.get())
+        XCTAssertEqual(got.1, 9.5, accuracy: 0.001)
+        XCTAssertTrue(got.0.lowercased().contains("five"))
+    }
+
+    final class TextBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: (String, TimeInterval)?
+        func set(_ t: String, _ ref: TimeInterval) { lock.withLock { value = (t, ref) } }
+        func get() -> (String, TimeInterval)? { lock.withLock { value } }
     }
 
     /// Synthetic speech from macOS `say`, as mono Float32 at `sampleRate` (temp file removed).
@@ -83,7 +80,6 @@ final class OpenAILiveTests: XCTestCase {
         try p.run()
         p.waitUntilExit()
         let data = try Data(contentsOf: url)
-        // Float32 WAV from `say`: find the "data" chunk.
         guard let r = data.range(of: Data("data".utf8)) else { return [] }
         let start = r.upperBound + 4
         return data[start...].withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }

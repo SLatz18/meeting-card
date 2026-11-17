@@ -1,7 +1,8 @@
 import XCTest
 
-/// The call coach is wired in as an opt-in: a local package (vendored, no remote dependency),
-/// permission strings present, the opt-in a UserDefaults boolean (false until set).
+/// The call coach is wired in as an opt-in: a local package (the coach's single source, no remote
+/// dependency), permission strings present, the opt-in a UserDefaults boolean (false until set), the
+/// key in MeetingCard's own Keychain item, and the coach running in-process (no helper, no interpreter).
 final class CoachWiringTests: XCTestCase {
     static let swiftDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 
@@ -34,5 +35,28 @@ final class CoachWiringTests: XCTestCase {
                       "fixture runs never create the coach")
         XCTAssertTrue(controller.contains("log(ListenMoreConfig.loadFailureMessage(error))"),
                       "a config failure logs its type only")
+    }
+
+    func testKeyLivesInMeetingCardsKeychainItem() throws {
+        let src = try read("App/CoachController.swift")
+        XCTAssertTrue(src.contains("static let keychainService = \"com.slatz.meetingcard.swift.openai\""))
+        XCTAssertTrue(src.contains("keychain: KeychainStore = KeychainStore(service: CoachController.keychainService)"))
+        XCTAssertTrue(src.contains("keys: keychain"), "the service reads the key from that item only")
+    }
+
+    func testCoachRunsInProcess() throws {
+        let kit = Self.swiftDir.appendingPathComponent("Packages/ListenMoreKit/Sources")
+        let e = try XCTUnwrap(FileManager.default.enumerator(at: kit, includingPropertiesForKeys: nil))
+        let spawn = #"\bProcess\(\)|posix_spawn|NSTask|executableURL|launchPath|\bexecv"#
+        var count = 0
+        for case let url as URL in e where ["swift", "c", "h"].contains(url.pathExtension) {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            XCTAssertNil(text.range(of: spawn, options: .regularExpression), "\(url.lastPathComponent) starts a process")
+            count += 1
+        }
+        XCTAssertGreaterThan(count, 30)
+        let spec = try read("project.yml")
+        XCTAssertFalse(spec.lowercased().contains("python"), "nothing Python ships in the app")
+        XCTAssertFalse(spec.contains("dstSubfolderSpec"), "no helper executables copied into the bundle")
     }
 }

@@ -1,17 +1,18 @@
 import AVFoundation
 import CoreMedia
 
-/// Converts any PCM buffer to mono Float32 at the engine's sample rate. Output stays in memory.
-final class MonoResampler {
-    let outputFormat: AVAudioFormat
+/// Converts any PCM buffer to mono Float32 at the engine's sample rate (downmixing channels). Output
+/// stays in memory. One instance per capture thread; it caches the converter for the last input format.
+public final class MonoResampler: @unchecked Sendable {
+    public let outputFormat: AVAudioFormat
     private var converter: AVAudioConverter?
     private var inputFormat: AVAudioFormat?
 
-    init(sampleRate: Double) {
+    public init(sampleRate: Double) {
         outputFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
     }
 
-    func convert(_ buffer: AVAudioPCMBuffer) -> [Float] {
+    public func convert(_ buffer: AVAudioPCMBuffer) -> [Float] {
         if buffer.format == outputFormat, let ch = buffer.floatChannelData {
             return Array(UnsafeBufferPointer(start: ch[0], count: Int(buffer.frameLength)))
         }
@@ -40,7 +41,7 @@ final class MonoResampler {
     }
 
     /// ScreenCaptureKit delivers audio as CMSampleBuffers.
-    static func pcmBuffer(from sample: CMSampleBuffer) -> AVAudioPCMBuffer? {
+    public static func pcmBuffer(from sample: CMSampleBuffer) -> AVAudioPCMBuffer? {
         guard let desc = CMSampleBufferGetFormatDescription(sample),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc) else { return nil }
         var streamDesc = asbd.pointee

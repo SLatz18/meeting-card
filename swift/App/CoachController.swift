@@ -15,6 +15,9 @@ final class CoachController: NSObject {
         static let onboarded = "coach.onboarded"
     }
 
+    /// MeetingCard's Keychain item for the OpenAI key (the Kit's default service is not ours).
+    static let keychainService = "com.slatz.meetingcard.swift.openai"
+
     let defaults: UserDefaults
     let config: ListenMoreConfig
     let keychain: KeychainStore
@@ -27,7 +30,7 @@ final class CoachController: NSObject {
     /// Last key problem shown in Settings.
     var keyProblem: KeyCheck?
 
-    init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore()) throws {
+    init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService)) throws {
         self.defaults = defaults
         self.keychain = keychain
         config = try ListenMoreConfig.builtIn()
@@ -95,9 +98,10 @@ final class CoachController: NSObject {
     // MARK: service
 
     private func makeService() {
-        let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp, allowlist: allowlist)
+        let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
+                             allowlist: allowlist, keys: keychain)
         s.fallbackScreen = { [weak self] in self?.cardScreen() }
-        s.cardWindowNumber = { [weak self] in self?.visibleCards().last?.panel.windowNumber }
+        s.hostWindowNumber = { [weak self] in self?.visibleCards().last?.panel.windowNumber }
         s.onChange = { [weak self] in self?.refresh() }
         service = s
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }

@@ -1,8 +1,9 @@
 import Foundation
 
-/// Local, deterministic layer (port of `local_layer.py`): interrupt, talk-over, monologue, talk
-/// share, prosody flags. Mic stream = the user ("me"), call stream = everyone else; attribution is by
-/// stream, no diarization.
+/// Port of `listen_more/local_layer.py`: cut-in, talk-over, monologue, talk share and prosody flags.
+/// mic = me, call = everyone else (attribution by stream, no diarization). An optional transcript
+/// context answers what the audio can't: a how/why question before a long run, a round-robin handoff,
+/// or a number read-back during fast switches. Without it those checks are skipped.
 public struct LocalEvent: Equatable, Sendable {
     public enum Kind: String, Equatable, Sendable {
         case interrupt
@@ -18,13 +19,36 @@ public struct LocalEvent: Equatable, Sendable {
 
     public var kind: Kind
     /// Audio time the event was raised (end of the frame that triggered it).
-    public var t: Double
+    public var t: TimeInterval
     /// Audio time of the underlying behaviour onset.
-    public var onset: Double
-    public var prosody: ProsodyFlags?
+    public var onset: TimeInterval
     public var share: Double?
+    public var prosody: ProsodyReading?
+    /// Monologue: soft or strong.
+    public var level: CueLevel?
+    /// Cut-in: the other side was still active when it was raised, when they last spoke, and whether
+    /// it is a trailing candidate (a short overlap that needs their last words to be unfinished).
+    public var othersActive: Bool?
+    public var othersLastSpeech: TimeInterval?
+    public var trailing = false
+    /// Talk-over: speaker switches in the episode.
+    public var switches: Int?
 
-    /// The local events that are cues by themselves.
+    public init(kind: Kind, t: TimeInterval, onset: TimeInterval, share: Double? = nil, prosody: ProsodyReading? = nil,
+                level: CueLevel? = nil, othersActive: Bool? = nil, othersLastSpeech: TimeInterval? = nil,
+                trailing: Bool = false, switches: Int? = nil) {
+        self.kind = kind
+        self.t = t
+        self.onset = onset
+        self.share = share
+        self.prosody = prosody
+        self.level = level
+        self.othersActive = othersActive
+        self.othersLastSpeech = othersLastSpeech
+        self.trailing = trailing
+        self.switches = switches
+    }
+
     public var cueType: CueType? {
         switch kind {
         case .interrupt: return .interrupt
@@ -36,139 +60,291 @@ public struct LocalEvent: Equatable, Sendable {
     }
 }
 
+/// Transcript questions the local layer asks (`TextRules` answers them).
+public protocol LocalTextContext: AnyObject {
+    /// The other side asked how/why just before `t`.
+    func howWhyBefore(_ t: TimeInterval) -> Bool
+    /// The user's turn starting at `t` is an update slot in a round of updates.
+    func updateTurnBefore(_ t: TimeInterval) -> Bool
+    /// The fast switches since `t0` are a number read-back, not a fight for the floor.
+    func readback(from t0: TimeInterval, now: TimeInterval) -> Bool
+}
+
 public final class LocalLayer {
-    let frameS: Double
+    /// "Speaking" = raw speech within this window (VAD hangover excluded from overlap).
+    static let speakingTailS = 0.06
+    /// The other side must keep talking through a cut-in's opening overlap, bar VAD flicker this short.
+    static let overlapGapS = 0.1
+
+    struct CutIn {
+        var onset: TimeInterval
+        var overlap = 0.0
+        var gap = 0.0
+        var othersAfter = 0.0
+        var trailing = false
+        var othersEnd = 0.0
+    }
+
+    enum Who { case me, others }
+
     public let me: StreamVAD
     public let others: StreamVAD
-    let prosody: Prosody
-    let confirm: Double
-    let othersMin: Double
-    let talkOver: Double
-    let monoS: Double
-    let monoFloor: Double
-    let monoGap: Double
-    let shareWindow: Int
-    let shareMax: Double
-    let shareMin: Double
-
-    private var shareWin: [(me: Bool, others: Bool)] = []
+    public let prosody: Prosody
+    public weak var context: LocalTextContext?
+    private let frameS: Double
+    private let prosodyEnabled: Bool
+    private let cutOverlap, cutContinue, cutBackchannel, cutPause, cutMidPause, cutAfterTalkOver: Double
+    private let cutTrailingOverlap, cutTrailingWindow, cutTrailingYield: Double
+    private let toSwitches: Int
+    private let toWindow, toOverlap, toHold: Double
+    private let monoSoft, monoStrong, relFactor, relMinS, relMinRunS, howWhyRaise, monoFloor, monoGap: Double
+    private let relMinRuns: Int
+    private let shareWindow: Int
+    private var shareFrames: [(Bool, Bool)] = []
     private var shareHead = 0
-    private var shareCounts = (me: 0, others: 0)
+    private var shareCount = (me: 0, others: 0)
+    private let shareMax, shareMin: Double
     private var shareArmed = true
-    private var pendingInterrupt: Double?
-    private var overlapSince: Double?
-    private var overlapFired = false
-    private var turnStart: Double?
-    private var turnFired = false
+    private var cut: CutIn?
+    private var lastOnsetWho: Who?
+    private var switchLog: [(t: TimeInterval, who: Who)] = []
+    private var overlapFrames: [TimeInterval] = []
+    private var toDoneAt = -1e9
+    private var toFiredAt = -1e9
+    private var turnStart: TimeInterval?
+    private var turnLevel: CueLevel?
+    private var turnRaise: Double?
+    private var turnExempt: Bool?
+    private var runs: [Double] = []
     private var meLastActive = -1e9
+    private var othersSoloSince: TimeInterval?
 
-    public init(config: ListenMoreConfig) {
-        let loc = config.local
-        frameS = config.frameS
+    /// `participants`: people on the call (2 = a 1:1), for the talk-share limit.
+    public init(config: ListenMoreConfig, participants: Int = 2, context: LocalTextContext? = nil) {
+        let l = config.local
+        frameS = Double(config.audio.frameMs) / 1000
         me = StreamVAD(config: config)
         others = StreamVAD(config: config)
         prosody = Prosody(config: config)
-        confirm = loc.interruptConfirmMs / 1000
-        othersMin = loc.interruptOthersMinActiveMs / 1000
-        talkOver = loc.talkOverMs / 1000
-        monoS = loc.monologueS
-        monoFloor = loc.monologueOthersFloorMs / 1000
-        monoGap = loc.monologueMeGapResetS
-        shareWindow = max(1, Int((loc.talkShareWindowS / frameS).rounded()))
-        shareMax = loc.talkShareMax
-        shareMin = loc.talkShareMinSpeechS
+        self.context = context
+        prosodyEnabled = l.prosodyEnabled
+        cutOverlap = l.cutInMinOverlapMs / 1000
+        cutContinue = l.cutInOthersContinueMs / 1000
+        cutBackchannel = l.cutInBackchannelMaxMs / 1000
+        cutPause = l.cutInUtteranceGapMs / 1000
+        cutMidPause = l.cutInOthersPauseMs / 1000
+        cutAfterTalkOver = l.cutInAfterTalkOverS
+        cutTrailingOverlap = l.cutInTrailingMinOverlapMs / 1000
+        cutTrailingWindow = l.cutInTrailingWindowS
+        cutTrailingYield = l.cutInTrailingYieldS
+        toSwitches = l.talkOverSwitches
+        toWindow = l.talkOverWindowS
+        toOverlap = l.talkOverMinOverlapMs / 1000
+        toHold = l.talkOverHoldFloorMs / 1000
+        monoSoft = l.monologueSoftS
+        monoStrong = l.monologueStrongS
+        relFactor = l.monologueRelativeFactor
+        relMinS = l.monologueRelativeMinS
+        relMinRuns = l.monologueRelativeMinRuns
+        relMinRunS = l.monologueRelativeMinRunS
+        howWhyRaise = l.monologueHowWhyRaise
+        monoFloor = l.monologueOthersFloorMs / 1000
+        monoGap = l.monologueMeGapResetS
+        shareWindow = max(1, Int((l.talkShareWindowS / frameS).rounded(.toNearestOrEven)))
+        shareMax = participants <= 2 ? l.talkShareMaxOneOnOne : l.talkShareMaxGroup
+        shareMin = l.talkShareMinSpeechS
     }
 
-    public func step(t: Double, mic: ArraySlice<Float>, call: ArraySlice<Float>) -> (events: [LocalEvent], me: VadState, others: VadState) {
+    /// Length of the user's current run (0 when they do not hold the floor).
+    public func meRunS(at t: TimeInterval) -> Double {
+        turnStart.map { t - $0 } ?? 0
+    }
+
+    private func speaking(_ vad: StreamVAD, _ t: TimeInterval) -> Bool {
+        vad.active && t - vad.lastSpeechT <= Self.speakingTailS
+    }
+
+    public func step(t: TimeInterval, mic: ArraySlice<Float>, call: ArraySlice<Float>) -> (events: [LocalEvent], me: VadState, others: VadState) {
         var ev: [LocalEvent] = []
         let s = me.process(tEnd: t, frame: mic)
         let o = others.process(tEnd: t, frame: call)
-        prosody.onFrame(active: s.active || s.offset != nil, db: s.dbfs)
-        if let on = o.onset { ev.append(LocalEvent(kind: .othersOnset, t: t, onset: on)) }
+        if prosodyEnabled {
+            prosody.onFrame(active: s.active || s.offset != nil, raw: s.raw, db: s.dbfs)
+        }
+        if let on = o.onset {
+            ev.append(LocalEvent(kind: .othersOnset, t: t, onset: on))
+            onset(on, .others)
+        }
         if let off = o.offset { ev.append(LocalEvent(kind: .othersOffset, t: t, onset: off)) }
         if let off = s.offset {
             ev.append(LocalEvent(kind: .meOffset, t: t, onset: off))
-            if let p = prosody.onUtteranceEnd(t: off) {
+            if prosodyEnabled, let p = prosody.onUtteranceEnd(t: off) {
                 ev.append(LocalEvent(kind: .prosody, t: t, onset: off, prosody: p))
             }
         }
-
-        // Interrupt: I start while others are mid-speech, and both are still talking after a grace window.
         if let on = s.onset {
             ev.append(LocalEvent(kind: .meOnset, t: t, onset: on))
-            if o.active, let since = others.activeSince, on - since >= othersMin {
-                pendingInterrupt = on
+            onset(on, .me)
+            let midSpeech = o.active || on - others.lastSpeechT <= cutMidPause
+            let afterTalkOver = on - toFiredAt < cutAfterTalkOver
+            if midSpeech && cut == nil && !afterTalkOver {
+                cut = CutIn(onset: on)
             }
         }
-        if let pending = pendingInterrupt {
-            if !(s.active && o.active) {
-                pendingInterrupt = nil
-            } else if t - pending >= confirm - 1e-9 {
-                pendingInterrupt = nil
-                // Still voicing at the end of the grace window (filters "yeah"/"mm-hm" backchannels).
-                if t - me.lastSpeechT <= 0.06 {
-                    ev.append(LocalEvent(kind: .interrupt, t: t, onset: pending))
-                }
-            }
-        }
-        rest(t: t, s: s, o: o, ev: &ev)
+        let both = speaking(me, t) && speaking(others, t)
+        if both { overlapFrames.append(t) }
+        cutIn(t, s, &ev, both)
+        talkOver(t, &ev)
+        monologue(t, s, o, &ev)
+        talkShare(t, s, o, &ev)
         return (ev, s, o)
     }
 
-    public func step(t: Double, mic: [Float], call: [Float]) -> (events: [LocalEvent], me: VadState, others: VadState) {
-        step(t: t, mic: mic[...], call: call[...])
+    private func onset(_ t: TimeInterval, _ who: Who) {
+        if let last = lastOnsetWho, last != who { switchLog.append((t, who)) }
+        lastOnsetWho = who
     }
 
-    private func rest(t: Double, s: VadState, o: VadState, ev: inout [LocalEvent]) {
-        // Talk-over: sustained overlap > ~1 s (either side started it).
-        if s.active && o.active {
-            if overlapSince == nil {
-                overlapSince = max(me.activeSince ?? t, others.activeSince ?? t)
-                overlapFired = false
+    // Cut-in: the user starts while others talk (or inside a pause in their speech shorter than
+    // cut_in_others_pause_ms), the overlap from their onset lasts >= cut_in_min_overlap_ms, they keep going
+    // >= cut_in_others_continue_ms, and the user's utterance runs past the backchannel length. A shorter
+    // overlap that ends with them stopping within cut_in_trailing_window_s of the start is a trailing
+    // candidate: it needs them to leave the floor for cut_in_trailing_yield_s, and the engine fires it only
+    // if their last words were unfinished.
+    private func cutIn(_ t: TimeInterval, _ s: VadState, _ ev: inout [LocalEvent], _ both: Bool) {
+        guard var c = cut else { return }
+        let othersSpeaking = speaking(others, t)
+        if c.overlap < cutOverlap && !c.trailing {
+            if othersSpeaking {
+                c.gap = 0
+                c.overlap += both ? frameS : 0
+            } else {
+                c.gap += frameS
+                if c.gap > Self.overlapGapS {
+                    let end = others.lastSpeechT
+                    if c.overlap >= cutTrailingOverlap && abs(end - c.onset) <= cutTrailingWindow {
+                        c.trailing = true
+                        c.othersEnd = end
+                    } else {
+                        cut = nil
+                        return
+                    }
+                }
             }
-            if let since = overlapSince, !overlapFired, t - since >= talkOver - 1e-9 {
-                ev.append(LocalEvent(kind: .talkOver, t: t, onset: since))
-                overlapFired = true
-            }
-        } else {
-            overlapSince = nil
         }
+        if c.trailing && othersSpeaking {
+            cut = nil
+            return
+        }
+        if othersSpeaking && t > c.onset { c.othersAfter += frameS }
+        cut = c
+        if !s.active {
+            if t - me.lastSpeechT > cutPause { cut = nil }
+            return
+        }
+        if c.trailing && t - c.onset >= max(cutBackchannel, cutTrailingYield) {
+            ev.append(LocalEvent(kind: .interrupt, t: t, onset: c.onset, othersActive: false, othersLastSpeech: c.othersEnd,
+                                 trailing: true))
+            cut = nil
+        } else if c.overlap >= cutOverlap && c.othersAfter >= cutContinue && t - c.onset >= cutBackchannel {
+            ev.append(LocalEvent(kind: .interrupt, t: t, onset: c.onset, othersActive: others.active,
+                                 othersLastSpeech: others.lastSpeechT))
+            cut = nil
+        }
+    }
 
-        // Monologue fallback.
+    // Talk-over: >= talk_over_switches speaker switches inside talk_over_window_s, some true overlap, and
+    // the user ends up holding the floor.
+    private func talkOver(_ t: TimeInterval, _ ev: inout [LocalEvent]) {
+        let horizon = toWindow + toHold + 2
+        while let first = switchLog.first, t - first.t > horizon { switchLog.removeFirst() }
+        while let first = overlapFrames.first, t - first > horizon { overlapFrames.removeFirst() }
+        guard switchLog.count >= toSwitches else { return }
+        let last = switchLog[switchLog.count - 1]
+        let firstT = switchLog[switchLog.count - toSwitches].t
+        guard last.who == .me, last.t > toDoneAt, last.t - firstT <= toWindow else { return }
+        let holding = speaking(me, t) && t - others.lastSpeechT >= toHold && t - last.t >= toHold
+        guard holding else { return }
+        let overlap = Double(overlapFrames.filter { firstT - 0.5 <= $0 && $0 <= t }.count) * frameS
+        toDoneAt = last.t
+        guard overlap >= toOverlap else { return }
+        if let context, context.readback(from: firstT, now: t) { return }
+        ev.append(LocalEvent(kind: .talkOver, t: t, onset: last.t, switches: switchLog.filter { $0.t >= firstT }.count))
+        toFiredAt = t
+        cut = nil
+    }
+
+    // Monologue: soft at monologue_soft_s, strong at monologue_strong_s; soft earlier when the run passes
+    // relative_factor x the user's rolling median run (and relative_min_s); both raised right after the
+    // other side asked how/why; none during the user's update turn in a round of updates.
+    private func thresholds() -> (soft: Double, strong: Double) {
+        var soft = monoSoft
+        let done = runs.filter { $0 >= relMinRunS }
+        if done.count >= relMinRuns {
+            soft = min(soft, max(relFactor * ProsodyMath.median(done), relMinS))
+        }
+        if turnRaise == nil, let context, let start = turnStart {
+            turnRaise = context.howWhyBefore(start) ? howWhyRaise : 1
+        }
+        let r = turnRaise ?? 1
+        return (soft * r, monoStrong * r)
+    }
+
+    private func monologue(_ t: TimeInterval, _ s: VadState, _ o: VadState, _ ev: inout [LocalEvent]) {
         if s.active {
             meLastActive = t
             if turnStart == nil {
                 turnStart = me.activeSince ?? t
-                turnFired = false
+                turnLevel = nil
+                turnRaise = nil
+                turnExempt = nil
             }
         }
-        if let start = turnStart {
-            let othersFloor = o.active && others.activeSince.map { t - $0 >= monoFloor } == true
-            if othersFloor || t - meLastActive >= monoGap {
-                turnStart = nil
-            } else if !turnFired && t - start >= monoS {
-                ev.append(LocalEvent(kind: .monologue, t: t, onset: start + monoS))
-                turnFired = true
-            }
+        if o.active && !s.active {
+            if othersSoloSince == nil { othersSoloSince = t }
+        } else {
+            othersSoloSince = nil
         }
+        guard let start = turnStart else { return }
+        let othersFloor = othersSoloSince.map { t - $0 >= monoFloor } ?? false
+        if othersFloor || t - meLastActive >= monoGap {
+            runs.append(meLastActive - start)
+            if runs.count > 200 { runs.removeFirst(runs.count - 200) }
+            turnStart = nil
+            return
+        }
+        let run = t - start
+        if run < min(relMinS, monoSoft) { return }
+        if turnExempt == nil, let context { turnExempt = context.updateTurnBefore(start) }
+        if turnExempt == true { return }
+        let (soft, strong) = thresholds()
+        if turnLevel == nil && run >= soft {
+            turnLevel = .soft
+            ev.append(LocalEvent(kind: .monologue, t: t, onset: start + soft, level: .soft))
+        } else if turnLevel == .soft && run >= strong {
+            turnLevel = .strong
+            ev.append(LocalEvent(kind: .monologue, t: t, onset: start + strong, level: .strong))
+        }
+    }
 
-        // Talk-share fallback (rolling window).
-        if shareWin.count == shareWindow {
-            let old = shareWin[shareHead]
-            shareCounts.me -= old.me ? 1 : 0
-            shareCounts.others -= old.others ? 1 : 0
-            shareWin[shareHead] = (s.raw, o.raw)
+    // Talk share over a rolling window (talk_share_max_group with 3+ people, talk_share_max_one_on_one in a 1:1).
+    private func talkShare(_ t: TimeInterval, _ s: VadState, _ o: VadState, _ ev: inout [LocalEvent]) {
+        if shareFrames.count == shareWindow {
+            let old = shareFrames[shareHead]
+            shareCount.me -= old.0 ? 1 : 0
+            shareCount.others -= old.1 ? 1 : 0
+            shareFrames[shareHead] = (s.raw, o.raw)
             shareHead = (shareHead + 1) % shareWindow
         } else {
-            shareWin.append((s.raw, o.raw))
+            shareFrames.append((s.raw, o.raw))
         }
-        shareCounts.me += s.raw ? 1 : 0
-        shareCounts.others += o.raw ? 1 : 0
-        let speechFrames = shareCounts.me + shareCounts.others
-        if Double(speechFrames) * frameS >= shareMin {
-            let share = Double(shareCounts.me) / Double(speechFrames)
+        shareCount.me += s.raw ? 1 : 0
+        shareCount.others += o.raw ? 1 : 0
+        let total = Double(shareCount.me + shareCount.others) * frameS
+        if total >= shareMin {
+            let share = Double(shareCount.me) / Double(shareCount.me + shareCount.others)
             if shareArmed && share > shareMax {
-                ev.append(LocalEvent(kind: .talkShare, t: t, onset: t, share: (share * 1000).rounded() / 1000))
+                ev.append(LocalEvent(kind: .talkShare, t: t, onset: t, share: (share * 1000).rounded(.toNearestOrEven) / 1000))
                 shareArmed = false
             } else if !shareArmed && share < shareMax - 0.05 {
                 shareArmed = true

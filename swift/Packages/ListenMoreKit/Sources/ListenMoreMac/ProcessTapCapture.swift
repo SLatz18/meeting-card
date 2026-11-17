@@ -34,7 +34,7 @@ final class ProcessTapCapture {
         guard let format = AVAudioFormat(streamDescription: &asbd) else { throw TapError.format }
 
         var aggregate: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "MeetingCard coach call tap",
+            kAudioAggregateDeviceNameKey: "ListenMoreKit call tap",
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,

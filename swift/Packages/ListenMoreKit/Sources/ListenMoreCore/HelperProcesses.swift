@@ -23,9 +23,10 @@ public enum BundleIds {
         return b == p || b.hasPrefix(p + ".")
     }
 
-    /// Map an app or helper bundle ID to its capture target.
+    /// Map an app or helper bundle ID to its capture target. A target's `audio_bundle_ids` (e.g.
+    /// avconferenced for FaceTime) resolve to it too.
     public static func resolveParent(_ bundleId: String, targets: [CaptureTarget]) -> CaptureTarget? {
-        targets.first { belongs(bundleId, to: $0.bundleId) }
+        targets.first { t in t.ownedBundleIds.contains { belongs(bundleId, to: $0) } }
     }
 
     /// For apps outside the allowlist: drop a Chromium/Electron-style helper suffix so a helper groups

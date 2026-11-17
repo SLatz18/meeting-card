@@ -63,8 +63,9 @@ enum Synthetic {
     }
 
     /// Runs the local layer frame by frame like the Python `run_local` helper; returns cue events.
-    static func runLocal(_ config: ListenMoreConfig, mic: [Float], call: [Float]) -> [LocalEvent] {
-        let ll = LocalLayer(config: config)
+    static func runLocal(_ config: ListenMoreConfig, mic: [Float], call: [Float], participants: Int = 2,
+                         context: LocalTextContext? = nil) -> [LocalEvent] {
+        let ll = LocalLayer(config: config, participants: participants, context: context)
         let hop = config.frameSamples
         var out: [LocalEvent] = []
         for i in 0..<(min(mic.count, call.count) / hop) {
@@ -74,8 +75,4 @@ enum Synthetic {
         }
         return out
     }
-}
-
-enum TestConfig {
-    static func load() throws -> ListenMoreConfig { try ListenMoreConfig.builtIn() }
 }

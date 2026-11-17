@@ -2,19 +2,33 @@ import AppKit
 import ListenMoreCore
 import QuartzCore
 
-/// Glow colors, shape and timing. The app builds this from its shared Theme (rose and amber are
-/// derived from system semantic colors), so the glow cannot drift from the cards; the Kit only draws.
+/// Glow colors, shape, timing and window level, all owned by the host. MeetingCard builds this from its
+/// Theme (rose and amber derived from system semantic colors); the standalone app from its `CoachStyle`.
+/// The Kit only draws.
 public struct GlowStyle: Equatable {
     /// Interrupt, talk-over, aggressive.
     public var rose: NSColor
     /// Monologue, missed question, not listening, talk share.
     public var amber: NSColor
     public var profile: GlowProfile
+    /// Panel level. The default sits with status-bar windows so a host can order the glow behind its
+    /// own window; a host without one can raise it (e.g. `.screenSaver`).
+    public var level: NSWindow.Level
 
-    public init(rose: NSColor, amber: NSColor, profile: GlowProfile) {
+    public init(rose: NSColor, amber: NSColor, profile: GlowProfile, level: NSWindow.Level = GlowPanel.overlayLevel) {
         self.rose = rose
         self.amber = amber
         self.profile = profile
+        self.level = level
+    }
+
+    /// From a platform-neutral `CoachStyle`; a tone the style lacks takes the other tone's color.
+    public init(_ coach: CoachStyle, level: NSWindow.Level = GlowPanel.overlayLevel) {
+        func ns(_ c: CoachStyle.RGBA?) -> NSColor {
+            guard let c else { return .clear }
+            return NSColor(srgbRed: c.red, green: c.green, blue: c.blue, alpha: c.alpha)
+        }
+        self.init(rose: ns(coach.color(for: .red)), amber: ns(coach.color(for: .amber)), profile: coach.profile, level: level)
     }
 
     public func color(_ c: CueColor) -> NSColor {
@@ -29,7 +43,7 @@ public struct GlowStyle: Equatable {
 /// cue can never move keyboard focus. `sharingType = .none` asks the window server to leave it out
 /// of screen captures (see the README's screen-sharing note for how far that holds).
 public final class GlowPanel: NSPanel {
-    /// Same level as the cards; the controller orders the glow behind the card window.
+    /// Default level (`GlowStyle.level`): with status-bar windows, ordered behind the host's window.
     public static let overlayLevel: NSWindow.Level = .statusBar
     public static let overlayCollectionBehavior: NSWindow.CollectionBehavior =
         [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
@@ -46,7 +60,7 @@ public final class GlowPanel: NSPanel {
         sharingType = .none
         // isFloatingPanel resets level to .floating, so it must be set before level.
         isFloatingPanel = true
-        level = Self.overlayLevel
+        level = style.level
         collectionBehavior = Self.overlayCollectionBehavior
         becomesKeyOnlyIfNeeded = true
         hidesOnDeactivate = false
@@ -60,13 +74,18 @@ public final class GlowPanel: NSPanel {
 
     override public var canBecomeKey: Bool { false }
     override public var canBecomeMain: Bool { false }
+
+    func apply(style: GlowStyle) {
+        level = style.level
+        glowView.apply(style: style)
+    }
 }
 
 /// Soft band along every edge of one display: opacity falls off through the profile's stops, and
 /// the band follows the display's rounded corners. Drawn at full color; the panel's alpha carries
 /// the peak opacity and the animation.
 public final class GlowView: NSView {
-    public let style: GlowStyle
+    public private(set) var style: GlowStyle
     public private(set) var color: CueColor = .red
 
     public init(frame: NSRect, style: GlowStyle) {
@@ -85,9 +104,17 @@ public final class GlowView: NSView {
         needsDisplay = true
     }
 
+    public func apply(style: GlowStyle) {
+        self.style = style
+        needsDisplay = true
+    }
+
+    /// The color the band is drawn in now.
+    public var currentColor: NSColor { style.color(color) }
+
     override public var isOpaque: Bool { false }
 
-    /// Rose and amber are dynamic (per appearance): redraw when the appearance flips.
+    /// Dynamic colors (per appearance): redraw when the appearance flips.
     override public func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
@@ -124,15 +151,26 @@ public final class GlowView: NSView {
     }
 }
 
-/// Owns one `GlowPanel` per display and plays a cue on one of them: rise, hold, fade (~3 s in
-/// total), or appear-and-fade under Reduce Motion. Plays once and never pulses or repeats; no
-/// sound, ever. Cooldown is decided upstream by `CuePolicy`.
+/// Owns one `GlowPanel` per display and plays a cue on one of them: rise, hold, fade, or
+/// appear-and-fade under Reduce Motion. Plays once and never pulses or repeats; no sound, ever.
+/// Cooldown is decided upstream by `CuePolicy`. As a `CueRenderer`, `placement` picks the display
+/// and the window to order behind (nil: the first display, frontmost).
 @MainActor
-public final class GlowOverlayController {
-    public let style: GlowStyle
+public final class GlowOverlayController: CueRenderer {
+    public struct Placement: Equatable {
+        public var screen: NSRect?
+        public var belowWindow: Int?
+        public init(screen: NSRect?, belowWindow: Int? = nil) {
+            self.screen = screen
+            self.belowWindow = belowWindow
+        }
+    }
+
+    public private(set) var style: GlowStyle
     public private(set) var panels: [GlowPanel] = []
     /// The motion used by the most recent flash (tests and logs).
     public private(set) var lastMotion: GlowProfile.Motion?
+    public var placement: (() -> Placement)?
     private let screenFrames: () -> [NSRect]
     private let reduceMotion: () -> Bool
     private var screenObserver: NSObjectProtocol?
@@ -160,10 +198,27 @@ public final class GlowOverlayController {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
     }
 
+    /// Hosts can retheme live (e.g. a light/dark switch).
+    public func apply(style: GlowStyle) {
+        self.style = style
+        panels.forEach { $0.apply(style: style) }
+    }
+
     public func rebuildPanels() {
         panels.forEach { $0.orderOut(nil) }
         panels = screenFrames().map { GlowPanel(frame: $0, style: style) }
     }
+
+    // MARK: CueRenderer
+
+    public func render(_ cue: Cue) {
+        let p = placement?()
+        flash(cue.color, on: p?.screen, below: p?.belowWindow)
+    }
+
+    public func clear() { hideAll() }
+
+    // MARK: drawing
 
     /// The panel covering `screen` (exact frame, else the most overlap), else the first display.
     public func panel(for screen: NSRect?) -> GlowPanel? {
@@ -186,7 +241,7 @@ public final class GlowOverlayController {
         return target
     }
 
-    /// Plays one cue on the display `screen` (Cocoa frame), ordered behind the card window if given.
+    /// Plays one cue on the display `screen` (Cocoa frame), ordered behind `windowNumber` if given.
     public func flash(_ color: CueColor, on screen: NSRect? = nil, below windowNumber: Int? = nil) {
         guard !suppressed else { return }
         generation += 1
