@@ -94,7 +94,7 @@ final class FixesV21_11Tests: XCTestCase {
                                       spawnGet: { _, _ in })
         c.pollResult([])
         let card = c.showCard(a)
-        cur = KeyGate.Point(x: 1000, y: 230)            // Scott parks the cursor just above the card
+        cur = KeyGate.Point(x: 1000, y: 230)            // the user parks the cursor just above the card
         c.pollResult([a, b])                            // card A grows 18pt up under the resting cursor
         XCTAssertNotNil(c.nextUp(card))
         KeyGate.apply(card.gate.step(.hoverEnter(cursor: cur, inCard: true)), to: card)   // AppKit enter

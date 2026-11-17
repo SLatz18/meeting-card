@@ -1,7 +1,7 @@
 import XCTest
 @testable import MeetingCardCore
 
-/// v2.4 addendum (Scott 8:40am repro): Join click -> pointer exits while "Joining..." -> flash.
+/// v2.4 addendum (owner 8:40am repro): Join click -> pointer exits while "Joining..." -> flash.
 /// Drives click -> exit -> re-enter -> exit cycles DURING Joining through the real Coordinator and a
 /// card double wired like the App's Card (gate step/apply, openingTitle, opening-only logging).
 final class JoiningCycleTests: XCTestCase {
@@ -48,7 +48,7 @@ final class JoiningCycleTests: XCTestCase {
         ctl.pollResult([fx("zoom")]); ctl.tick()
         let c = made[0]
         c.gateStep(.appear(cursor: Self.elsewhere))
-        // Scott's Join click: pointer moves in, click arms (makeKey), then Join -> Joining.
+        // The user's Join click: pointer moves in, click arms (makeKey), then Join -> Joining.
         c.gateStep(.hoverEnter(cursor: Self.inside, inCard: true))
         c.gateStep(.click(inCard: true))
         XCTAssertNotNil(ctl.join(c))

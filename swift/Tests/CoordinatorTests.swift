@@ -125,7 +125,7 @@ final class CoordinatorTests: XCTestCase {
         r.gets[0].1(.failed)                     // card shows from cache
         r.advance(10); r.ctl.tick()
         XCTAssertEqual(r.gets.count, 2, "live get in flight")
-        r.ctl.ignore(r.ctl.cards[0])             // Scott closes the card mid-get
+        r.ctl.ignore(r.ctl.cards[0])             // the user closes the card mid-get
         XCTAssertNil(r.weakMade[0](), "card actually released")
         r.gets[1].1(.fatal)
         XCTAssertTrue(r.ctl.stopped, "fatal stops gws regardless of card lifetime")

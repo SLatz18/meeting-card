@@ -1,7 +1,7 @@
 import XCTest
 @testable import MeetingCardCore
 
-/// #17 (Scott 10:18pm 2026-10-06): "Next up: <title> @ <time>", styled apart from the Ends line,
+/// #17 (owner 10:18pm 2026-10-06): "Next up: <title> @ <time>", styled apart from the Ends line,
 /// long titles truncate with an ellipsis so " @ <time>" always shows.
 final class NextUpStyleTests: XCTestCase {
     let tz = TimeZone(secondsFromGMT: -5 * 3600)!

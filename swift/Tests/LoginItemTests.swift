@@ -1,7 +1,7 @@
 import XCTest
 @testable import MeetingCardCore
 
-/// v2.5 #1 (Scott 9:05am): launch at login via SMAppService.mainApp, but ONLY from the installed app.
+/// v2.5 #1 (owner 9:05am): launch at login via SMAppService.mainApp, but ONLY from the installed app.
 final class LoginItemTests: XCTestCase {
     let home = "/Users/jdoe"
     var installed: String { home + "/Applications/MeetingCardSwift.app" }
