@@ -490,6 +490,8 @@ public enum Theme {
         public static let buttonGlyph = CardStyle.Typography.caption
         public static let buttonGap = Coach.controlInset
         public static let wordsFont = CoachCard.nudgeFont
+        /// Room each side of the nudge words for the text field's own inset.
+        public static let wordsInset = Coach.glyphGap
         public static let maxWidth = CardLayout.W
         public static var glyphX: Double { CardStyle.Coach.nudgeBar + padding }
         /// Mute (hidden with no Zoom call), Pause/Resume and Stop.

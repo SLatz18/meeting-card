@@ -317,13 +317,11 @@ final class CoachPillView: CoachSurfaceView {
 
     override var surfaceRadius: Double { Theme.CoachPill.radius }
 
-    /// The words' label width, including the text field's cell padding, so they never clip.
+    /// The words' label width: the text plus the text field's inset each side, so they never clip.
     static func wordsWidth(_ nudge: CoachNudge?) -> Double {
         guard let nudge else { return 0 }
-        let f = CoachSurfaceView.label()
-        f.font = Theme.font(Theme.CoachPill.wordsFont)
-        f.stringValue = nudge.words
-        return Double(f.intrinsicContentSize.width.rounded(.up))
+        let text = (nudge.words as NSString).size(withAttributes: [.font: Theme.font(Theme.CoachPill.wordsFont)]).width
+        return Double(text.rounded(.up)) + 2 * Theme.CoachPill.wordsInset
     }
 
     static func width(for s: CoachCardState) -> Double { s.pillWidth(wordsWidth: wordsWidth(s.nudge)) }

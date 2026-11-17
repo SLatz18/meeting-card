@@ -47,6 +47,7 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(k.statusRow.y, k.captions.maxY + CardStyle.Spacing.control, accuracy: 1e-9)
         XCTAssertEqual(k.statusRow.maxY + CardStyle.Spacing.controlBottom, k.height, accuracy: 1e-9)
         XCTAssertEqual(p.button, Theme.Coach.pauseButtonSize)
+        XCTAssertEqual(p.wordsInset, Theme.Coach.glyphGap)
         XCTAssertEqual(p.buttonRadius, Theme.Coach.pauseButtonRadius)
         let xs = p.buttonXs(pillWidth: p.width)
         XCTAssertEqual(xs.count, 3)
