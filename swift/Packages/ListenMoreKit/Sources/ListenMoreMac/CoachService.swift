@@ -25,14 +25,15 @@ public final class CoachService: CoachSessionDelegate {
     /// The display the host's window is on (glow fallback) and the window to order the glow behind.
     public var fallbackScreen: () -> NSRect? = { nil }
     public var hostWindowNumber: () -> Int? = { nil }
-    /// Display for a session's app; injectable for tests.
+    /// Display for a session's app: the one place the call's window is chosen, for the glow and (through
+    /// `glowScreen`) the host's coach card. Injectable for tests.
     var locateScreen: (String?, NSRect?) -> NSRect? = { CallDisplayLocator.screen(appKey: $0, fallback: $1) }
     public var onChange: (() -> Void)?
     /// A cue was shown (after the glow started).
     public var onCue: ((Cue) -> Void)?
-    /// The display the last cue's glow went to: the call's display as far as the coach knows it (the
-    /// fallback display when the call's window wasn't found). nil until a cue and after the session
-    /// ends. Reading it reads nothing; only the glow's own placement does.
+    /// The display the last cue's glow went to: `locateScreen`'s choice of the call's window, or the
+    /// fallback display when it found none. nil until a cue and after the session ends. Reading it
+    /// reads nothing; only the glow's own placement does.
     public private(set) var glowScreen: NSRect?
 
     /// - Parameters:

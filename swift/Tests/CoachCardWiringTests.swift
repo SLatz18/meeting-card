@@ -79,6 +79,10 @@ final class CoachCardWiringTests: XCTestCase {
             }
         }
         XCTAssertTrue(try read("App/CoachController.swift").contains("p.callScreen = { [weak self] in self?.service?.glowScreen }"))
+        // glowScreen is whatever the service's locateScreen seam chose, so a better window choice there moves the card too.
+        let service = try read("Packages/ListenMoreKit/Sources/ListenMoreMac/CoachService.swift")
+        XCTAssertTrue(service.contains("let screen = self.locateScreen(self.session.session?.appKey, self.fallbackScreen())\n            self.glowScreen = screen"))
+        XCTAssertEqual(code(service).components(separatedBy: "glowScreen = ").count - 1, 2, "set only from locateScreen (and cleared)")
         let panel = try read("App/CoachCardPanel.swift")
         XCTAssertTrue(panel.contains("CoachPlacement.display(call:"))
         XCTAssertTrue(panel.contains("safeAreaTop: Double(s.safeAreaInsets.top), builtIn: CGDisplayIsBuiltin(n) != 0"))

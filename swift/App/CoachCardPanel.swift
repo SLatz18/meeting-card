@@ -54,7 +54,8 @@ final class CoachCardPresenter {
     let positionKey: String
     let captions: CoachCaptionsSlot
     var actions = CoachCardActions()
-    /// The display the coach last found the call on (the glow's), if any.
+    /// The display the coach last found the call on (`CoachService.glowScreen`, so the service's
+    /// `locateScreen` choice of the call's window), if any. The card never picks a window itself.
     var callScreen: () -> NSRect? = { nil }
     var reduceMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     var displays: () -> [CoachDisplay] = { CoachCardPresenter.screens() }
