@@ -1,0 +1,34 @@
+# Opened by the app's "Send Feedback…" item, pre-filled through the field ids below
+# (swift/Core/Feedback.swift). The strings match swift/Core/FeedbackCopy.swift.
+name: "Feedback from the app"
+description: "Opened from Send Feedback in MeetingCard."
+body:
+  - type: markdown
+    attributes:
+      value: "This issue is public. Leave out meeting details, names and log contents."
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: "What happened"
+    validations:
+      required: true
+  - type: textarea
+    id: what-expected
+    attributes:
+      label: "What you expected"
+  - type: input
+    id: app-version
+    attributes:
+      label: "App version"
+  - type: input
+    id: build-number
+    attributes:
+      label: "Build number"
+  - type: input
+    id: macos-version
+    attributes:
+      label: "macOS version"
+  - type: input
+    id: build-type
+    attributes:
+      label: "Build"

@@ -1,0 +1,37 @@
+import Foundation
+
+/// Every user-facing "Send feedback" string: the menu item, the Settings row, the public-issue
+/// notice and the GitHub issue form. `.github/ISSUE_TEMPLATE/feedback.yml` repeats the `Form`
+/// strings (GitHub reads them from there); FeedbackTests fails if the two drift apart.
+/// Placeholder copy until comms review.
+public enum FeedbackCopy {
+    public static let menuItem = "Send Feedback\u{2026}"
+    public static let settingsLabel = "Feedback"
+    public static let settingsHelp = "Opens a new issue on GitHub in your browser."
+    public static let settingsButton = "Send Feedback\u{2026}"
+
+    public static let notice = "Issues on this GitHub repo are public."
+    public static let noticeContinue = "Continue"
+    public static let noticeCancel = "Cancel"
+    public static let dontShowAgain = "Don't show again"
+
+    /// The issue form's name, intro and field labels.
+    public enum Form {
+        public static let name = "Feedback from the app"
+        public static let description = "Opened from Send Feedback in MeetingCard."
+        public static let intro = "This issue is public. Leave out meeting details, names and log contents."
+        public static let whatHappened = "What happened"
+        public static let whatExpected = "What you expected"
+        public static let appVersion = "App version"
+        public static let buildNumber = "Build number"
+        public static let macOSVersion = "macOS version"
+        public static let buildType = "Build"
+        public static let all = [name, description, intro, whatHappened, whatExpected, appVersion, buildNumber, macOSVersion, buildType]
+    }
+
+    /// Pre-filled values of the form's Build field.
+    public static let buildRelease = "release"
+    public static let buildTestId = "test-id"
+    /// A pre-filled value the app couldn't read.
+    public static let unknown = "unknown"
+}
