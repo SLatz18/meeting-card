@@ -14,6 +14,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let toggle = NSSwitch()
     private let startButton = NSButton(title: CoachCopy.startNow, target: nil, action: nil)
     private let toggleError = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: .systemRed)
+    private let gptNote = CoachSettingsWindow.text(CoachCopy.gptOffNoKey, font: Theme.Settings.helperFont, color: .secondaryLabelColor)
     private let permissionNote = CoachSettingsWindow.text(CoachCopy.permissionDenied, font: Theme.Settings.helperFont, color: .systemRed)
     private let keyField = NSSecureTextField()
     private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: .systemRed)
@@ -187,8 +188,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         startButton.controlSize = .small
         let toggleRow = Self.row(Self.text(CoachCopy.toggle, font: Theme.Settings.rowFont), toggle)
         let help = Self.text(CoachCopy.toggleHelp, font: Theme.Settings.helperFont, color: .secondaryLabelColor)
-        let g1 = Self.group([toggleRow, help, toggleError, permissionNote, startButton])
-        for v in [toggleRow, help, toggleError, permissionNote] { pin(v, in: g1) }
+        let g1 = Self.group([toggleRow, help, gptNote, toggleError, permissionNote, startButton])
+        for v in [toggleRow, help, gptNote, toggleError, permissionNote] { pin(v, in: g1) }
 
         keyField.placeholderString = coach.hasKey ? CoachCopy.keySavedPlaceholder : CoachCopy.keyPlaceholder
         keyField.font = Theme.font(Theme.Fonts.body)
@@ -259,9 +260,16 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         startButton.isHidden = !(coach.enabled && (coach.indicator == .hidden || coach.indicator == .on))
         permissionNote.isHidden = !(coach.enabled && coach.service?.captureProblem == true)
         anyAppBox.state = coach.anyApp ? .on : .off
-        toggleError.stringValue = message(coach.keyProblem) ?? ""
+        gptNote.isHidden = !(coach.enabled && !coach.keyStored)
+        toggleError.stringValue = coach.enabled ? toggleMessage(coach) ?? "" : ""
         toggleError.isHidden = toggleError.stringValue.isEmpty
         keyStatus.isHidden = keyStatus.stringValue.isEmpty
+    }
+
+    /// Under the toggle: problems with the stored key. A missing key is the GPT note, not an error.
+    private func toggleMessage(_ coach: CoachController) -> String? {
+        if coach.keyGate.rejected { return CoachCopy.storedKeyRejected }
+        return coach.keyProblem == .unreachable ? CoachCopy.keyUnreachable : nil
     }
 
     private func message(_ k: KeyCheck?) -> String? {

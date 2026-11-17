@@ -99,13 +99,20 @@ enum UISnapshots {
         let keychain = KeychainStore(service: "com.slatz.meetingcard.swift.snapshots", account: "none")
         let onboarding: [(String, () -> CoachSettingsWindow?)] = (0..<CoachCopy.onboarding.count).map { i in
             ("onboarding-\(i + 1)", {
-                guard let coach = try? CoachController(defaults: defaults, keychain: keychain) else { return nil }
+                guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
                 return CoachSettingsWindow(coach: coach, onboardingScreen: i)
             })
         }
         let shots: [(String, () -> CoachSettingsWindow?)] = onboarding + [("settings", {
             defaults.set(true, forKey: CoachController.Keys.onboarded)
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain) else { return nil }
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            let w = CoachSettingsWindow(coach: coach)
+            w.update()
+            return w
+        }), ("settings-local-only", {
+            defaults.set(true, forKey: CoachController.Keys.enabled)
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            coach.service?.setEnabled(false)
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w

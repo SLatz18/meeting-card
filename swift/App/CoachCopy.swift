@@ -9,11 +9,21 @@ enum CoachCopy {
     static let keyPlaceholder = "sk-\u{2026}"
     static let keySavedPlaceholder = "Saved in your Keychain"
     static let keyHelp = "Call audio goes to OpenAI on this key, only while the coach is on. The key is stored in your Keychain."
-    static let keyEmpty = "Add an OpenAI API key to turn on Call coach."
+    static let keyEmpty = "No key saved. Call coach runs its on-device cues; add a key for GPT cues."
     static let keyRejected = "OpenAI didn't accept this key. Check it and try again."
+    static let storedKeyRejected = "OpenAI didn't accept the saved key. GPT cues are off; the on-device cues still run."
+    static let gptOffNoKey = "GPT cues are off until you add an OpenAI API key. The on-device cues still run."
     static let keyUnreachable = "Can't reach OpenAI right now. Call coach will try again on your next call."
     static let coachOn = "Coach on"
     static let coachPaused = "Coach paused"
+    static let coachListening = "Coach on, listening"
+    static let menuOff = "Call coach: off"
+    static let menuWaiting = "Coach on, waiting for a call"
+    static let menuEnable = "Turn On Call Coach"
+    static let menuTurnOff = "Turn Off Call Coach"
+    static let menuGptOffNoKey = "GPT cues off: no API key"
+    static let menuGptOffRejected = "GPT cues off: key not accepted"
+    static let skipThisCall = "Skip This Call"
     static let pause = "Pause"
     static let resume = "Resume"
     static let startNow = "Start now"
@@ -22,7 +32,7 @@ enum CoachCopy {
     static let add = "Add"
     static let remove = "Remove"
     static let anyApp = "Coach any app that uses the mic and speakers"
-    static let privacy = "When the coach is on, call audio is sent to OpenAI for analysis."
+    static let privacy = "When the coach is on with an API key, call audio is sent to OpenAI for analysis. Without a key, only the on-device cues run."
     static let pausedPrivacy = "No audio is sent while paused."
     static let permissionDenied = "Call coach needs mic and system audio access. You can turn these on in System Settings > Privacy & Security."
 
@@ -41,7 +51,7 @@ enum CoachCopy {
                body: "While the coach is on, call audio goes to OpenAI on your own API key. Nothing is saved: no transcripts, no stats, no recaps. Your key stays in the Keychain.",
                primary: "Next", secondary: nil),
         Screen(title: "Turn it on",
-               body: "Add your OpenAI API key and allow mic and system audio access. The coach starts by itself when a call starts, and you can pause it anytime from the coach chip on the meeting card, or from the menu bar while no card is showing.",
+               body: "Turn it on and allow mic and system audio access. Add your OpenAI API key for GPT cues; without one, the on-device cues still run. The coach starts by itself when a call starts, and you can pause it anytime from the coach chip on the meeting card or the coach menu in the menu bar.",
                primary: "Add key", secondary: "Not now"),
     ]
 }

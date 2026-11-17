@@ -41,7 +41,33 @@ final class CoachWiringTests: XCTestCase {
         let src = try read("App/CoachController.swift")
         XCTAssertTrue(src.contains("static let keychainService = \"com.slatz.meetingcard.swift.openai\""))
         XCTAssertTrue(src.contains("keychain: KeychainStore = KeychainStore(service: CoachController.keychainService)"))
-        XCTAssertTrue(src.contains("keys: keychain"), "the service reads the key from that item only")
+        XCTAssertTrue(src.contains("keys: keyGate"), "the service reads the key from that item only, through the gate")
+        XCTAssertTrue(try read("App/CoachKeyActions.swift").contains("func readKey() throws -> APIKey? { rejected ? nil : try store.readKey() }"),
+                      "a rejected key is withheld, so only GPT cues stop")
+    }
+
+    /// Local-only: turning on never waits for or requires a key; a stored key is checked afterwards.
+    func testEnablingNeedsNoKey() throws {
+        let src = try read("App/CoachController.swift")
+        let body = try XCTUnwrap(src.components(separatedBy: "func setEnabled(_ on: Bool").dropFirst().first?
+            .components(separatedBy: "func checkStoredKey").first)
+        XCTAssertTrue(body.contains("defaults.set(on, forKey: Keys.enabled)"))
+        XCTAssertTrue(body.contains("if let service { service.setEnabled(true) } else { makeService() }"))
+        XCTAssertFalse(body.contains("readKey"), "enabling doesn't read the key")
+        XCTAssertFalse(body.contains("KeyValidator"), "enabling doesn't wait for OpenAI")
+        let keys = try read("App/CoachKeyActions.swift")
+        XCTAssertFalse(keys.contains("setEnabled(false)"), "removing the key keeps local-only coaching on")
+    }
+
+    /// The coach status menu is always in the menu bar (a way in while off) and follows CoachMenu.
+    func testStatusMenuIsAlwaysThere() throws {
+        let src = try read("App/CoachController.swift")
+        XCTAssertTrue(src.contains("showsStatusItem: Bool = true"))
+        XCTAssertTrue(src.contains("CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable)"))
+        for action in ["enableClicked", "skipClicked", "pauseClicked", "resumeClicked", "startClicked", "turnOffClicked"] {
+            XCTAssertTrue(src.contains("#selector(\(action)(_:))"), action)
+        }
+        XCTAssertFalse(try read("App/Controller.swift").contains("showsStatusItem"), "the app keeps the default")
     }
 
     func testCoachRunsInProcess() throws {

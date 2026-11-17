@@ -3,9 +3,10 @@ import ListenMoreCore
 import ListenMoreMac
 import MeetingCardCore
 
-/// The call coach inside MeetingCard. Off by default: until the user turns it on in Settings there
-/// is no service, no Core Audio polling, no capture and no network. Stores four settings in
-/// UserDefaults (never call data); the API key lives only in the Keychain.
+/// The call coach inside MeetingCard. Off by default: until the user turns it on (Settings or the
+/// coach status menu) there is no service, no Core Audio polling, no capture and no network. It
+/// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores four
+/// settings in UserDefaults (never call data); the API key lives only in the Keychain.
 @MainActor
 final class CoachController: NSObject {
     enum Keys {
@@ -21,8 +22,12 @@ final class CoachController: NSObject {
     let defaults: UserDefaults
     let config: ListenMoreConfig
     let keychain: KeychainStore
-    /// Cards on screen, newest last (the chip goes on each; the status item shows only without one).
+    /// What the service reads the key through: nil while the stored key is known to be rejected.
+    let keyGate: KeyGate
+    /// Cards on screen, newest last (the chip goes on each).
     var visibleCards: () -> [Card] = { [] }
+    /// The coach status menu: always there, so the coach can be enabled from it while off.
+    private let showsStatusItem: Bool
     private(set) var service: CoachService?
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
@@ -30,18 +35,30 @@ final class CoachController: NSObject {
     /// Last key problem shown in Settings.
     var keyProblem: KeyCheck?
 
-    init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService)) throws {
+    init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
+         showsStatusItem: Bool = true) throws {
         self.defaults = defaults
         self.keychain = keychain
+        keyGate = KeyGate(keychain)
+        self.showsStatusItem = showsStatusItem
         config = try ListenMoreConfig.builtIn()
         super.init()
-        if enabled { makeService() }
+        keyStored = keychain.hasKey
+        if enabled {
+            makeService()
+            checkStoredKey()
+        }
+        refresh()
     }
 
     var enabled: Bool { defaults.bool(forKey: Keys.enabled) }
     var anyApp: Bool { defaults.bool(forKey: Keys.anyApp) }
     var onboarded: Bool { defaults.bool(forKey: Keys.onboarded) }
     var hasKey: Bool { keychain.hasKey }
+    /// GPT cues can run: a key is stored and OpenAI hasn't rejected it.
+    var gptAvailable: Bool { keyStored && !keyGate.rejected }
+    /// Whether a key is in the Keychain, kept current by key actions (refresh runs every second).
+    var keyStored = false
 
     /// The user's allowlist, or nil for the shipped call apps.
     var allowlist: [String]? { defaults.stringArray(forKey: Keys.allowlist) }
@@ -52,34 +69,37 @@ final class CoachController: NSObject {
 
     // MARK: settings
 
-    /// Turning on needs a key that OpenAI accepts, or OpenAI being unreachable right now (the coach
-    /// then retries on the next call). Empty or rejected keys keep it off.
+    /// Turning on never needs a key: without one (or with one OpenAI rejects, which is flagged) the
+    /// coach runs local cues only. A stored key is checked in the background.
     func setEnabled(_ on: Bool, completion: @escaping (KeyCheck?) -> Void) {
+        defaults.set(on, forKey: Keys.enabled)
         guard on else {
-            defaults.set(false, forKey: Keys.enabled)
             service?.setEnabled(false)
             keyProblem = nil
             refresh()
             completion(nil)
             return
         }
+        if let service { service.setEnabled(true) } else { makeService() }
+        keyProblem = nil
+        refresh()
+        checkStoredKey(completion: completion)
+    }
+
+    /// Flags a stored key OpenAI rejects (GPT cues stay off until it is replaced); local cues are unaffected.
+    func checkStoredKey(completion: @escaping (KeyCheck?) -> Void = { _ in }) {
+        keyStored = hasKey
         guard let key = try? keychain.readKey() else {
-            keyProblem = .empty
-            completion(.empty)
+            keyGate.rejected = false
+            completion(nil)
             return
         }
         Task { @MainActor in
             let check = await KeyValidator.check(key.value)
-            switch check {
-            case .ok, .unreachable:
-                self.defaults.set(true, forKey: Keys.enabled)
-                if let service = self.service { service.setEnabled(true) } else { self.makeService() }
-                self.keyProblem = check == .ok ? nil : .unreachable
-            case .empty, .rejected:
-                self.keyProblem = check
-            }
+            self.keyGate.rejected = check == .rejected
+            self.keyProblem = check == .ok ? nil : check
             self.refresh()
-            completion(check == .ok ? nil : check)
+            completion(self.keyProblem)
         }
     }
 
@@ -99,7 +119,7 @@ final class CoachController: NSObject {
 
     private func makeService() {
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
-                             allowlist: allowlist, keys: keychain)
+                             allowlist: allowlist, keys: keyGate)
         s.fallbackScreen = { [weak self] in self?.cardScreen() }
         s.hostWindowNumber = { [weak self] in self?.visibleCards().last?.panel.windowNumber }
         s.onChange = { [weak self] in self?.refresh() }
@@ -150,6 +170,12 @@ final class CoachController: NSObject {
     @objc func startClicked(_ sender: Any?) { service?.start() }
     @objc func pauseClicked(_ sender: Any?) { service?.pause() }
     @objc func resumeClicked(_ sender: Any?) { service?.resume() }
+    @objc func skipClicked(_ sender: Any?) { service?.skipThisCall() }
+    @objc func enableClicked(_ sender: Any?) {
+        setEnabled(true) { _ in }
+        if !onboarded { showSettings() }
+    }
+    @objc func turnOffClicked(_ sender: Any?) { setEnabled(false) { _ in } }
     @objc func settingsClicked(_ sender: Any?) { showSettings() }
 
     func showSettings() {
@@ -160,48 +186,80 @@ final class CoachController: NSObject {
 
     // MARK: indicator
 
-    /// Chip on every visible card; the status item only while a session runs with no card showing.
+    /// Chip on every visible card, and the coach status menu (always there, so it's a way in while off).
     func refresh() {
         let chip = self.chip
-        let cards = visibleCards()
-        for c in cards { c.setCoach(chip) }
-        let session = indicator == .listening || indicator == .paused
-        updateStatusItem(show: session && cards.isEmpty)
+        for c in visibleCards() { c.setCoach(chip) }
+        updateStatusItem()
         settingsWindow?.update()
     }
 
-    private func updateStatusItem(show: Bool) {
-        guard show else {
-            if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
-            statusItem = nil
-            return
-        }
+    var menuItems: [CoachMenuItem] { CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable) }
+    private var shownMenu: (items: [CoachMenuItem], rejected: Bool)?
+
+    private func updateStatusItem() {
+        guard showsStatusItem else { return }
+        let items = menuItems
+        if let shown = shownMenu, shown.items == items, shown.rejected == keyGate.rejected { return }
+        shownMenu = (items, keyGate.rejected)
         let item = statusItem ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
-        let paused = indicator == .paused
-        let label = paused ? CoachCopy.coachPaused : CoachCopy.coachOn
+        let label = Self.statusLabel(enabled: enabled, indicator: indicator)
         if let button = item.button {
             let image = NSImage(systemSymbolName: Theme.Coach.symbol, accessibilityDescription: label)?
                 .withSymbolConfiguration(.init(pointSize: CGFloat(Theme.Coach.glyphSize), weight: .regular))
             image?.isTemplate = true
             button.image = image
-            button.appearsDisabled = paused
+            button.appearsDisabled = !enabled || indicator == .paused
             button.toolTip = label
             button.setAccessibilityLabel(label)
         }
         let menu = NSMenu()
-        let header = NSMenuItem(title: label, action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-        let toggle = NSMenuItem(title: paused ? CoachCopy.resume : CoachCopy.pause,
-                                action: paused ? #selector(resumeClicked(_:)) : #selector(pauseClicked(_:)), keyEquivalent: "")
-        toggle.target = self
-        menu.addItem(toggle)
-        menu.addItem(.separator())
-        let settings = NSMenuItem(title: CoachCopy.settings, action: #selector(settingsClicked(_:)), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
+        menu.autoenablesItems = false
+        for entry in items { menu.addItem(menuItem(entry)) }
         item.menu = menu
+    }
+
+    static func statusLabel(enabled: Bool, indicator: CoachIndicator) -> String {
+        guard enabled else { return CoachCopy.menuOff }
+        switch indicator {
+        case .hidden: return CoachCopy.menuWaiting
+        case .on: return CoachCopy.coachOn
+        case .listening: return CoachCopy.coachListening
+        case .paused: return CoachCopy.coachPaused
+        }
+    }
+
+    private func menuItem(_ entry: CoachMenuItem) -> NSMenuItem {
+        func action(_ title: String, _ selector: Selector, key: String = "") -> NSMenuItem {
+            let m = NSMenuItem(title: title, action: selector, keyEquivalent: key)
+            m.target = self
+            return m
+        }
+        func note(_ title: String) -> NSMenuItem {
+            let m = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            m.isEnabled = false
+            return m
+        }
+        switch entry {
+        case .status(let st):
+            switch st {
+            case .off: return note(CoachCopy.menuOff)
+            case .waiting: return note(CoachCopy.menuWaiting)
+            case .on: return note(CoachCopy.coachOn)
+            case .listening: return note(CoachCopy.coachListening)
+            case .paused: return note(CoachCopy.coachPaused)
+            }
+        case .gptOff: return note(keyGate.rejected ? CoachCopy.menuGptOffRejected : CoachCopy.menuGptOffNoKey)
+        case .enable: return action(CoachCopy.menuEnable, #selector(enableClicked(_:)))
+        case .startNow: return action(CoachCopy.startNow, #selector(startClicked(_:)))
+        case .skipThisCall: return action(CoachCopy.skipThisCall, #selector(skipClicked(_:)))
+        case .pause: return action(CoachCopy.pause, #selector(pauseClicked(_:)))
+        case .resume: return action(CoachCopy.resume, #selector(resumeClicked(_:)))
+        case .turnOff: return action(CoachCopy.menuTurnOff, #selector(turnOffClicked(_:)))
+        case .separator: return .separator()
+        case .settings: return action(CoachCopy.settings, #selector(settingsClicked(_:)), key: ",")
+        }
     }
 
     var statusItemVisible: Bool { statusItem != nil }
