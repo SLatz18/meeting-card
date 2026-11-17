@@ -1,6 +1,40 @@
 # Mac demo checks (run by hand on a real Mac, with the user's go-ahead; not CI tests)
 
-Prereqs: the unsigned `MeetingCardSwift-app` CI artifact (see [SIGNING_PLAN.md](SIGNING_PLAN.md) for opening it);
+## Always the test build (`--test-id`)
+Every check below runs on the **test build**, never the real app, so the real app's privacy grants, settings and
+Keychain item are never touched. Get it either way:
+- `swift/scripts/build.sh --test-id` installs `~/Applications/MeetingCardSwift-Test.app` (not launched);
+  `swift/scripts/build.sh build --test-id` only builds it, in `swift/build/dd-test/Build/Products/Release/`.
+- or the unsigned `MeetingCardSwift-Test-app` CI artifact (see [SIGNING_PLAN.md](SIGNING_PLAN.md) for opening it).
+  The `MeetingCardSwift-app` artifact is the real app: don't use it for these checks.
+
+The test build has its own identity, and nothing else changes:
+
+| | Real app | Test build |
+|---|---|---|
+| Bundle ID | `com.slatz.meetingcard.swift` | `com.slatz.meetingcard.swift.test` |
+| Name in permission prompts and System Settings | MeetingCardSwift | MeetingCard (Test) |
+| UserDefaults domain | `com.slatz.meetingcard.swift` | `com.slatz.meetingcard.swift.test` |
+| Keychain service (account `OPENAI_API_KEY`) | `com.slatz.meetingcard.swift.openai` | `com.slatz.meetingcard.swift.test.openai` |
+| Log | `~/Library/Logs/MeetingCardSwift.log` | `~/Library/Logs/MeetingCardSwift-Test.log` |
+| State | `~/Library/Application Support/MeetingCardSwift/` | `~/Library/Application Support/MeetingCardSwift-Test/` |
+| Login item | `~/Applications/MeetingCardSwift.app` only | never |
+
+macOS asks for Microphone and Screen & System Audio Recording again for "MeetingCard (Test)"; grant them there.
+
+**Quit the real app before checking** (`pkill -f MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift`; it doesn't
+match the test build). Both builds read the same calendar, so both would show cards, and with the coach on in both,
+both would react to the same call. The coach's unified-log entries (`com.listenmore.kit`, K1) also come from a
+process named `MeetingCardSwift` in either build.
+
+Clean up after the demo (only the test identity; the real app is untouched):
+`tccutil reset Microphone com.slatz.meetingcard.swift.test` (likewise `AudioCapture`, `ScreenCapture`),
+`defaults delete com.slatz.meetingcard.swift.test`,
+`security delete-generic-password -s com.slatz.meetingcard.swift.test.openai -a OPENAI_API_KEY`,
+`rm -rf ~/Library/Logs/MeetingCardSwift-Test.log ~/Library/Application\ Support/MeetingCardSwift-Test`.
+
+## Checks
+Prereqs: the test build (above);
 coach turned on in MeetingCard Settings (or the coach menu bar menu) with an OpenAI key, except for L1/L2; Microphone and Screen & System Audio Recording granted when
 macOS asks. If a call app's bundle ID differs from `capture_targets` in
 `swift/Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift` (`osascript -e 'id of app "<App>"'`), note it.
@@ -33,7 +67,7 @@ always there (Turn On Call Coach while off).
 | G1 | All | Focus | A cue fires while typing in another app | Keyboard focus never moves; clicks pass through |
 | G2 | All | No sound / cooldown | Trigger the same cue twice in 20 s | One glow, no sound |
 | K1 | All | Keychain and logs | Inspect the Keychain and `log show --predicate 'subsystem == "com.listenmore.kit"'` | Key only in the Keychain; no transcript text or key in logs; no files written |
-| K2 | All | Keychain caveat | Keychain Access → login → the `com.slatz.meetingcard.swift.openai` item | Item is in the **login** keychain. Expected until the app is properly signed (see below), not a failure |
+| K2 | All | Keychain caveat | Keychain Access → login → the `com.slatz.meetingcard.swift.test.openai` item | Item is in the **login** keychain. Expected until the app is properly signed (see below), not a failure |
 
 ### Keychain caveat (read before K1/K2)
 The app asks for the key to be kept "on this device only, while unlocked" (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`).
@@ -44,4 +78,4 @@ Apple developer account; see [SIGNING_PLAN.md](SIGNING_PLAN.md)). Until then:
 - the key **can** move to another Mac in a Time Machine backup or a Migration Assistant transfer.
 
 If that matters for the demo Mac, remove the item after the demo (Keychain Access, or
-`security delete-generic-password -s com.slatz.meetingcard.swift.openai -a OPENAI_API_KEY`).
+`security delete-generic-password -s com.slatz.meetingcard.swift.test.openai -a OPENAI_API_KEY`).

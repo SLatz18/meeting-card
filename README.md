@@ -45,6 +45,7 @@ open ~/Applications/MeetingCardSwift.app
 ```
 
 `./scripts/build.sh test` runs the tests only, and `./scripts/build.sh build` builds and signs without installing. The script never launches or kills the app.
+Add `--test-id` (for example `./scripts/build.sh build --test-id`) for a separate test build, "MeetingCard (Test)" (`com.slatz.meetingcard.swift.test`), with its own settings, Keychain item, privacy grants, log and state, and never a login item; see [docs/MAC_DEMO_CHECKS.md](docs/MAC_DEMO_CHECKS.md).
 
 ### Signing
 
@@ -103,6 +104,7 @@ Reopen MeetingCard (double-click it in Finder, or `open ~/Applications/MeetingCa
 - API key: Keychain generic password, service `com.slatz.meetingcard.swift.openai`, account `OPENAI_API_KEY`, never synchronizable. `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is requested on every save, but the login keychain ignores it. It is enforced (readable only while unlocked, never migrated) only once a properly signed build, with a team ID, uses the data-protection keychain. The app tries that keychain first and falls back to the login keychain on `errSecMissingEntitlement`, which is what ad-hoc and self-signed builds from `build.sh` get.
 - Network: `api.openai.com` only (realtime transcription WebSocket, Responses API with `store: false`, `GET /v1/models` to check the key), only while the coach is on, not paused, and has a key.
 - Permissions (TCC): Microphone, System Audio Recording (Core Audio process taps), and Screen Recording (ScreenCaptureKit's audio-only call capture). Reset with `tccutil reset Microphone|AudioCapture|ScreenCapture com.slatz.meetingcard.swift`.
+- A `build.sh --test-id` build uses `com.slatz.meetingcard.swift.test` instead, for the defaults domain, the TCC grants and the Keychain service (`com.slatz.meetingcard.swift.test.openai`), and `MeetingCardSwift-Test` for its log and Application Support dir.
 
 **Screen sharing**
 The glow and the coach chip's card ask macOS to leave them out of screen captures (`NSWindow.sharingType = .none`). A CI probe (`ScreenShareProbeTests`) captures the display with ScreenCaptureKit, which current Zoom, Teams, Meet and Webex builds use to share a screen. On macOS 26.7.2 (25G332) it found our windows absent from the captured pixels while an ordinary window was present, so people you share your screen with don't see the glow. Our windows still appear in ScreenCaptureKit's window list, so an app could offer them as a pick in a "share a window" menu; picking one shares nothing visible. Sharing tools that use older capture paths are untested. If one shows the glow, pause the coach from the chip while you share.
