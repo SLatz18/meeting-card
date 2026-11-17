@@ -179,6 +179,23 @@ final class GlowOverlayTests: XCTestCase {
         c.hideAll()
     }
 
+    func testIncreaseContrastUsesTheHigherPeak() {
+        var style = testGlowStyle
+        style.profile.increasedContrastPeakOpacity = 0.6
+        let frames = { [NSRect(x: 0, y: 0, width: 400, height: 300)] }
+        let hc = GlowOverlayController(style: style, screenFrames: frames, reduceMotion: { true }, increaseContrast: { true })
+        hc.flash(.red)
+        XCTAssertEqual(hc.lastPeak, 0.6)
+        XCTAssertEqual(hc.panels[0].alphaValue, 0.6 * 0.7, accuracy: 0.01)
+        hc.show(.amber)
+        XCTAssertEqual(hc.panels[0].alphaValue, 0.6, accuracy: 0.01)
+        hc.hideAll()
+        let normal = GlowOverlayController(style: style, screenFrames: frames, increaseContrast: { false })
+        normal.show(.red)
+        XCTAssertEqual(normal.lastPeak, 0.45)
+        normal.hideAll()
+    }
+
     func testShowHoldsAtPeakOpacity() {
         let c = GlowOverlayController(style: testGlowStyle, screenFrames: { [NSRect(x: 0, y: 0, width: 400, height: 300)] })
         c.show(.red)

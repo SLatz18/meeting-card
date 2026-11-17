@@ -177,9 +177,12 @@ public final class GlowOverlayController: CueRenderer {
     public private(set) var panels: [GlowPanel] = []
     /// The motion used by the most recent flash (tests and logs).
     public private(set) var lastMotion: GlowProfile.Motion?
+    /// The peak opacity used by the most recent flash or show (tests and logs).
+    public private(set) var lastPeak: Double?
     public var placement: (() -> Placement)?
     private let screenFrames: () -> [NSRect]
     private let reduceMotion: () -> Bool
+    private let increaseContrast: () -> Bool
     private var screenObserver: NSObjectProtocol?
     private var generation = 0
     /// While true, flashes are dropped.
@@ -189,10 +192,12 @@ public final class GlowOverlayController: CueRenderer {
 
     public init(style: GlowStyle,
                 screenFrames: @escaping () -> [NSRect] = { NSScreen.screens.map(\.frame) },
-                reduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }) {
+                reduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion },
+                increaseContrast: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }) {
         self.style = style
         self.screenFrames = screenFrames
         self.reduceMotion = reduceMotion
+        self.increaseContrast = increaseContrast
         rebuildPanels()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -256,7 +261,9 @@ public final class GlowOverlayController: CueRenderer {
         let motion = style.profile.motion(reduce: reduceMotion())
         lastMotion = motion
         guard let p = present(color, on: screen, below: windowNumber) else { return }
-        let peak = CGFloat(style.profile.peakOpacity)
+        let peakValue = style.profile.peak(increaseContrast: increaseContrast())
+        lastPeak = peakValue
+        let peak = CGFloat(peakValue)
         p.alphaValue = peak * CGFloat(motion.appearFactor)
         guard motion.rise > 0 else {
             hold(p, motion: motion, generation: gen)
@@ -295,7 +302,9 @@ public final class GlowOverlayController: CueRenderer {
     /// Shows the glow at peak and leaves it up (screenshots and the screen-share probe).
     public func show(_ color: CueColor, on screen: NSRect? = nil, below windowNumber: Int? = nil) {
         generation += 1
-        present(color, on: screen, below: windowNumber)?.alphaValue = CGFloat(style.profile.peakOpacity)
+        let peak = style.profile.peak(increaseContrast: increaseContrast())
+        lastPeak = peak
+        present(color, on: screen, below: windowNumber)?.alphaValue = CGFloat(peak)
     }
 
     public func hideAll() {

@@ -21,6 +21,17 @@ final class GlowProfileTests: XCTestCase {
         XCTAssertEqual(p.opacity(at: 10, reduce: false), 0, "plays once, never repeats")
     }
 
+    func testIncreaseContrastRaisesOnlyThePeak() {
+        var hc = p
+        XCTAssertEqual(hc.peak(increaseContrast: true), 0.45, "no high-contrast peak: the normal peak")
+        hc.increasedContrastPeakOpacity = 0.6
+        XCTAssertEqual(hc.peak(increaseContrast: false), 0.45)
+        XCTAssertEqual(hc.peak(increaseContrast: true), 0.6)
+        XCTAssertEqual(hc.opacity(at: 1.0, reduce: false, increaseContrast: true), 0.6, accuracy: 1e-9)
+        XCTAssertEqual(hc.opacity(at: 3.0, reduce: false, increaseContrast: true), 0, "same timing")
+        XCTAssertEqual(hc.motion, p.motion)
+    }
+
     func testRiseEasesInAndFadeEasesOut() {
         XCTAssertLessThan(p.opacity(at: 0.16, reduce: false), 0.45 / 2, "ease-in is slow at first")
         let mid = 0.32 + 0.8 + 0.94

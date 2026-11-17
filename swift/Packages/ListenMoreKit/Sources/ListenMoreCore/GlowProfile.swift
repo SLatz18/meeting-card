@@ -31,14 +31,18 @@ public struct GlowProfile: Equatable, Sendable {
 
     public var width: Double
     public var peakOpacity: Double
+    /// Peak opacity while the system's Increase Contrast is on; nil = `peakOpacity`.
+    public var increasedContrastPeakOpacity: Double?
     public var cornerRadius: Double
     public var stops: [Stop]
     public var motion: Motion
     public var reduceMotion: Motion
 
-    public init(width: Double, peakOpacity: Double, cornerRadius: Double, stops: [Stop], motion: Motion, reduceMotion: Motion) {
+    public init(width: Double, peakOpacity: Double, increasedContrastPeakOpacity: Double? = nil, cornerRadius: Double,
+                stops: [Stop], motion: Motion, reduceMotion: Motion) {
         self.width = width
         self.peakOpacity = peakOpacity
+        self.increasedContrastPeakOpacity = increasedContrastPeakOpacity
         self.cornerRadius = cornerRadius
         self.stops = stops
         self.motion = motion
@@ -59,11 +63,15 @@ public struct GlowProfile: Equatable, Sendable {
 
     public func motion(reduce: Bool) -> Motion { reduce ? reduceMotion : motion }
 
+    public func peak(increaseContrast: Bool) -> Double {
+        increaseContrast ? increasedContrastPeakOpacity ?? peakOpacity : peakOpacity
+    }
+
     /// Panel opacity `t` seconds into a cue (for tests and snapshots; the panel animates with the
     /// same timings). Ease-in = cubic-bezier(0.42,0,1,1), ease-out = (0,0,0.58,1), approximated.
-    public func opacity(at t: Double, reduce: Bool) -> Double {
+    public func opacity(at t: Double, reduce: Bool, increaseContrast: Bool = false) -> Double {
         let m = motion(reduce: reduce)
-        let peak = peakOpacity
+        let peak = peak(increaseContrast: increaseContrast)
         if t < 0 { return 0 }
         if t < m.rise {
             let x = t / m.rise
