@@ -108,7 +108,12 @@ final class KeychainStoreTests: XCTestCase {
     func testTypeSafeKeyHasItsOwnAccountUnderTheSameService() throws {
         XCTAssertEqual(KeychainStore.typeSafeAccount, "TYPESAFE_API_KEY")
         XCTAssertNotEqual(KeychainStore.typeSafeAccount, KeychainStore.defaultAccount)
-        let ts = KeychainStore(service: store.service, account: KeychainStore.typeSafeAccount)
+        let grouped = KeychainStore(service: "com.example.derived.openai", account: KeychainStore.defaultAccount, accessGroup: "ABCDE12345.com.example")
+        let sibling = grouped.sibling(account: KeychainStore.typeSafeAccount)
+        XCTAssertEqual(sibling.service, "com.example.derived.openai", "follows whatever service the host derives")
+        XCTAssertEqual(sibling.accessGroup, "ABCDE12345.com.example")
+        XCTAssertEqual(sibling.account, KeychainStore.typeSafeAccount)
+        let ts = store.sibling(account: KeychainStore.typeSafeAccount)
         for loc in [KeychainStore.Location.dataProtection, .login] {
             XCTAssertEqual(ts.baseQuery(loc)[kSecAttrService as String] as? String, store.service)
             XCTAssertEqual(ts.baseQuery(loc)[kSecAttrAccount as String] as? String, "TYPESAFE_API_KEY")

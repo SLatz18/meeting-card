@@ -80,6 +80,11 @@ final class DeadlineClock: GptScheduler, @unchecked Sendable {
     }
 }
 
+/// The reply from the one real System One call (11/17), verbatim.
+enum SystemOneFixture {
+    static let confirmedResponse = #"{"model":"jev-1.14.0","answers":{"missed_question":{"type":"choice","choice":"fire","confidence":1.0,"probabilities":{"fire":1.0,"no_fire":0.0}}},"usage":{"input_tokens":408,"output_tokens":34}}"#
+}
+
 // MARK: provider
 
 final class TypeSafeJudgeTests: XCTestCase {
@@ -148,6 +153,63 @@ final class TypeSafeJudgeTests: XCTestCase {
         let raw = String(decoding: req.raw, as: UTF8.self)
         XCTAssertFalse(raw.contains(Self.secret), "the key goes in the header only")
         XCTAssertFalse(raw.contains("LOCAL_FLAGS") || raw.contains("prosody") || raw.contains("TRIGGER"))
+    }
+
+    func testConfirmedResponseDecodes() throws {
+        let reply = try SystemOne.decode(Data(SystemOneFixture.confirmedResponse.utf8))
+        XCTAssertEqual(reply, SystemOne.Response(
+            model: "jev-1.14.0",
+            answers: ["missed_question": SystemOne.Answer(type: "choice", choice: "fire", confidence: 1.0,
+                                                          probabilities: ["fire": 1.0, "no_fire": 0.0])],
+            usage: SystemOne.Usage(inputTokens: 408, outputTokens: 34)))
+        XCTAssertTrue(reply.answers["missed_question"]?.fires == true)
+    }
+
+    func testConfirmedResponseThroughTheJudge() async throws {
+        let http = FakeTypeSafeTransport(.reply(200, Data(SystemOneFixture.confirmedResponse.utf8)))
+        let d = try await decide(judge(http))
+        XCTAssertNil(d.failure)
+        XCTAssertEqual(d.verdicts, [JudgeVerdict(label: "missed_question", confidence: 1.0)],
+                       "the missing aggressive and not_listening answers give no cue")
+        XCTAssertEqual(d.belowFloor, 0)
+        XCTAssertEqual(d.inputTokens, 408)
+        XCTAssertEqual(d.outputTokens, 34)
+        XCTAssertEqual(d.model, "jev-1.14.0")
+    }
+
+    /// `questions` is an object keyed by question id; each value is {type: choice, instructions,
+    /// criteria: {fire, no_fire}}. Byte for byte, sorted keys.
+    func testRequestEncodesTheConfirmedShape() throws {
+        var ts = config.judge.typesafe
+        ts.context = "Context."
+        ts.questions = .init(aggressive: nil, notListening: nil,
+                             missedQuestion: .init(instructions: "Was a question missed?", fire: "It was missed.", noFire: "It was answered."))
+        let body = try SystemOne.encode(SystemOne.request(ts, window: [JudgeLine(speaker: .others, secondsAgo: 6.24, text: "one two three?"),
+                                                                       JudgeLine(speaker: .me, secondsAgo: 1.04, text: "four five.")]))
+        XCTAssertEqual(String(decoding: body, as: UTF8.self), #"{"model":"jev-latest","questions":{"missed_question":{"criteria":{"fire":"It was missed.","no_fire":"It was answered."},"instructions":"Context. Was a question missed?","type":"choice"}},"state":{"transcript":[{"seconds_ago":6.2,"speaker":"OTHERS","text":"one two three?"},{"seconds_ago":1,"speaker":"ME","text":"four five."}]}}"#)
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertNotNil(parsed["questions"] as? [String: Any], "questions is an object, not an array")
+    }
+
+    func testUnknownOrMissingAnswersGiveNoCue() async throws {
+        let body = #"{"model":"jev-1.14.0","answers":{"missed_question":{"type":"noul","noul":0.97},"not_listening":{"type":"choice","choice":"maybe","confidence":1.0},"talk_over":{"type":"choice","choice":"fire","confidence":1.0},"aggressive":{"type":"choice","choice":"fire","confidence":0.9,"probabilities":"odd"}}}"#
+        let d = try await decide(judge(FakeTypeSafeTransport(.reply(200, Data(body.utf8)))))
+        XCTAssertNil(d.failure, "unknown answers are not an error")
+        XCTAssertEqual(d.verdicts, [JudgeVerdict(label: "aggressive", confidence: 0.9)], "an odd extra field doesn't drop a valid answer")
+        XCTAssertEqual(d.inputTokens, 0, "no usage reported")
+        let empty = try await decide(judge(FakeTypeSafeTransport(.reply(200, Data(#"{"model":"jev-1.14.0","answers":{}}"#.utf8)))))
+        XCTAssertNil(empty.failure)
+        XCTAssertEqual(empty.verdicts, [])
+        let fireNoType = try await decide(judge(FakeTypeSafeTransport(.reply(200, Data(#"{"answers":{"aggressive":{"choice":"fire","confidence":1.0}}}"#.utf8)))))
+        XCTAssertEqual(fireNoType.verdicts, [], "only a choice answer counts")
+    }
+
+    func testFailureKinds() {
+        XCTAssertEqual([401, 403, 402, 429, 500, 503, 400, 404].map { JudgeFailure.http($0).kind },
+                       [.auth, .auth, .balance, .rateLimited, .server, .server, .rejected, .rejected])
+        XCTAssertEqual(JudgeFailure.timeout.kind, .timeout)
+        XCTAssertEqual(JudgeFailure.transport.kind, .unreachable)
+        XCTAssertEqual(JudgeFailure.badResponse.kind, .badReply)
     }
 
     func testEndpointModelFloorAndQuestionsAreConfigurable() async throws {
@@ -432,6 +494,40 @@ final class JudgeProviderCoreTests: XCTestCase {
         XCTAssertEqual(priced.stopReason, .budgetCap)
     }
 
+    func testUsageTokensAreSummedAndReportedPerCallHour() {
+        config.judge.provider = .typesafe
+        let core = GptCore(config: config)
+        XCTAssertNil(core.snapshot.judgeTokensPerCallHour, "no audio yet")
+        let req = GptCore.JudgeRequest(refT: 1, reason: "me_reply")
+        _ = core.finishJudge(req, reply: .success(.decided(JudgeDecision(inputTokens: 408, outputTokens: 34, model: "jev-1.14.0"))), now: 2)
+        _ = core.finishJudge(req, reply: .success(.decided(JudgeDecision(failure: .timeout))), now: 3)
+        _ = core.finishJudge(req, reply: .success(.decided(JudgeDecision(inputTokens: 392, outputTokens: 30))), now: 4)
+        _ = core.feed(.me, frame: GptFrames.silent, vad: GptFrames.quiet, now: 1800)
+        let snap = core.snapshot
+        XCTAssertEqual(snap.judgeInputTokens, 800)
+        XCTAssertEqual(snap.judgeOutputTokens, 64)
+        XCTAssertEqual(snap.judgeModel, "jev-1.14.0")
+        XCTAssertEqual(snap.callSeconds, 1800)
+        XCTAssertEqual(snap.judgeTokensPerCallHour?.input, 1600)
+        XCTAssertEqual(snap.judgeTokensPerCallHour?.output, 128)
+        XCTAssertEqual(snap.judgeCalls, 3)
+        XCTAssertNil(snap.judgeCallUsd, "tokens only: no dollar rate is assumed")
+    }
+
+    func testJudgeStopReasonIsTheFailureThatStoppedIt() {
+        config.judge.provider = .typesafe
+        let core = GptCore(config: config)
+        let req = GptCore.JudgeRequest(refT: 1, reason: "me_reply")
+        for (i, f) in [JudgeFailure.timeout, .timeout, .http(401)].enumerated() {
+            XCTAssertNil(core.snapshot.judgeStopReason)
+            _ = core.finishJudge(req, reply: .success(.decided(JudgeDecision(failure: f))), now: Double(i))
+        }
+        XCTAssertEqual(core.snapshot.judgeStopReason, .http(401))
+        XCTAssertFalse(core.judgeActive)
+        _ = core.finishJudge(req, reply: .success(.decided(JudgeDecision(failure: .timeout))), now: 9)
+        XCTAssertEqual(core.snapshot.judgeStopReason, .http(401), "a late reply doesn't change why it stopped")
+    }
+
     func testLatencyKeepsTheMostRecentCalls() {
         let core = GptCore(config: config)
         for ms in 0..<(GptCore.latencyKept + 5) { core.recordJudgeLatency(ms: ms) }
@@ -465,6 +561,7 @@ final class TypeSafeLayerTests: XCTestCase {
     let offers = OfferBox()
     let stops = StopBox()
     let segments = SegmentBox()
+    let judgeStops = JudgeStopBox()
     let v = GptFrames.voiced, z = GptFrames.silent
 
     override func setUpWithError() throws {
@@ -474,10 +571,10 @@ final class TypeSafeLayerTests: XCTestCase {
     }
 
     func makeLayer(me: [String], others: [String], provider: JudgeProvider?, scheduler: InstantScheduler = InstantScheduler()) -> GptLayer {
-        let clock = clock, offers = offers, stops = stops, segments = segments
+        let clock = clock, offers = offers, stops = stops, segments = segments, judgeStops = judgeStops
         let layer = GptLayer(config: config, now: { clock.now() }, offer: { offers.add($0, $1, $2, $3) },
                              onSegment: { s, t, r, _ in segments.add(s, t, r) }, onStopped: { stops.add($0) },
-                             provider: provider, scheduler: scheduler) { speaker, onEvent in
+                             onJudgeStopped: { judgeStops.add($0) }, provider: provider, scheduler: scheduler) { speaker, onEvent in
             FakeTranscriber(speaker: speaker, script: speaker == .me ? me : others, onEvent: onEvent)
         }
         layer.start()
@@ -543,6 +640,8 @@ final class TypeSafeLayerTests: XCTestCase {
         XCTAssertFalse(snap.judgeActive)
         XCTAssertEqual(snap.judgeFailures, 2, "judging stopped after two failures in a row")
         XCTAssertEqual(snap.lastJudgeFailure, "HTTP 402")
+        XCTAssertEqual(snap.judgeStopReason, .http(402))
+        XCTAssertEqual(judgeStops.failures, [.http(402)], "reported once, with the failure that stopped it")
         XCTAssertEqual(snap.errors, [])
         XCTAssertEqual(stops.reasons, [])
         XCTAssertEqual(offers.offers.count, 0)
@@ -606,4 +705,11 @@ final class TypeSafeLayerTests: XCTestCase {
         let hostDefault = LocalCoachEngine(transports: transports, judgeProvider: { nil })
         XCTAssertEqual(hostDefault.sessionConfig(base).judge.provider, .gpt, "no pick keeps the config value")
     }
+}
+
+final class JudgeStopBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _failures: [JudgeFailure] = []
+    var failures: [JudgeFailure] { lock.withLock { _failures } }
+    func add(_ f: JudgeFailure) { lock.withLock { _failures.append(f) } }
 }

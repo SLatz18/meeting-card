@@ -61,6 +61,23 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
         }
     }
 
+    /// What kind of problem it was, for a host to explain why judging stopped.
+    public var kind: JudgeFailureKind {
+        switch self {
+        case .http(let code):
+            switch code {
+            case 401, 403: return .auth
+            case 402: return .balance
+            case 429: return .rateLimited
+            case 500...: return .server
+            default: return .rejected
+            }
+        case .timeout: return .timeout
+        case .transport: return .unreachable
+        case .badResponse: return .badReply
+        }
+    }
+
     /// Network errors by class; anything else is a transport error (its description is never read).
     public static func classify(_ error: Error) -> JudgeFailure {
         if let f = error as? JudgeFailure { return f }
@@ -70,6 +87,22 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
     }
 }
 
+public enum JudgeFailureKind: String, CaseIterable, Equatable, Sendable {
+    /// 401 or 403: the key was not accepted.
+    case auth
+    /// 402: insufficient balance.
+    case balance
+    /// 429.
+    case rateLimited
+    /// 5xx.
+    case server
+    /// Any other HTTP status.
+    case rejected
+    case timeout
+    case unreachable
+    case badReply
+}
+
 /// One state-based provider call. Content-free: labels, confidences, counts and the configured price.
 public struct JudgeDecision: Equatable, Sendable {
     public var verdicts: [JudgeVerdict]
@@ -77,18 +110,22 @@ public struct JudgeDecision: Equatable, Sendable {
     public var belowFloor: Int
     /// Set when the call gave no answer (no cue then).
     public var failure: JudgeFailure?
+    /// The reply's `usage` (0 when the reply had none or the call failed).
     public var inputTokens: Int
     public var outputTokens: Int
+    /// The model the reply names (e.g. a resolved version of the configured alias).
+    public var model: String?
     /// The configured price of a call, nil when none is configured.
     public var costUsd: Double?
 
     public init(verdicts: [JudgeVerdict] = [], belowFloor: Int = 0, failure: JudgeFailure? = nil,
-                inputTokens: Int = 0, outputTokens: Int = 0, costUsd: Double? = nil) {
+                inputTokens: Int = 0, outputTokens: Int = 0, model: String? = nil, costUsd: Double? = nil) {
         self.verdicts = verdicts
         self.belowFloor = belowFloor
         self.failure = failure
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
+        self.model = model
         self.costUsd = costUsd
     }
 }

@@ -72,6 +72,9 @@ public final class CoachSession {
     public private(set) var captureStage: CaptureStage = .parentApps
     /// Set when the GPT layer turned itself off this session (local cues continue).
     public private(set) var gptStopped: GptStopReason?
+    /// Set when judging stopped this session after repeated provider failures: the failure that
+    /// stopped it (transcription, the transcript rules and local cues continue). Kept until the next session.
+    public private(set) var judgeStopped: JudgeFailure?
     /// Cues shown in the current session (a live counter; reset at start, never kept).
     public private(set) var cuesShown = 0
     /// Mic or call capture failed to start in the current session (usually a missing permission).
@@ -226,6 +229,7 @@ public final class CoachSession {
                 cuePolicy.reset()
                 shownAt.removeAll()
                 gptStopped = nil
+                judgeStopped = nil
                 cuesShown = 0
                 captureProblem = false
             case .stop:
@@ -360,6 +364,12 @@ public final class CoachSession {
         changed()
     }
 
+    fileprivate func judgeDidStop(_ failure: JudgeFailure) {
+        guard isCapturing else { return }
+        judgeStopped = failure
+        changed()
+    }
+
     private func changed() {
         delegate?.coachSessionDidChange(self)
     }
@@ -417,6 +427,12 @@ final class EngineDelegateBridge: CoachEngineDelegate, @unchecked Sendable {
     func engine(_ engine: CoachEngine, gptStopped reason: GptStopReason) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated { self.session?.gptDidStop(reason) }
+        }
+    }
+
+    func engine(_ engine: CoachEngine, judgeStopped failure: JudgeFailure) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self.session?.judgeDidStop(failure) }
         }
     }
 }

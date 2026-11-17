@@ -59,6 +59,23 @@ public final class GptCore {
         public var judgeLatenciesMs: [Int]
         /// Spend on a per-call priced provider; nil when no price is configured for it.
         public var judgeCallUsd: Double?
+        /// Why judging stopped after `max_consecutive_errors` failures in a row (nil while it runs).
+        public var judgeStopReason: JudgeFailure?
+        /// Tokens a state-based provider reported in `usage`, summed over the session's calls.
+        public var judgeInputTokens: Int
+        public var judgeOutputTokens: Int
+        /// The model the provider's last reply named.
+        public var judgeModel: String?
+        /// Engine audio time of the latest frame: how long this call has been coached.
+        public var callSeconds: Double
+
+        /// Provider tokens per hour of coached call (the provider reports cost as tokens, with no
+        /// dollar rate). nil before any audio.
+        public var judgeTokensPerCallHour: (input: Double, output: Double)? {
+            guard callSeconds > 0 else { return nil }
+            let hours = callSeconds / 3600
+            return (Double(judgeInputTokens) / hours, Double(judgeOutputTokens) / hours)
+        }
     }
 
     /// Judge call latencies kept for the snapshot.
@@ -94,6 +111,11 @@ public final class GptCore {
     public private(set) var lastJudgeFailure: JudgeFailure?
     public private(set) var belowFloorVerdicts = 0
     public private(set) var judgeLatenciesMs: [Int] = []
+    public private(set) var judgeStopReason: JudgeFailure?
+    public private(set) var judgeInputTokens = 0
+    public private(set) var judgeOutputTokens = 0
+    public private(set) var judgeModel: String?
+    public private(set) var callSeconds = 0.0
     private var failuresInARow = 0
 
     public init(config: ListenMoreConfig) {
@@ -117,7 +139,9 @@ public final class GptCore {
                         billedAudioSeconds: cost.billedAudioS, budgetExhausted: cost.exhausted,
                         judgeProvider: config.judge.provider, judgeActive: judgeActive, judgeFailures: judgeFailures,
                         lastJudgeFailure: lastJudgeFailure?.description, belowFloorVerdicts: belowFloorVerdicts,
-                        judgeLatenciesMs: judgeLatenciesMs, judgeCallUsd: priced ? cost.judgeCallUsd : nil)
+                        judgeLatenciesMs: judgeLatenciesMs, judgeCallUsd: priced ? cost.judgeCallUsd : nil,
+                        judgeStopReason: judgeStopReason, judgeInputTokens: judgeInputTokens,
+                        judgeOutputTokens: judgeOutputTokens, judgeModel: judgeModel, callSeconds: callSeconds)
     }
 
     /// No judge calls for the rest of the session (no provider wired, or repeated provider failures).
@@ -153,6 +177,7 @@ public final class GptCore {
 
     /// One frame of one stream. The driver performs the returned actions in order.
     public func feed(_ speaker: Speaker, frame: [Float], vad: VadState, now: TimeInterval) -> [TxAction] {
+        if now > callSeconds { callSeconds = now }
         guard enabled else { return [] }
         if cost.exhausted {
             budgetStop()
@@ -303,11 +328,17 @@ public final class GptCore {
     private func finishDecision(_ req: JudgeRequest, _ d: JudgeDecision, now: TimeInterval) -> [Offer] {
         cost.addJudgeCall(usd: d.costUsd)
         belowFloorVerdicts += d.belowFloor
+        judgeInputTokens += d.inputTokens
+        judgeOutputTokens += d.outputTokens
+        if let model = d.model { judgeModel = model }
         if let failure = d.failure {
             judgeFailures += 1
             lastJudgeFailure = failure
             failuresInARow += 1
-            if failuresInARow >= config.judge.typesafe.maxConsecutiveErrors { stopJudging() }
+            if failuresInARow >= config.judge.typesafe.maxConsecutiveErrors && judgeActive {
+                judgeStopReason = failure
+                stopJudging()
+            }
             return []
         }
         failuresInARow = 0
@@ -399,6 +430,7 @@ public final class GptLayer: @unchecked Sendable {
     private let offer: Offer
     private let onSegment: SegmentSink?
     private let onStopped: (@Sendable (GptStopReason) -> Void)?
+    private let onJudgeStopped: (@Sendable (JudgeFailure) -> Void)?
     private let scheduler: GptScheduler
     private let judge: JudgeProvider?
     private var transcribers: [Speaker: TranscriptionSession] = [:]
@@ -406,13 +438,16 @@ public final class GptLayer: @unchecked Sendable {
     private var loop: Task<Void, Never>?
     private var tasks: [Task<Void, Never>] = []
     private var stopReported = false
+    private var judgeStopReported = false
     private var transcribersClosed = false
 
     /// `transcriberFactory` builds one session per speaker and must route its events to the given callback.
-    /// `onStopped` is called once, from the event loop, when the layer turns itself off. `provider` nil:
-    /// nothing is judged (transcripts still reach `onSegment`).
+    /// `onStopped` is called once, from the event loop, when the layer turns itself off; `onJudgeStopped`
+    /// once when judging stops after repeated provider failures, with the failure that stopped it.
+    /// `provider` nil: nothing is judged (transcripts still reach `onSegment`).
     public init(config: ListenMoreConfig, now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
                 onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
+                onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil,
                 provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
@@ -421,6 +456,7 @@ public final class GptLayer: @unchecked Sendable {
         self.offer = offer
         self.onSegment = onSegment
         self.onStopped = onStopped
+        self.onJudgeStopped = onJudgeStopped
         self.judge = provider
         self.scheduler = scheduler
         var continuation: AsyncStream<Command>.Continuation!
@@ -450,8 +486,9 @@ public final class GptLayer: @unchecked Sendable {
     /// `config.judge.provider` selects (`JudgeProviders.make`; `judgeKey` is the TypeSafe key).
     public convenience init(config: ListenMoreConfig, key: APIKey, judgeKey: APIKey? = nil, transports: GptTransports,
                             now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
-                            onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil) {
-        self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped,
+                            onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
+                            onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil) {
+        self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped, onJudgeStopped: onJudgeStopped,
                   provider: JudgeProviders.make(config: config, openAIKey: key, judgeKey: judgeKey, http: transports.http,
                                                 scheduler: transports.scheduler),
                   scheduler: transports.scheduler) { speaker, onEvent in
@@ -529,6 +566,10 @@ public final class GptLayer: @unchecked Sendable {
         if let reason = core.stopReason, !stopReported {
             stopReported = true
             onStopped?(reason)
+        }
+        if let failure = core.judgeStopReason, !judgeStopReported {
+            judgeStopReported = true
+            onJudgeStopped?(failure)
         }
         return false
     }

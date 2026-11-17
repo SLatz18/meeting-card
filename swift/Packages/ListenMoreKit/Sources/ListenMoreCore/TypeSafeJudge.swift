@@ -1,7 +1,7 @@
 import Foundation
 
-/// The TypeSafe System One judge: POST `judge.typesafe.url` with `{model, state, questions}` and a
-/// Bearer key. The state is the minimal redacted window (`JudgeLine`s: speaker label, seconds ago,
+/// The TypeSafe System One judge: POST `judge.typesafe.url` with `{model, state, questions}` (the
+/// confirmed `SystemOne` format) and a Bearer key. The state is the minimal redacted window (`JudgeLine`s: speaker label, seconds ago,
 /// text); each judged cue is a `choice` question whose criteria are `fire` and `no_fire`. A `fire`
 /// answer at or above `min_confidence` is a verdict; anything under it, an HTTP error, a bad reply,
 /// a transport error or no answer within `timeout_s` gives no cue. It never throws.
@@ -27,35 +27,13 @@ public final class TypeSafeJudge: JudgeProvider, Sendable, CustomReflectable {
 
     public var customMirror: Mirror { Mirror(self, children: ["config": config]) }
 
-    public static func requestBody(_ c: ListenMoreConfig.Judge.TypeSafe, window: [JudgeLine]) -> [String: Any] {
-        ["model": c.model, "state": state(window), "questions": questions(c)]
-    }
-
-    static func state(_ window: [JudgeLine]) -> [String: Any] {
-        ["transcript": window.map { line -> [String: Any] in
-            ["speaker": line.speaker.rawValue, "seconds_ago": (line.secondsAgo * 10).rounded() / 10, "text": line.text]
-        }]
-    }
-
-    static func questions(_ c: ListenMoreConfig.Judge.TypeSafe) -> [String: Any] {
-        var out: [String: Any] = [:]
-        for (type, q) in c.questions.asked {
-            out[type.rawValue] = [
-                "type": "choice",
-                "instructions": c.context + " " + q.instructions,
-                "criteria": ["fire": q.fire, "no_fire": q.noFire],
-            ] as [String: Any]
-        }
-        return out
-    }
-
     public func judge(_ input: JudgeInput) async throws -> JudgeReply {
         .decided(await decide(input.window))
     }
 
     func decide(_ window: [JudgeLine]) async -> JudgeDecision {
         guard let url = URL(string: config.url),
-              let body = try? JSONSerialization.data(withJSONObject: Self.requestBody(config, window: window), options: [.sortedKeys])
+              let body = try? SystemOne.encode(SystemOne.request(config, window: window))
         else { return JudgeDecision(failure: .badResponse) }
         var d = JudgeDecision(costUsd: config.costUsdPerCall)
         do {
@@ -69,6 +47,7 @@ public final class TypeSafeJudge: JudgeProvider, Sendable, CustomReflectable {
             d.belowFloor = parsed.belowFloor
             d.inputTokens = parsed.inputTokens
             d.outputTokens = parsed.outputTokens
+            d.model = parsed.model
         } catch {
             d.failure = JudgeFailure.classify(error)
         }
@@ -97,26 +76,24 @@ public final class TypeSafeJudge: JudgeProvider, Sendable, CustomReflectable {
         var belowFloor: Int
         var inputTokens: Int
         var outputTokens: Int
+        var model: String?
     }
 
-    /// `answers` keyed by question id; only the questions asked count. A missing answer, a `no_fire`
-    /// choice or a missing confidence gives no cue.
+    /// Answers are matched to the questions asked by id. A missing or unknown answer (another id,
+    /// another type, any choice but `fire`) gives no cue; a `fire` without a confidence is under the floor.
     static func parse(_ data: Data, config: ListenMoreConfig.Judge.TypeSafe) throws -> Parsed {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let answers = root["answers"] as? [String: Any] else { throw JudgeFailure.badResponse }
-        var out = Parsed(verdicts: [], belowFloor: 0, inputTokens: 0, outputTokens: 0)
+        guard let reply = try? SystemOne.decode(data) else { throw JudgeFailure.badResponse }
+        var out = Parsed(verdicts: [], belowFloor: 0, inputTokens: reply.usage?.inputTokens ?? 0,
+                         outputTokens: reply.usage?.outputTokens ?? 0, model: reply.model)
         for (type, _) in config.questions.asked {
-            guard let a = answers[type.rawValue] as? [String: Any], a["choice"] as? String == "fire" else { continue }
-            let confidence = (a["confidence"] as? NSNumber)?.doubleValue ?? 0
+            guard let a = reply.answers[type.rawValue], a.fires else { continue }
+            let confidence = a.confidence ?? 0
             if confidence >= config.minConfidence {
                 out.verdicts.append(JudgeVerdict(label: type.rawValue, confidence: confidence))
             } else {
                 out.belowFloor += 1
             }
         }
-        let usage = root["usage"] as? [String: Any] ?? [:]
-        out.inputTokens = (usage["input_tokens"] as? NSNumber)?.intValue ?? 0
-        out.outputTokens = (usage["output_tokens"] as? NSNumber)?.intValue ?? 0
         return out
     }
 }

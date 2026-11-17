@@ -94,6 +94,12 @@ public struct KeychainStore: APIKeyProvider {
 
     public var hasKey: Bool { (try? readKey()) != nil }
 
+    /// Another item under this store's service (and access group), in `account`: e.g. the TypeSafe key
+    /// beside the OpenAI key, whatever service the host derives for that.
+    public func sibling(account: String) -> KeychainStore {
+        KeychainStore(service: service, account: account, accessGroup: accessGroup)
+    }
+
     /// Replaces any existing item in either keychain.
     public func save(_ key: APIKey) throws {
         try delete()

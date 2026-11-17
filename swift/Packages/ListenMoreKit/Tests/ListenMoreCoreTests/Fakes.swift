@@ -150,6 +150,10 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
     func stopGpt(_ reason: GptStopReason) {
         delegate?.engine(self, gptStopped: reason)
     }
+
+    func stopJudge(_ failure: JudgeFailure) {
+        delegate?.engine(self, judgeStopped: failure)
+    }
 }
 
 /// Settable wall clock.

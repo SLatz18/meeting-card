@@ -75,6 +75,8 @@ public final class CoachService: CoachSessionDelegate {
     public var isCapturing: Bool { session.isCapturing }
     /// The GPT layer stopped itself this session (local cues continue).
     public var gptStopped: GptStopReason? { session.gptStopped }
+    /// Judging stopped this session after repeated provider failures, and why (no key text, ever).
+    public var judgeStopped: JudgeFailure? { session.judgeStopped }
     /// Cues shown in the current session (a live counter; reset at start, never kept).
     public var cuesShown: Int { session.cuesShown }
     /// Mic or call-audio capture failed to start (usually a missing permission).

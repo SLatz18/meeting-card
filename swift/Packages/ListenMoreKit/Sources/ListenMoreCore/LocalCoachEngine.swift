@@ -119,6 +119,10 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
                                  onStopped: { [weak self] reason in
                                      guard let self else { return }
                                      self.delegate?.engine(self, gptStopped: reason)
+                                 },
+                                 onJudgeStopped: { [weak self] failure in
+                                     guard let self else { return }
+                                     self.delegate?.engine(self, judgeStopped: failure)
                                  })
             box.layer = layer
             layer.start()
