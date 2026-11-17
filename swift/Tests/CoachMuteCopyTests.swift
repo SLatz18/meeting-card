@@ -11,7 +11,8 @@ final class CoachMuteCopyTests: XCTestCase {
         XCTAssertEqual(CoachMuteCopy.strings["coach.mute.disabled.permission"],
                        "Allow MeetingCard in Privacy & Security to mute here.")
         XCTAssertEqual(CoachMuteCopy.strings["coach.mute.disabled.meet"], "Mute from the Meet window")
-        XCTAssertEqual(CoachMuteCopy.strings.count, 3)
+        XCTAssertEqual(CoachMuteCopy.strings["coach.a11y.mute.disabled.meet"], "Mute unavailable. Mute from the Meet window.")
+        XCTAssertEqual(CoachMuteCopy.strings.count, 4)
     }
 
     func testEachReasonMapsToItsString() {
@@ -31,8 +32,12 @@ final class CoachMuteCopyTests: XCTestCase {
         }
         XCTAssertEqual(CoachMuteCopy.presentation(reason: .toggleOff, isMuted: false).accessibilityLabel, "Mute your Zoom mic")
         XCTAssertEqual(CoachMuteCopy.presentation(reason: .permissionDenied, isMuted: true).accessibilityLabel, "Unmute your Zoom mic")
-        XCTAssertEqual(CoachMuteCopy.presentation(reason: .meet, isMuted: false).accessibilityLabel, "Mute from the Meet window",
-                       "no Zoom mic to name in a Meet call")
+        for muted in [false, true] {
+            let meet = CoachMuteCopy.presentation(reason: .meet, isMuted: muted)
+            XCTAssertEqual(meet.accessibilityLabel, "Mute unavailable. Mute from the Meet window.",
+                           "coach.a11y.mute.disabled.meet: no Zoom mic to name in a Meet call")
+            XCTAssertEqual(meet.tooltip, "Mute from the Meet window", "the tooltip stays coach.mute.disabled.meet")
+        }
     }
 
     func testNoZoomCallHidesTheControlWithNoTooltip() {

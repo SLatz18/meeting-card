@@ -32,11 +32,14 @@ public enum CoachMuteCopy {
     public static let disabledOffKey = "coach.mute.disabled.off"
     public static let disabledPermissionKey = "coach.mute.disabled.permission"
     public static let disabledMeetKey = "coach.mute.disabled.meet"
+    /// VoiceOver's label in a Meet call (the tooltip stays `disabledMeetKey`'s text).
+    public static let accessibilityDisabledMeetKey = "coach.a11y.mute.disabled.meet"
 
     public static let strings: [String: String] = [
         disabledOffKey: "Turn on \"Use Zoom/Meet controls\" in Settings to mute here.",
         disabledPermissionKey: "Allow MeetingCard in Privacy & Security to mute here.",
         disabledMeetKey: "Mute from the Meet window",
+        accessibilityDisabledMeetKey: "Mute unavailable. Mute from the Meet window.",
     ]
 
     public static let muteTooltip = "Mute your mic"
@@ -68,9 +71,9 @@ public enum CoachMuteCopy {
             return MuteControlPresentation(visibility: .hidden, tooltip: nil, accessibilityLabel: nil,
                                            accessibilityHelp: nil, disabledKey: nil)
         }
-        // In a Meet call there is no Zoom mic to name: the control reads as the Meet instruction.
-        return MuteControlPresentation(visibility: .disabled, tooltip: text,
-                                       accessibilityLabel: reason == .meet ? text : label,
+        // In a Meet call there is no Zoom mic to name: VoiceOver gets its own Meet label.
+        let a11y = reason == .meet ? strings[accessibilityDisabledMeetKey] : label
+        return MuteControlPresentation(visibility: .disabled, tooltip: text, accessibilityLabel: a11y,
                                        accessibilityHelp: text, disabledKey: key)
     }
 }
