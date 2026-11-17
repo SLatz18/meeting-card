@@ -35,6 +35,22 @@ final class CoachController: NSObject {
     private(set) lazy var callControlsModel = CallControlsModel(provider: callControls, sessionAppKey: { [weak self] in
         MainActor.assumeIsolated { self?.service?.session.session?.appKey }
     })
+
+    /// What a host shows for Mute: enabled with "Mute your mic" / "Unmute your mic", disabled with
+    /// the approved reason text, or hidden with no Zoom call (CoachMuteCopy).
+    var muteControl: MuteControlPresentation {
+        let m = callControlsModel
+        return CoachMuteCopy.presentation(reason: m.muteUnavailableReason.map(Self.muteDisabledReason), isMuted: m.isMuted)
+    }
+
+    static func muteDisabledReason(_ r: MuteUnavailableReason) -> MuteDisabledReason {
+        switch r {
+        case .toggleOff: .toggleOff
+        case .permissionDenied: .permissionDenied
+        case .noZoomCall: .noZoomCall
+        case .meet: .meet
+        }
+    }
     /// Cards on screen, newest last (the chip goes on each).
     var visibleCards: () -> [Card] = { [] }
     /// The coach status menu: always there, so the coach can be enabled from it while off.

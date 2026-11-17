@@ -34,7 +34,7 @@ menu-bar shortcuts only, plus the ⇧⌘A audio toggle's label reduced to a Bool
 Chrome and Dia (AppleScript: the browser filters tabs to the Meet host and the script returns a
 count; Meet mute is not detected, so only Zoom reports `muted`). `CallControlsModel` (`isMuted`, `canMute`,
 `muteUnavailableReason`, `toggleMute()`, `onChange`) is a host's Mute control: one Accessibility press on Zoom's own ⇧⌘A item
-per call, read back right after; a no-op with a reason (`toggleOff`, `permissionDenied`, `noZoomCall`, `meet`) otherwise. Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
+per call, read back right after; a no-op with a reason (`toggleOff`, `permissionDenied`, `noZoomCall`, `meet`) otherwise. MeetingCard's copy for each reason, and the tooltips and VoiceOver labels, are in `swift/Core/CoachMuteCopy.swift` (no Zoom call hides the control). Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
 revoked or unsupported backend reports nothing for its app. `CallControlsPermissions.request...`
 shows the system prompts and is for a host's opt-in toggle only.
 
