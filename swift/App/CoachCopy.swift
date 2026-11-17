@@ -39,7 +39,6 @@ enum CoachCopy {
     static let menuTurnOff = "Turn Off Call Coach"
     static let menuGptOffNoKey = "GPT cues off: no API key"
     static let menuGptOffRejected = "GPT cues off: key not accepted"
-    static let skipThisCall = "Skip This Call"
     static let pause = "Pause"
     static let resume = "Resume"
     static let startNow = "Start now"

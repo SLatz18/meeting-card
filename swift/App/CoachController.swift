@@ -5,12 +5,15 @@ import MeetingCardCore
 
 /// The call coach inside MeetingCard. Off by default: until the user turns it on (Settings or the
 /// coach status menu) there is no service, no Core Audio polling, no capture and no network. It
-/// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores six
-/// settings in UserDefaults (never call data); the API keys live only in the Keychain. The cue judge
+/// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores seven
+/// settings in UserDefaults (never call data; one is where the coach card was dragged); the API keys
+/// live only in the Keychain. The cue judge
 /// (`coach.judgeProvider`, gpt unless set) applies from the next call.
 /// "Use Zoom/Meet controls" (off by default) lets Zoom's meeting controls and an open Meet tab stop
 /// the coach within seconds of a call ending and hold it while Zoom is muted; its Accessibility and
 /// Automation prompts appear only when the user turns it on (or asks again from Settings).
+/// While the coach is on for a call, the reminder card morphs into the coach card near the camera
+/// (minimizable to a pill), which also mutes Zoom through that setting.
 @MainActor
 final class CoachController: NSObject {
     enum Keys {
@@ -20,7 +23,11 @@ final class CoachController: NSObject {
         static let onboarded = "coach.onboarded"
         static let callControls = "coach.callControls"
         static let judgeProvider = "coach.judgeProvider"
+        static let cardPosition = "coach.cardPosition"
     }
+
+    /// MeetingCard's choices on top of the coach's generic config: not_listening nudges are off by default.
+    static let configOverrides: [String: Any] = ["cues": ["disabled": [CueType.notListening.rawValue]]]
 
     /// MeetingCard's Keychain item for the OpenAI key, `<bundle id>.openai` (the Kit's default service is not ours).
     static let keychainService = AppIdentity.current.keychainService
@@ -34,8 +41,8 @@ final class CoachController: NSObject {
     let keyGate: CoachKeyGate
     /// App-level call state for the service; reads nothing while the setting is off.
     let callControls: CallControlsProvider
-    /// The coach's Mute control for a host surface to show (Zoom only: one press on Zoom's own
-    /// Mute/Unmute item; Meet: unavailable, mute from Meet). No surface hosts it yet.
+    /// The coach's Mute control (Zoom only: one press on Zoom's own Mute/Unmute item; Meet:
+    /// unavailable, mute from Meet), hosted by the coach card and pill.
     private(set) lazy var callControlsModel = CallControlsModel(provider: callControls, sessionAppKey: { [weak self] in
         MainActor.assumeIsolated { self?.service?.session.session?.appKey }
     })
@@ -65,6 +72,12 @@ final class CoachController: NSObject {
     private var settingsWindow: CoachSettingsWindow?
     /// Last key problem shown in Settings.
     var keyProblem: KeyCheck?
+    /// The coach card, made the first time it shows.
+    private(set) var coachCard: CoachCardPresenter?
+    private var nudges = CoachNudgeHold()
+    private var nudgeTimer: Timer?
+    /// The coach card is the pill (for the rest of this showing).
+    private(set) var minimized = false
 
     init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
          showsStatusItem: Bool = true) throws {
@@ -73,10 +86,11 @@ final class CoachController: NSObject {
         typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
         self.showsStatusItem = showsStatusItem
-        config = try ListenMoreConfig.builtIn()
+        config = try ListenMoreConfig.load(overrides: Self.configOverrides)
         callControls = .live(config: config)
         super.init()
         callControls.isEnabled = callControlsOn
+        callControlsModel.onChange = { [weak self] in self?.refresh() }
         keyStored = keychain.hasKey
         typeSafeKeyStored = typeSafeKeychain.hasKey
         if enabled {
@@ -223,8 +237,9 @@ final class CoachController: NSObject {
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
                              allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine)
         s.fallbackScreen = { [weak self] in self?.cardScreen() }
-        s.hostWindowNumber = { [weak self] in self?.visibleCards().last?.panel.windowNumber }
+        s.hostWindowNumber = { [weak self] in self?.hostWindowNumber() }
         s.onChange = { [weak self] in self?.refresh() }
+        s.onCue = { [weak self] cue in self?.showNudge(cue) }
         service = s
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
         RunLoop.main.add(t, forMode: .common)
@@ -232,8 +247,16 @@ final class CoachController: NSObject {
         refresh()
     }
 
+    /// The coach card's display while it shows, else the newest reminder card's.
     private func cardScreen() -> NSRect? {
-        visibleCards().last?.panel.screen?.frame ?? NSScreen.main?.frame
+        if let c = coachCard, c.isShown, let f = c.panel.screen?.frame { return f }
+        return visibleCards().last?.panel.screen?.frame ?? NSScreen.main?.frame
+    }
+
+    /// The glow goes behind the coach card while it shows, else behind the newest reminder card.
+    private func hostWindowNumber() -> Int? {
+        if let c = coachCard, c.isShown { return c.panel.windowNumber }
+        return visibleCards().last?.panel.windowNumber
     }
 
     /// The Kit's coach style from MeetingCard's tokens: rose and amber per appearance at standard
@@ -276,13 +299,45 @@ final class CoachController: NSObject {
     @objc func startClicked(_ sender: Any?) { service?.start() }
     @objc func pauseClicked(_ sender: Any?) { service?.pause() }
     @objc func resumeClicked(_ sender: Any?) { service?.resume() }
-    @objc func skipClicked(_ sender: Any?) { service?.skipThisCall() }
+    @objc func stopClicked(_ sender: Any?) { stopForThisCall() }
     @objc func enableClicked(_ sender: Any?) {
         setEnabled(true) { _ in }
         if !onboarded { showSettings() }
     }
     @objc func turnOffClicked(_ sender: Any?) { setEnabled(false) { _ in } }
     @objc func settingsClicked(_ sender: Any?) { showSettings() }
+
+    /// Stop: the coach is off for the rest of this call (replaces Skip this call).
+    func stopForThisCall() {
+        service?.stopForThisCall()
+        CoachCardPresenter.announce(CoachCardCopy.A11y.skipped)
+        refresh()
+    }
+
+    /// One press of Zoom's own Mute/Unmute item (on the provider's queue); the card follows the read-back.
+    func toggleMute() {
+        callControlsModel.toggleMute()
+    }
+
+    func pauseOrResume() {
+        if indicator == .paused { service?.resume() } else { service?.pause() }
+    }
+
+    func toggleMinimized() {
+        minimized.toggle()
+        refresh()
+    }
+
+    private func showNudge(_ cue: Cue) {
+        guard let n = CoachNudge(cue) else { return }
+        nudges.show(n, now: ProcessInfo.processInfo.systemUptime)
+        CoachCardPresenter.announce(n.announcement)
+        nudgeTimer?.invalidate()
+        let t = Timer(timeInterval: nudges.hold, repeats: false) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
+        RunLoop.main.add(t, forMode: .common)
+        nudgeTimer = t
+        refresh()
+    }
 
     func showSettings() {
         let w = settingsWindow ?? CoachSettingsWindow(coach: self)
@@ -292,12 +347,49 @@ final class CoachController: NSObject {
 
     // MARK: indicator
 
-    /// Chip on every visible card, and the coach status menu (always there, so it's a way in while off).
+    /// The coach card while the coach is on for a call (the chip on the cards otherwise), and the
+    /// coach status menu (always there, so it's a way in while off).
     func refresh() {
-        let chip = self.chip
+        let card = coachCardState()
+        let chip = card == nil ? self.chip : nil
         for c in visibleCards() { c.setCoach(chip) }
+        updateCoachCard(card)
         updateStatusItem()
         settingsWindow?.update()
+    }
+
+    /// What the coach card shows now, or nil while the coach isn't on for a call.
+    func coachCardState() -> CoachCardState? {
+        guard enabled, let status = CoachCardState.Status(indicator) else { return nil }
+        let now = ProcessInfo.processInfo.systemUptime
+        nudges.expire(now: now)
+        return CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, nudge: nudges.active(now: now),
+                              mode: minimized ? .pill : .card,
+                              increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+    }
+
+    private func updateCoachCard(_ s: CoachCardState?) {
+        guard let s else {
+            guard let c = coachCard, c.isShown else { return }
+            let card = c.hide()
+            minimized = false
+            nudges.clear()
+            if let card, visibleCards().contains(where: { $0 === card }) { card.panel.orderFrontRegardless() }
+            return
+        }
+        let c = coachCard ?? makeCoachCard()
+        coachCard = c
+        if c.isShown { c.update(s) } else { c.show(s, from: visibleCards().last) }
+    }
+
+    private func makeCoachCard() -> CoachCardPresenter {
+        let p = CoachCardPresenter(defaults: defaults, positionKey: Keys.cardPosition, captions: CoachCaptionsPlaceholder())
+        p.actions = CoachCardActions(stop: { [weak self] in self?.stopForThisCall() },
+                                     mute: { [weak self] in self?.toggleMute() },
+                                     pause: { [weak self] in self?.pauseOrResume() },
+                                     resize: { [weak self] in self?.toggleMinimized() })
+        p.callScreen = { [weak self] in self?.service?.glowScreen }
+        return p
     }
 
     var menuItems: [CoachMenuItem] { CoachMenu.items(enabled: enabled, indicator: indicator, gptAvailable: gptAvailable) }
@@ -375,7 +467,7 @@ final class CoachController: NSObject {
                                     : note(CoachCopy.menuGptOffNoKey, sym.gptOffNoKey)
         case .enable: return action(CoachCopy.menuEnable, sym.enable, #selector(enableClicked(_:)))
         case .startNow: return action(CoachCopy.startNow, sym.start, #selector(startClicked(_:)))
-        case .skipThisCall: return action(CoachCopy.skipThisCall, sym.skip, #selector(skipClicked(_:)))
+        case .stopForCall: return action(CoachCardCopy.Button.stop, sym.stop, #selector(stopClicked(_:)))
         case .pause: return action(CoachCopy.pause, sym.pause, #selector(pauseClicked(_:)))
         case .resume: return action(CoachCopy.resume, sym.resume, #selector(resumeClicked(_:)))
         case .turnOff: return action(CoachCopy.menuTurnOff, sym.turnOff, #selector(turnOffClicked(_:)))

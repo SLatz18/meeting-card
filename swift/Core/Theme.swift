@@ -280,7 +280,7 @@ public enum Theme {
         public static let pauseSymbol = "pause.fill"
         public static let resumeSymbol = "play.fill"
         /// SF Symbols for the coach status menu, drawn at the body font size like a native menu.
-        public static let menuSymbols = (enable: "power", start: resumeSymbol, skip: "forward.end.fill",
+        public static let menuSymbols = (enable: "power", start: resumeSymbol, stop: CoachCard.Symbols.stop,
                                          pause: pauseSymbol, resume: resumeSymbol, turnOff: "power",
                                          gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
                                          settings: "gearshape")
@@ -408,7 +408,12 @@ public enum Theme {
         public static var height: Double { 2 * vertical + 2 * rowHeight + 2 * rowGap + captionsHeight }
 
         public static let statusFont = CardStyle.Typography.body
+        /// The status line reads like the chip: primary, held (paused or muted) secondary.
+        public static let statusText = Coach.text
+        public static let heldText = Coach.heldText
         public static let nudgeFont = Theme.FontSpec(CardStyle.Typography.body.size, .semibold)
+        /// Nudge words on the tint (contrast checked against it).
+        public static let nudgeText = CardStyle.Text.primary
         public static let captionsFont = CardStyle.Typography.caption
         public static let captionsText = CardStyle.Text.secondary
         public static let buttonFont = CardStyle.Typography.button
@@ -476,6 +481,7 @@ public enum Theme {
         public static let radius = CardStyle.Coach.pill.radius
         public static let grabber = CardStyle.Coach.grabber
         public static let grabberTop = Coach.controlInset
+        public static let grabberColor = CardStyle.Text.tertiary
         public static let padding = Coach.paddingLeading
         public static let glyphSize = Coach.glyphSize
         public static let glyphGap = Coach.glyphGap
