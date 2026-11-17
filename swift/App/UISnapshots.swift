@@ -30,27 +30,43 @@ enum UISnapshots {
                 let chip = card.coach
                 let withChip = card.snapshotImage()
                 card.setCoach(nil)
-                let plain = card.snapshotImage()
-                card.setCoach(chip)
-                func packet(_ name: String, _ surface: CGImage?) {
-                    guard let plain, let surface, let img = pair(plain, surface, dark: card.isDark) else {
-                        return controller.log("coach packet \(name)-\(tag) ok=false")
+                controller.schedule(0.5, repeats: false) { [weak card] in
+                    MainActor.assumeIsolated {
+                        guard let card else { return }
+                        let plain = card.snapshotImage()
+                        card.setCoach(chip)
+                        controller.schedule(0.5, repeats: false) { [weak card] in
+                            MainActor.assumeIsolated {
+                                guard let card else { return }
+                                shots(dir: dir, tag: tag, card: card, plain: plain, withChip: chip == nil ? nil : withChip,
+                                      controller: controller)
+                            }
+                        }
                     }
-                    let ok = Card.writePNG(img, "\(dir)/packet-\(name)-\(tag).png")
-                    controller.log("coach packet \(name)-\(tag) ok=\(ok)")
-                }
-                if chip != nil { packet("chip", withChip) }
-                for (name, color) in [("rose", CueColor.red), ("amber", CueColor.amber)] {
-                    let img = glowImage(color, card: card)
-                    let ok = img.map { Card.writePNG($0, "\(dir)/glow-\(name)-\(tag).png") } ?? false
-                    controller.log("coach shot glow-\(name)-\(tag) ok=\(ok)")
-                    packet("glow-\(name)", img)
-                }
-                settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
-                    menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
-                    NSApp.terminate(nil)
                 }
             }
+        }
+    }
+
+    @MainActor
+    static func shots(dir: String, tag: String, card: Card, plain: CGImage?, withChip: CGImage?, controller: Controller) {
+        func packet(_ name: String, _ surface: CGImage?) {
+            guard let plain, let surface, let img = pair(plain, surface, dark: card.isDark) else {
+                return controller.log("coach packet \(name)-\(tag) ok=false")
+            }
+            let ok = Card.writePNG(img, "\(dir)/packet-\(name)-\(tag).png")
+            controller.log("coach packet \(name)-\(tag) ok=\(ok)")
+        }
+        if withChip != nil { packet("chip", withChip) }
+        for (name, color) in [("rose", CueColor.red), ("amber", CueColor.amber)] {
+            let img = glowImage(color, card: card)
+            let ok = img.map { Card.writePNG($0, "\(dir)/glow-\(name)-\(tag).png") } ?? false
+            controller.log("coach shot glow-\(name)-\(tag) ok=\(ok)")
+            packet("glow-\(name)", img)
+        }
+        settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
+            menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
+            NSApp.terminate(nil)
         }
     }
 
@@ -152,20 +168,45 @@ enum UISnapshots {
         guard let w = menus.max(by: { $0.frame.height < $1.frame.height }) else { return nil }
         let f = w.frame
         let top = (NSScreen.screens.first?.frame.height ?? f.maxY) - f.maxY
-        let path = NSTemporaryDirectory() + "coach-menu-\(UUID().uuidString).png"
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-R\(Int(f.minX)),\(Int(top)),\(Int(f.width)),\(Int(f.height))", path]
-        try? p.run()
-        p.waitUntilExit()
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        if p.terminationStatus == 0, let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-           let img = CGImageSourceCreateImageAtIndex(src, 0, nil) {
-            log("coach menu capture: screencapture \(img.width)x\(img.height)")
-            return img
+        log("coach menu frame: \(Int(f.minX)),\(Int(top)) \(Int(f.width))x\(Int(f.height)) number=\(w.windowNumber)")
+        let attempts: [(String, [String])] = [
+            ("window", ["-x", "-o", "-l\(w.windowNumber)"]),
+            ("rect", ["-x", "-R\(Int(f.minX)),\(Int(top)),\(Int(f.width)),\(Int(f.height))"]),
+        ]
+        for (name, args) in attempts {
+            let path = NSTemporaryDirectory() + "coach-menu-\(UUID().uuidString).png"
+            defer { try? FileManager.default.removeItem(atPath: path) }
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            p.arguments = args + [path]
+            try? p.run()
+            p.waitUntilExit()
+            guard p.terminationStatus == 0, let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+                  let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+                log("coach menu capture \(name): failed status=\(p.terminationStatus)")
+                continue
+            }
+            let drawn = hasContent(img)
+            log("coach menu capture \(name): \(img.width)x\(img.height) content=\(drawn)")
+            if drawn { return img }
         }
-        log("coach menu capture: layer render")
-        return windowImage(w)
+        let img = windowImage(w)
+        log("coach menu capture render: content=\(img.map(hasContent) ?? false)")
+        return img
+    }
+
+    /// True when the image isn't one flat color (a capture without access returns blank pixels).
+    static func hasContent(_ img: CGImage) -> Bool {
+        let n = 24
+        var px = [UInt8](repeating: 0, count: n * n * 4)
+        guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: &px, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: n, height: n))
+        let first = Array(px[0..<4])
+        return stride(from: 0, to: px.count, by: 4).contains { i in
+            (0..<4).contains { abs(Int(px[i + $0]) - Int(first[$0])) > 8 }
+        }
     }
 
     /// A shown window's content over its resolved background (layer render, like the card snapshot;

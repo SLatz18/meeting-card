@@ -5,7 +5,8 @@
 #       <out>/head; a pair is re-rendered once if they differ (the clock minute can roll over
 #       between the two renders and the card shows absolute times)
 #   scripts/snapshots.sh coach <out-dir>
-#       coach chip states, glow, Settings and onboarding from this checkout's build
+#       coach chip states, glow, Settings, onboarding, status menu and the design packet
+#       (packet-<surface>-<appearance>.png) from this checkout's build
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 # Start 10 min out: the "in 10 min" title is stable across a pair.
@@ -41,9 +42,13 @@ case "${1:-}" in
         shot "$HERE" meet "$a" "$OUT/coach-chip-$chip-$a.png" MEETING_CARD_COACH_CHIP="$chip"
       done
     done
+    # Glow, Settings, onboarding, the status menu and the design packet (packet-*.png: the card
+    # beside each coach surface). The fixture log's coach-shot lines (names and sizes only) are kept.
+    LOG="$HOME/Library/Logs/MeetingCardSwift-fixture.log"
     for a in light dark; do
       (cd "$HERE" && MEETING_CARD_COACH_CHIP=listening MEETING_CARD_COACH_SHOTS="$OUT" \
-        scripts/show-fixture.sh meet "$a" 10 >/dev/null 2>&1) || true
+        scripts/show-fixture.sh meet "$a" 20 >/dev/null 2>&1) || true
+      grep -hE "coach (shot|packet|menu)" "$LOG" >> "$OUT/coach-shots.log" 2>/dev/null || true
     done
     ls "$OUT"
     ;;
