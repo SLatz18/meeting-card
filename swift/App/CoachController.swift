@@ -319,7 +319,7 @@ final class CoachController: NSObject {
             case .on: m = note(CoachCopy.coachOn, Theme.Coach.symbol)
             case .listening: m = note(CoachCopy.coachListening, Theme.Coach.symbol)
             case .paused: m = note(CoachCopy.coachPaused, Theme.Coach.symbol)
-            case .muted: m = note(CoachCopy.coachMuted, Theme.Coach.symbol)
+            case .muted: m = note(CoachCopy.coachMuted, Theme.CallControls.mutedSymbol)
             }
             return m
         case .gptOff:

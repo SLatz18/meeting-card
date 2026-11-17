@@ -106,7 +106,7 @@ final class CoachChipView: NSView {
         setAccessibilityLabel(showsLabel ? chip.accessibilityLabel : "\(chip.accessibilityLabel): \(chip.label)")
         if !showsLabel { toolTip = chip.label }
 
-        let fg = Theme.text(paused ? .secondary : .primary, style)
+        let fg = Theme.text(paused ? c.heldText : c.text, style)
         var x = c.paddingLeading
         let midY = frame.height / 2
         let glyph = NSImageView(image: Self.symbol(c.symbol, size: c.glyphSize, weight: weight, label: chip.accessibilityLabel) ?? NSImage())

@@ -214,6 +214,37 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(st.helperFont, CardStyle.Typography.caption)
     }
 
+    /// "Use Zoom/Meet controls" and the Muted state are Settings and chip tokens, so CardStyle's.
+    func testCallControlsDeriveFromCardStyle() {
+        let cc = Theme.CallControls.self
+        XCTAssertEqual(cc.rowFont, CardStyle.Typography.button)
+        XCTAssertEqual(cc.helperFont, CardStyle.Typography.caption)
+        XCTAssertEqual(cc.explainerFont, CardStyle.Typography.caption)
+        XCTAssertEqual(cc.helperText, .secondary)
+        XCTAssertEqual(cc.explainerText, .secondary, "informational, not critical")
+        XCTAssertEqual(cc.mutedText, Theme.Coach.heldText, "Muted reads like Paused")
+        XCTAssertEqual(Theme.Coach.heldText, .secondary)
+        XCTAssertEqual(Theme.Coach.text, .primary)
+        XCTAssertEqual(cc.mutedSymbol, Theme.Coach.symbol)
+    }
+
+    /// The coach UI files carry no literal sizes, radii or colors of their own, and the Zoom/Meet
+    /// controls UI reads its tokens (not inline text roles).
+    func testCallControlsUIReadsItsTokens() throws {
+        let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
+        let settings = try String(contentsOf: app.appendingPathComponent("CoachSettingsWindow.swift"), encoding: .utf8)
+        for line in settings.components(separatedBy: "\n") where line.contains("callControls") && line.contains("Self.text(") {
+            XCTAssertTrue(line.contains("Theme.CallControls."), line)
+        }
+        XCTAssertTrue(settings.contains("color(Theme.CallControls.explainerText)"))
+        XCTAssertTrue(settings.contains("color: Self.color(Theme.CallControls.helperText)"))
+        let chip = try String(contentsOf: app.appendingPathComponent("CoachChip.swift"), encoding: .utf8)
+        XCTAssertTrue(chip.contains("Theme.text(paused ? c.heldText : c.text, style)"))
+        XCTAssertTrue(chip.contains("let paused = chip.held"), "Muted is drawn like Paused")
+        let controller = try String(contentsOf: app.appendingPathComponent("CoachController.swift"), encoding: .utf8)
+        XCTAssertTrue(controller.contains("note(CoachCopy.coachMuted, Theme.CallControls.mutedSymbol)"))
+    }
+
     /// The coach UI files carry no literal sizes, radii or colors of their own.
     func testCoachUIHasNoOneOffValues() throws {
         let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")

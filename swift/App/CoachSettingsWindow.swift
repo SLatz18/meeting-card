@@ -21,7 +21,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let anyAppBox = NSButton(checkboxWithTitle: CoachCopy.anyApp, target: nil, action: nil)
     private let callControlsSwitch = NSSwitch()
-    private let callControlsNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let callControlsNote = CoachSettingsWindow.text("", font: Theme.CallControls.explainerFont,
+                                                            color: CoachSettingsWindow.color(Theme.CallControls.explainerText))
     private let requestAccessButton = NSButton(title: CoachCopy.requestAccess, target: nil, action: nil)
     private var appsStack = NSStackView()
     private let root = NSStackView()
@@ -314,8 +315,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         requestAccessButton.action = #selector(requestAccess(_:))
         requestAccessButton.bezelStyle = startButton.bezelStyle
         requestAccessButton.controlSize = startButton.controlSize
-        let callControlsRow = Self.row(Self.text(CoachCopy.callControlsToggle, font: Theme.Settings.rowFont), callControlsSwitch)
-        let callControlsHelp = Self.text(CoachCopy.callControlsHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
+        let callControlsRow = Self.row(Self.text(CoachCopy.callControlsToggle, font: Theme.CallControls.rowFont), callControlsSwitch)
+        let callControlsHelp = Self.text(CoachCopy.callControlsHelp, font: Theme.CallControls.helperFont,
+                                         color: Self.color(Theme.CallControls.helperText))
         let gControls = Self.group([callControlsRow, callControlsHelp, callControlsNote, requestAccessButton])
         for v in [callControlsRow, callControlsHelp, callControlsNote] { pin(v, in: gControls) }
 

@@ -39,7 +39,7 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertTrue(body.contains("if on { requestCallControlsAccess() }"), "asks in context, only when turned on")
         let settings = try read("App/CoachSettingsWindow.swift")
         XCTAssertTrue(settings.contains("coach.setCallControls(sender.state == .on)"))
-        XCTAssertTrue(settings.contains("Theme.Settings.rowFont") && settings.contains("CoachCopy.callControlsToggle"))
+        XCTAssertTrue(settings.contains("Theme.CallControls.rowFont") && settings.contains("CoachCopy.callControlsToggle"))
     }
 
     func testOptInIsOffByDefault() throws {

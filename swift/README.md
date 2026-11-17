@@ -38,7 +38,7 @@ Settings, Settings with Use Zoom/Meet controls on, onboarding and menu PNGs, the
 card at the base and head revisions (`scripts/compare-snapshots.py`).
 
 Call coach (opt-in, off by default): `App/Coach*.swift` (controller, chip, Settings, copy) on top of ListenMoreKit.
-Design tokens in `Core/Theme.swift`: `CardStyle` holds the reminder card's typography, color roles, radii, spacing, strokes, material and light/dark values. The card reads it, and every coach surface (chip, glow, Settings, onboarding, status menu) derives from it through `Theme`; the Kit gets its glow colors and shape as a `CoachStyle` built from these tokens. `scripts/snapshots.sh coach` also writes `packet-*.png`: the card beside each coach surface, light and dark.
+Design tokens in `Core/Theme.swift`: `CardStyle` holds the reminder card's typography, color roles, radii, spacing, strokes, material and light/dark values. The card reads it, and every coach surface (chip, glow, Settings, onboarding, status menu) derives from it through `Theme`; the Kit gets its glow colors and shape as a `CoachStyle` built from these tokens. `scripts/snapshots.sh coach` also writes `packet-*.png` (listed in `packet-list.txt`): the card beside each coach surface, light and dark, and fails if a Use Zoom/Meet controls packet (`chip-muted`, `settings`, `settings-call-controls`, `menu-muted`) is missing. The Use Zoom/Meet controls group and the Muted state read `Theme.CallControls`.
 Needs Microphone, System Audio Recording and Screen Recording only once the user turns the coach on. "Use Zoom/Meet
 controls" (off by default) adds Accessibility (Zoom) and Automation (Chrome, Dia), asked for only when that toggle is
 turned on (or from its Request access button).
