@@ -39,7 +39,29 @@ extension Theme {
         case .tertiary: .tertiaryLabelColor
         case .accent: ns(style.accent)
         case .warning: ns(style.warning)
-        case .critical: .systemRed
+        case .critical: system(CardStyle.criticalColor)
+        }
+    }
+
+    static func system(_ c: CardStyle.SystemColor) -> NSColor {
+        switch c {
+        case .red: .systemRed
+        case .orange: .systemOrange
+        }
+    }
+
+    /// A dynamic color: `c` resolved in the drawing appearance (dark, Increase Contrast) and then
+    /// passed through `transform(resolved, dark)`.
+    static func dynamic(_ c: CardStyle.SystemColor, _ transform: @escaping (RGBA, Bool) -> RGBA) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            var base = CardStyle.srgb(c, dark: dark)
+            appearance.performAsCurrentDrawingAppearance {
+                if let r = system(c).usingColorSpace(.sRGB) {
+                    base = RGBA(Double(r.redComponent), Double(r.greenComponent), Double(r.blueComponent))
+                }
+            }
+            return ns(transform(base, dark))
         }
     }
 

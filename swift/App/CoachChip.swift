@@ -7,8 +7,10 @@ import MeetingCardCore
 struct CoachChip: Equatable {
     enum Mode: Equatable { case on, listening, paused }
     var mode: Mode
+    /// Fixture runs only: a longer label, to show the collapse rule (`Theme.Coach.layout`).
+    var labelOverride: String?
 
-    init(mode: Mode) { self.mode = mode }
+    init(mode: Mode, labelOverride: String? = nil) { self.mode = mode; self.labelOverride = labelOverride }
 
     init?(_ indicator: CoachIndicator) {
         switch indicator {
@@ -20,7 +22,8 @@ struct CoachChip: Equatable {
     }
 
     var label: String {
-        switch mode {
+        if let labelOverride { return labelOverride }
+        return switch mode {
         case .on: "On"
         case .listening: "Listening"
         case .paused: "Paused"
@@ -71,7 +74,7 @@ final class CoachChipView: NSView {
         Double(makeLabel(chip).intrinsicContentSize.width.rounded(.up))
     }
 
-    /// Frame (card coordinates) right-anchored `Theme.Coach.joinGap` left of `joinX`.
+    /// Frame (card coordinates) right-anchored `Theme.Coach.clearance` left of `joinX`.
     static func frame(_ chip: CoachChip, joinX: Double?) -> (NSRect, Bool) {
         let l = Theme.Coach.layout(labelWidth: labelWidth(chip), joinX: joinX)
         let m = Theme.Metrics.self
@@ -94,7 +97,8 @@ final class CoachChipView: NSView {
         layer?.borderColor = Theme.ns(style.hairline).cgColor
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel(chip.accessibilityLabel)
+        setAccessibilityLabel(showsLabel ? chip.accessibilityLabel : "\(chip.accessibilityLabel): \(chip.label)")
+        if !showsLabel { toolTip = chip.label }
 
         let fg = Theme.text(paused ? .secondary : .primary, style)
         var x = c.paddingLeading

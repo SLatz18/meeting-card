@@ -102,6 +102,65 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(noJoin.x + noJoin.width, m.cardWidth - m.trailingInset - CardStyle.Spacing.control, accuracy: 1e-9)
     }
 
+    /// The fixed collapse rule: full only with >= 8 pt to Ignore and to the primary button, else
+    /// icon-only (glyph, 4 pt gap, 25 pt Pause), which always fits; the primary button is untouched.
+    func testChipCollapseRule() {
+        let m = Theme.Metrics.self, c = Theme.Coach.self
+        let ignoreRight = m.leadingInset + m.ignoreWidth
+        XCTAssertEqual(c.iconOnlyWidth, 8 + 20 + 4 + 25 + 4, accuracy: 1e-9)
+        XCTAssertEqual(c.pauseButtonSize, 25)
+        XCTAssertEqual(c.glyphGap, 4)
+        let joins: [Double?] = [m.joinWidth, m.joinWidthMeet, m.joinWidthCalendar, nil]
+        for jw in joins {
+            let joinX = jw.map { m.cardWidth - m.trailingInset - $0 }
+            let primaryLeft = joinX ?? (m.cardWidth - m.trailingInset)
+            for label in stride(from: 0.0, through: 220, by: 2) {
+                let l = c.layout(labelWidth: label, joinX: joinX)
+                let gapIgnore = l.x - ignoreRight, gapPrimary = primaryLeft - (l.x + l.width)
+                XCTAssertGreaterThanOrEqual(gapIgnore, 8 - 1e-9, "join \(String(describing: jw)) label \(label)")
+                XCTAssertEqual(gapPrimary, 8, accuracy: 1e-9)
+                let fullFits = primaryLeft - 8 - c.fullWidth(labelWidth: label) >= ignoreRight + 8
+                XCTAssertEqual(l.showsLabel, fullFits, "join \(String(describing: jw)) label \(label)")
+                XCTAssertEqual(l.width, fullFits ? c.fullWidth(labelWidth: label) : c.iconOnlyWidth, accuracy: 1e-9)
+            }
+        }
+        let calendarX = m.cardWidth - m.trailingInset - m.joinWidthCalendar
+        XCTAssertTrue(c.layout(labelWidth: 60, joinX: calendarX).showsLabel, "Listening fits beside Open in Calendar")
+        XCTAssertFalse(c.layout(labelWidth: 120, joinX: calendarX).showsLabel)
+    }
+
+    /// Settings stays card-width and inside the visible frame: taller groups scroll.
+    func testSettingsWindowStaysInsideTheVisibleFrame() {
+        let st = Theme.Settings.self
+        XCTAssertEqual(st.contentHeight(fitting: 600, visibleHeight: 875, chrome: 28).height, 600)
+        XCTAssertFalse(st.contentHeight(fitting: 600, visibleHeight: 875, chrome: 28).scrolls)
+        let tall = st.contentHeight(fitting: 1200, visibleHeight: 875, chrome: 28)
+        XCTAssertEqual(tall.height, 847)
+        XCTAssertTrue(tall.scrolls)
+        let visible = (x: 0.0, y: 25.0, w: 1440.0, h: 875.0)
+        let o = st.clamp(origin: (500, -40), size: (440, 875), visible: visible)
+        XCTAssertEqual(o.x, 500); XCTAssertEqual(o.y, 25, "pulled up off the Dock")
+        let top = st.clamp(origin: (1200, 600), size: (440, 400), visible: visible)
+        XCTAssertEqual(top.x, 1000); XCTAssertEqual(top.y, 500, "pulled in from the right and the top")
+        XCTAssertEqual(st.groupRadius, 20)
+        XCTAssertEqual(st.groupWidth, Theme.Metrics.cardWidth)
+    }
+
+    /// Onboarding: "Meet Call Coach", and the primary button is the card's button.
+    func testOnboardingUsesTheCardButtonAndTitleCase() throws {
+        let st = Theme.Settings.self
+        XCTAssertEqual(st.buttonHeight, 33)
+        XCTAssertEqual(st.buttonRadius, 9)
+        XCTAssertEqual(st.buttonFont, Theme.FontSpec(13.5, .medium))
+        let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
+        let copy = try String(contentsOf: app.appendingPathComponent("CoachCopy.swift"), encoding: .utf8)
+        XCTAssertTrue(copy.contains("\"Meet Call Coach\""))
+        XCTAssertFalse(copy.contains("\"Meet Call coach\""))
+        let window = try String(contentsOf: app.appendingPathComponent("CoachSettingsWindow.swift"), encoding: .utf8)
+        XCTAssertTrue(window.contains("let primary = Self.cardButton(s.primary"))
+        XCTAssertTrue(window.contains("b.role = .ignore"))
+    }
+
     /// Every coach surface value is a CardStyle token or derived from one.
     func testCoachSurfacesDeriveFromCardStyle() {
         let c = Theme.Coach.self
@@ -109,7 +168,7 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(c.radius, CardStyle.Radius.control)
         XCTAssertEqual(c.labelFont, CardStyle.Typography.button)
         XCTAssertEqual(c.glyphSize, CardStyle.Size.icon)
-        XCTAssertEqual(c.joinGap, CardStyle.Spacing.control)
+        XCTAssertEqual(c.clearance, CardStyle.Spacing.control)
         XCTAssertEqual(c.paddingLeading, CardStyle.Spacing.control)
         XCTAssertEqual(c.glyphGap, CardStyle.Spacing.control / 2)
         XCTAssertEqual(c.pauseButtonSize + 2 * c.controlInset, c.height)

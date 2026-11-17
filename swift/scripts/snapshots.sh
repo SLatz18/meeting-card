@@ -5,7 +5,7 @@
 #       <out>/head; a pair is re-rendered once if they differ (the clock minute can roll over
 #       between the two renders and the card shows absolute times)
 #   scripts/snapshots.sh coach <out-dir>
-#       coach chip states, glow, Settings, onboarding, status menu and the design packet
+#       coach chip states (incl. the multi-link card, full and collapsed), glow, Settings, onboarding, status menu and the design packet
 #       (packet-<surface>-<appearance>.png) from this checkout's build
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -41,6 +41,13 @@ case "${1:-}" in
       for a in light dark; do
         shot "$HERE" meet "$a" "$OUT/coach-chip-$chip-$a.png" MEETING_CARD_COACH_CHIP="$chip"
       done
+    done
+    # The wide multi-link "Open in Calendar" button: the real label (full chip, 8 pt clear of
+    # Ignore and the button) and a long label (the collapse rule: icon-only, button untouched).
+    for a in light dark; do
+      shot "$HERE" multilink "$a" "$OUT/coach-chip-multilink-$a.png" MEETING_CARD_COACH_CHIP=listening
+      shot "$HERE" multilink "$a" "$OUT/coach-chip-collapsed-multilink-$a.png" MEETING_CARD_COACH_CHIP=listening \
+        MEETING_CARD_COACH_CHIP_LABEL="Listening to this call"
     done
     # Glow, Settings, onboarding, the status menu and the design packet (packet-*.png: the card
     # beside each coach surface). The fixture log's coach-shot lines (names and sizes only) are kept.

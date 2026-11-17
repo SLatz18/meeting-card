@@ -20,10 +20,21 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let anyAppBox = NSButton(checkboxWithTitle: CoachCopy.anyApp, target: nil, action: nil)
     private var appsStack = NSStackView()
+    private let root = NSStackView()
+    private let document = FlippedView()
+    private let scroll = NSScrollView()
+    /// CI screenshots only: a shorter visible frame, to show the groups scrolling.
+    private let visibleHeightOverride: Double?
+
+    /// Scroll-view document with its origin at the top, so the groups start at the top.
+    final class FlippedView: NSView {
+        override var isFlipped: Bool { true }
+    }
 
     /// `onboardingScreen` forces that onboarding screen (CI screenshots).
-    init(coach: CoachController, onboardingScreen: Int? = nil) {
+    init(coach: CoachController, onboardingScreen: Int? = nil, visibleHeightOverride: Double? = nil) {
         self.coach = coach
+        self.visibleHeightOverride = visibleHeightOverride
         showingOnboarding = onboardingScreen != nil || !coach.onboarded
         screen = onboardingScreen ?? 0
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Theme.Settings.width, height: Theme.Metrics.cardHeight),
@@ -33,12 +44,25 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.backgroundColor = .windowBackgroundColor
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = document
+        root.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(root)
+        NSLayoutConstraint.activate([
+            root.topAnchor.constraint(equalTo: document.topAnchor),
+            root.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            root.widthAnchor.constraint(equalToConstant: CGFloat(Theme.Settings.width)),
+        ])
+        window.contentView = scroll
         build()
     }
 
     func present() {
-        update()
         window.center()
+        update()
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
@@ -102,6 +126,29 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     static func group(_ views: [NSView]) -> Group { Group(views) }
 
+    /// The card's button (as the Ignore button: fill, hairline, hover and pressed states).
+    static func cardButton(_ title: String, target: AnyObject?, action: Selector) -> NSButton {
+        let st = Theme.Settings.self
+        let b = CardButton(frame: .zero)
+        b.role = .ignore
+        b.style = { Theme.style(dark: Theme.isDark) }
+        b.isBordered = false
+        b.wantsLayer = true
+        b.layer?.cornerRadius = Theme.cg(st.buttonRadius)
+        b.layer?.cornerCurve = .continuous
+        b.attributedTitle = Card.attr(title, Theme.font(st.buttonFont), color(.primary))
+        b.target = target
+        b.action = action
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let w = b.attributedTitle.size().width.rounded(.up) + 2 * CGFloat(st.buttonPadding)
+        NSLayoutConstraint.activate([
+            b.heightAnchor.constraint(equalToConstant: CGFloat(st.buttonHeight)),
+            b.widthAnchor.constraint(equalToConstant: w),
+        ])
+        b.applyFill()
+        return b
+    }
+
     static func row(_ left: NSView, _ right: NSView) -> NSStackView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
@@ -118,7 +165,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     // MARK: content
 
     private func build() {
-        let root = NSStackView()
+        root.arrangedSubviews.forEach { $0.removeFromSuperview() }
         root.orientation = .vertical
         root.alignment = .leading
         let inset = CGFloat(Theme.Settings.inset)
@@ -130,14 +177,25 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             root.addArrangedSubview(v)
             v.widthAnchor.constraint(equalToConstant: width).isActive = true
         }
-        window.contentView = root
         update()
     }
 
+    /// Card-width window sized to its groups, but never past the screen's visible frame: taller
+    /// content scrolls inside the window instead.
     private func fitWindow() {
-        guard let root = window.contentView else { return }
         root.layoutSubtreeIfNeeded()
-        window.setContentSize(NSSize(width: CGFloat(Theme.Settings.width), height: root.fittingSize.height))
+        let w = Theme.Settings.width, fitting = Double(root.fittingSize.height)
+        document.frame = NSRect(x: 0, y: 0, width: w, height: fitting)
+        let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let chrome = Double(window.frameRect(forContentRect: .zero).height)
+        let h = Theme.Settings.contentHeight(fitting: fitting, visibleHeight: visibleHeightOverride ?? Double(visible.height),
+                                             chrome: chrome).height
+        window.setContentSize(NSSize(width: w, height: h))
+        let f = window.frame
+        let o = Theme.Settings.clamp(origin: (Double(f.minX), Double(f.minY)), size: (Double(f.width), Double(f.height)),
+                                     visible: (Double(visible.minX), Double(visible.minY), Double(visible.width), Double(visible.height)))
+        if !visible.isEmpty { window.setFrameOrigin(NSPoint(x: o.x, y: o.y)) }
+        document.scroll(.zero)
     }
 
     private func onboardingViews() -> [NSView] {
@@ -147,7 +205,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         glyph.contentTintColor = Self.color(.accent)
         let title = Self.text(s.title, font: Theme.Settings.headingFont)
         let body = Self.text(s.body, font: Theme.Settings.itemFont, color: Self.color(.secondary))
-        let primary = NSButton(title: s.primary, target: self, action: #selector(onboardingPrimary(_:)))
+        let primary = Self.cardButton(s.primary, target: self, action: #selector(onboardingPrimary(_:)))
         primary.keyEquivalent = "\r"
         var buttons: [NSView] = []
         if let secondary = s.secondary { buttons.append(NSButton(title: secondary, target: self, action: #selector(onboardingNotNow(_:)))) }

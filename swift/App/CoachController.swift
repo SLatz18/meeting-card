@@ -134,8 +134,9 @@ final class CoachController: NSObject {
         visibleCards().last?.panel.screen?.frame ?? NSScreen.main?.frame
     }
 
-    /// The Kit's coach style from MeetingCard's tokens: rose and amber per appearance, the card's
-    /// corner radius and a one-control-height band (Theme.Glow). The Kit draws only what it's given.
+    /// The Kit's coach style from MeetingCard's tokens: rose and amber per appearance at standard
+    /// contrast, the card's corner radius, a one-control-height band and the Increase Contrast peak
+    /// (Theme.Glow). The Kit draws only what it's given.
     static func coachStyle() -> CoachStyle {
         func kit(_ c: RGBA) -> CoachStyle.RGBA { CoachStyle.RGBA(red: c.r, green: c.g, blue: c.b, alpha: c.a) }
         func colors(dark: Bool) -> [CueColor: CoachStyle.RGBA] {
@@ -143,7 +144,8 @@ final class CoachController: NSObject {
         }
         let g = Theme.Glow.self
         let profile = GlowProfile(
-            width: g.width, peakOpacity: g.peakOpacity, cornerRadius: g.cornerRadius,
+            width: g.width, peakOpacity: g.peakOpacity, increasedContrastPeakOpacity: g.increasedContrastPeakOpacity,
+            cornerRadius: g.cornerRadius,
             stops: g.stops.map { GlowProfile.Stop($0.at, $0.factor) },
             motion: .init(rise: g.rise, hold: g.hold, fade: g.fade, appearFactor: 0, easeRise: true, easeFade: true),
             reduceMotion: .init(rise: 0, hold: 0, fade: g.reduceMotionFade, appearFactor: g.reduceMotionAppear,
@@ -152,7 +154,14 @@ final class CoachController: NSObject {
                           cooldownDisplay: .hidden)
     }
 
-    static func glowStyle() -> GlowStyle { GlowStyle(coachStyle()) }
+    /// The glow as drawn: rose and amber are dynamic semantic colors (systemRed / systemOrange,
+    /// muted), so they follow dark mode and Increase Contrast; shape and timing from `coachStyle()`.
+    static func glowStyle() -> GlowStyle {
+        let g = Theme.Glow.self
+        return GlowStyle(rose: Theme.dynamic(g.roseSource) { g.rose(base: $0, dark: $1) },
+                         amber: Theme.dynamic(g.amberSource) { g.amber(base: $0, dark: $1) },
+                         profile: coachStyle().profile)
+    }
 
     // MARK: controls
 

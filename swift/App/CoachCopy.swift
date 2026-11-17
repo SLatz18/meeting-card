@@ -44,7 +44,7 @@ enum CoachCopy {
     }
 
     static let onboarding: [Screen] = [
-        Screen(title: "Meet Call coach",
+        Screen(title: "Meet Call Coach",
                body: "A quiet nudge on your calls. The edge of your screen glows red if you interrupt or talk over someone, and amber if you miss a question. Only you see it.",
                primary: "Next", secondary: nil),
         Screen(title: "Your audio stays yours",

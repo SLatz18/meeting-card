@@ -20,8 +20,21 @@ public struct CardStyle: Sendable {
     public var accent: RGBA { palette.nextUp }
     /// The flag amber: attention.
     public var warning: RGBA { palette.flag }
-    /// AppKit's systemRed in sRGB; the App uses the live semantic `NSColor.systemRed`.
-    public var critical: RGBA { dark ? RGBA(hex: 0xFF453A) : RGBA(hex: 0xFF3B30) }
+    /// AppKit system colors by meaning. The App draws the live semantic NSColor (it follows dark
+    /// mode and Increase Contrast); `srgb` is its standard-contrast value, for math and tests.
+    public enum SystemColor: Sendable { case red, orange }
+    public static func srgb(_ c: SystemColor, dark: Bool) -> RGBA {
+        switch c {
+        case .red: dark ? RGBA(hex: 0xFF453A) : RGBA(hex: 0xFF3B30)
+        case .orange: dark ? RGBA(hex: 0xFF9F0A) : RGBA(hex: 0xFF9500)
+        }
+    }
+    /// Alerts and errors: systemRed.
+    public static let criticalColor = SystemColor.red
+    /// Caution: systemOrange.
+    public static let cautionColor = SystemColor.orange
+    public var critical: RGBA { CardStyle.srgb(CardStyle.criticalColor, dark: dark) }
+    public var caution: RGBA { CardStyle.srgb(CardStyle.cautionColor, dark: dark) }
     /// Secondary control fill (Ignore) per state.
     public func controlFill(_ s: ButtonState) -> RGBA { palette.ignoreFill(s) }
     /// Primary control fill (Join) per state, and its text.
@@ -149,11 +162,15 @@ public enum Theme {
         public static let windowAnimation = CardStyle.Material.animates
     }
 
-    /// Screen-edge glow for coach cues: calm, peripheral, plays once. Colors are the card's color
-    /// roles muted toward neutral gray (rose from `critical`, amber from the dark card's `warning`,
-    /// the vivid flag hue, for both appearances), near the design tokens #A65B57/#C47A76 and
-    /// #B4843A/#D4A45A. The corner radius is the card's, the band one control height wide.
+    /// Screen-edge glow for coach cues: calm, peripheral, plays once. Rose and amber are the live
+    /// semantic system colors of the card style's `critical` and `caution` roles (systemRed and
+    /// systemOrange, so they follow dark mode and Increase Contrast), muted toward neutral gray;
+    /// at standard contrast they land near the design tokens #A65B57/#C47A76 and #B4843A/#D4A45A.
+    /// The corner radius is the card's, the band one control height wide.
     public enum Glow {
+        public static let roseSource = CardStyle.criticalColor
+        public static let amberSource = CardStyle.cautionColor
+
         /// NSColor.systemRed in sRGB (light / dark): the card style's `critical`.
         public static func systemRed(dark: Bool) -> RGBA { CardStyle.for(dark: dark).critical }
 
@@ -164,20 +181,24 @@ public enum Theme {
             return RGBA(c.r * (1 - k) + gray * k, c.g * (1 - k) + gray * k, c.b * (1 - k) + gray * k, 1)
         }
 
-        /// Interrupt, talk-over, aggressive.
-        public static func rose(dark: Bool) -> RGBA {
-            mute(CardStyle.for(dark: dark).critical, dark: dark)
+        /// Interrupt, talk-over, aggressive: `base` is the resolved systemRed.
+        public static func rose(base: RGBA, dark: Bool) -> RGBA { mute(base, dark: dark) }
+
+        /// Monologue, missed question, not listening, talk share: `base` is the resolved systemOrange.
+        public static func amber(base: RGBA, dark: Bool) -> RGBA {
+            mute(base, dark: dark, amount: 0.48, gray: dark ? 0.65 : 0.4)
         }
 
-        /// Monologue, missed question, not listening, talk share.
-        public static func amber(dark: Bool) -> RGBA {
-            mute(CardStyle.for(dark: true).warning, dark: dark, amount: 0.48, gray: dark ? 0.65 : 0.4)
-        }
+        /// Standard-contrast values.
+        public static func rose(dark: Bool) -> RGBA { rose(base: CardStyle.srgb(roseSource, dark: dark), dark: dark) }
+        public static func amber(dark: Bool) -> RGBA { amber(base: CardStyle.srgb(amberSource, dark: dark), dark: dark) }
 
         public static let width = CardStyle.Size.control
         public static let cornerRadius = CardStyle.Radius.card
         /// Glow behaviour (calibrated, not card tokens): peak opacity, falloff and timing.
         public static let peakOpacity: Double = 0.45
+        /// Increase Contrast: a stronger peak, same timing.
+        public static let increasedContrastPeakOpacity: Double = 0.60
         /// (fraction of width from the outer edge, opacity factor)
         public static let stops: [(at: Double, factor: Double)] = [
             (0, 1), (0.15, 0.78), (0.35, 0.42), (0.6, 0.16), (0.82, 0.05), (1, 0)]
@@ -208,8 +229,6 @@ public enum Theme {
         public static let statusSymbolFont = CardStyle.Typography.button
         public static let glyphSize = CardStyle.Size.icon
         public static let glyphFont = CardStyle.Typography.button
-        /// Right edge sits one control gap left of the Join button (or of the Join slot if none).
-        public static let joinGap = CardStyle.Spacing.control
         public static let height = CardStyle.Size.control
         public static let radius = CardStyle.Radius.control
         public static let labelFont = CardStyle.Typography.button
@@ -229,20 +248,27 @@ public enum Theme {
         /// Live tint = the card's accent (Next up blue).
         public static func live(style: CardStyle) -> RGBA { style.accent }
 
-        /// Chip frame in card coordinates: content-hugging width, right-anchored `joinGap` left of
-        /// Join. The label is dropped (glyph and control stay) if the chip would reach the Ignore
-        /// button, e.g. next to the wide multi-link Join.
+        /// Fixed collapse rule. The full chip (glyph, label, Pause) shows only if it keeps at least
+        /// `clearance` to Ignore and to the primary button (Join / Open in Calendar); otherwise it is
+        /// icon-only: glyph, `glyphGap`, Pause. The label then moves to the tooltip and the
+        /// accessibility label. The primary button is never moved, narrowed or truncated.
+        public static let clearance = CardStyle.Spacing.control
+
+        public static func fullWidth(labelWidth: Double) -> Double {
+            paddingLeading + glyphSize + glyphGap + labelWidth + controlGap + pauseButtonSize + paddingTrailing
+        }
+
+        public static var iconOnlyWidth: Double { paddingLeading + glyphSize + glyphGap + pauseButtonSize + paddingTrailing }
+
+        /// Chip frame in card coordinates, right-anchored `clearance` left of the primary button
+        /// at `joinX` (or of its slot if there is none).
         public static func layout(labelWidth: Double, joinX: Double?) -> (x: Double, width: Double, showsLabel: Bool) {
             let m = Metrics.self
-            let right = (joinX ?? (m.cardWidth - m.trailingInset)) - joinGap
-            let minX = m.leadingInset + m.ignoreWidth + m.controlGap
-            func width(_ label: Bool) -> Double {
-                paddingLeading + glyphSize + (label ? glyphGap + labelWidth : 0) + controlGap + pauseButtonSize + paddingTrailing
-            }
-            let full = width(true)
+            let right = (joinX ?? (m.cardWidth - m.trailingInset)) - clearance
+            let minX = m.leadingInset + m.ignoreWidth + clearance
+            let full = fullWidth(labelWidth: labelWidth)
             if right - full >= minX { return (right - full, full, true) }
-            let compact = width(false)
-            return (right - compact, compact, false)
+            return (right - iconOnlyWidth, iconOnlyWidth, false)
         }
     }
 
@@ -261,6 +287,26 @@ public enum Theme {
         public static let itemFont = CardStyle.Typography.body
         public static let helperFont = CardStyle.Typography.caption
         public static let glyphSize = CardStyle.Size.icon
+        /// Onboarding's primary button: the card's button (control height and radius, Ignore fill
+        /// and hairline) with a body-size label in the button weight, padded like the card's text.
+        public static let buttonFont = Theme.FontSpec(CardStyle.Typography.body.size, CardStyle.Typography.button.weight)
+        public static let buttonHeight = CardStyle.Size.control
+        public static let buttonRadius = CardStyle.Radius.control
+        public static let buttonPadding = CardStyle.Spacing.leading
         public static func groupFill(style: CardStyle) -> RGBA { style.surface }
+
+        /// Content height for a window whose title bar etc. take `chrome`: the groups' fitting
+        /// height, capped so the window stays inside the screen's visible frame (the groups scroll).
+        public static func contentHeight(fitting: Double, visibleHeight: Double, chrome: Double) -> (height: Double, scrolls: Bool) {
+            let cap = max(0, visibleHeight - chrome)
+            return fitting > cap ? (cap, true) : (fitting, false)
+        }
+
+        /// Window origin moved the least to put `frame` inside `visible` (both bottom-left origin).
+        public static func clamp(origin: (x: Double, y: Double), size: (w: Double, h: Double),
+                                 visible: (x: Double, y: Double, w: Double, h: Double)) -> (x: Double, y: Double) {
+            (min(max(origin.x, visible.x), visible.x + max(0, visible.w - size.w)),
+             min(max(origin.y, visible.y), visible.y + max(0, visible.h - size.h)))
+        }
     }
 }

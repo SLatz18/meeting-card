@@ -6,17 +6,19 @@ import MeetingCardCore
 /// Fixture-run seams for the CI screenshots of the call coach UI (never active on a live run, and
 /// they render UI only: no audio, no service, no network).
 ///   MEETING_CARD_COACH_CHIP=on|listening|paused  put that chip on the fixture card
+///   MEETING_CARD_COACH_CHIP_LABEL=<text>         a longer chip label (shows the icon-only collapse)
 ///   MEETING_CARD_COACH_SHOTS=<dir>               write glow, Settings, onboarding and menu PNGs,
 ///                                                 plus the design packet, then quit
 /// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
 /// surface (chip, glow, Settings, onboarding, status menu) for a side-by-side design review.
 enum UISnapshots {
     static func demoChip(_ env: [String: String]) -> CoachChip? {
+        let label = env["MEETING_CARD_COACH_CHIP_LABEL"]
         switch env["MEETING_CARD_COACH_CHIP"] {
-        case "on": CoachChip(mode: .on)
-        case "listening": CoachChip(mode: .listening)
-        case "paused": CoachChip(mode: .paused)
-        default: nil
+        case "on": return CoachChip(mode: .on, labelOverride: label)
+        case "listening": return CoachChip(mode: .listening, labelOverride: label)
+        case "paused": return CoachChip(mode: .paused, labelOverride: label)
+        default: return nil
         }
     }
 
@@ -251,6 +253,11 @@ enum UISnapshots {
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
+        }), ("settings-scrolls", {
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            let w = CoachSettingsWindow(coach: coach, visibleHeightOverride: 480)
+            w.update()
+            return w
         }), ("settings-local-only", {
             defaults.set(true, forKey: CoachController.Keys.enabled)
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
@@ -268,6 +275,7 @@ enum UISnapshots {
             guard let w = make() else { return next(i + 1) }
             w.window.appearance = NSApp.effectiveAppearance
             w.window.center()
+            w.update()
             w.window.orderFrontRegardless()
             controller.schedule(0.5, repeats: false) {
                 MainActor.assumeIsolated {
