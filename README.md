@@ -99,7 +99,7 @@ Reopen MeetingCard (double-click it in Finder, or `open ~/Applications/MeetingCa
 
 **For IT and admins**
 - Opt-in: the boolean UserDefaults key `coach.enabled` in the `com.slatz.meetingcard.swift` domain (absent or false = off). Other settings: `coach.anyApp`, `coach.allowlist` (bundle IDs), `coach.onboarded`.
-- API key: Keychain generic password, service `com.slatz.meetingcard.swift.openai`, account `OPENAI_API_KEY`, accessibility `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (never synced or migrated).
+- API key: Keychain generic password, service `com.slatz.meetingcard.swift.openai`, account `OPENAI_API_KEY`, never synchronizable. A build signed with a team ID stores it in the data protection keychain with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (readable only while unlocked, never migrated). Ad-hoc and self-signed builds, like `build.sh` makes, aren't entitled to that keychain, so the key goes to the login keychain, which doesn't enforce accessibility classes.
 - Network: `api.openai.com` only (realtime transcription WebSocket, Responses API with `store: false`, `GET /v1/models` to check the key), only while the coach is on and not paused.
 - Permissions (TCC): Microphone, System Audio Recording (Core Audio process taps), and Screen Recording (ScreenCaptureKit's audio-only call capture). Reset with `tccutil reset Microphone|AudioCapture|ScreenCapture com.slatz.meetingcard.swift`.
 

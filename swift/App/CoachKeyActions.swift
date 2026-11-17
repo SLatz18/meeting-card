@@ -3,7 +3,7 @@ import ListenMoreCore
 import ListenMoreMac
 
 /// Key entry from Settings. Kept apart from the settings defaults: the key goes to the Keychain
-/// only (ThisDeviceOnly), is checked with GET /v1/models, and is never logged.
+/// only (see `KeychainStore`), is checked with GET /v1/models, and is never logged.
 extension CoachController {
     /// Saves (or, for blank text, removes) the key. A key OpenAI rejects is not saved.
     func saveKey(_ text: String, completion: @escaping (KeyCheck) -> Void) {

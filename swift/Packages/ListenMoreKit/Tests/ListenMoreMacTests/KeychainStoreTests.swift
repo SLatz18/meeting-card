@@ -37,6 +37,20 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertEqual(q[kSecAttrAccessible as String] as! CFString, kSecAttrAccessibleWhenUnlockedThisDeviceOnly)
         XCTAssertEqual(q[kSecAttrSynchronizable as String] as? Bool, false)
         XCTAssertEqual(q[kSecClass as String] as! CFString, kSecClassGenericPassword)
+        XCTAssertEqual(q[kSecUseDataProtectionKeychain as String] as? Bool, true)
+        let login = store.addQuery(Data("x".utf8), .login)
+        XCTAssertNil(login[kSecUseDataProtectionKeychain as String])
+        XCTAssertEqual(login[kSecAttrSynchronizable as String] as? Bool, false)
+    }
+
+    /// ThisDeviceOnly is enforced only in the data protection keychain (entitled, signed builds).
+    func assertAccessibilityWhereEnforced() {
+        if store.location() == .dataProtection {
+            XCTAssertEqual(store.storedAccessibility(), kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
+        } else {
+            XCTAssertEqual(store.location(), .login)
+            XCTAssertNil(store.storedAccessibility())
+        }
     }
 
     func testMissingKeyReadsNil() throws {
@@ -48,12 +62,13 @@ final class KeychainStoreTests: XCTestCase {
         try requireKeychain()
         try store.save(APIKey("sk-test-first")!)
         XCTAssertEqual(try store.readKey()?.value, "sk-test-first")
-        XCTAssertEqual(store.storedAccessibility(), kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
+        assertAccessibilityWhereEnforced()
         try store.save(APIKey("sk-test-second")!)
         XCTAssertEqual(try store.readKey()?.value, "sk-test-second")
-        XCTAssertEqual(store.storedAccessibility(), kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
+        assertAccessibilityWhereEnforced()
         try store.delete()
         XCTAssertNil(try store.readKey())
+        XCTAssertNil(store.location())
         XCTAssertNoThrow(try store.delete())
     }
 
