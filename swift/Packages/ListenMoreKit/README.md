@@ -10,12 +10,19 @@ Swift-native inside the app: no helper process, no interpreter.
 - `ListenMoreCore` (Foundation only, builds and tests on Linux): config and defaults, VAD and the
   streaming VAD, local rules (interrupt, talk-over, monologue, talk share, prosody), text rules,
   cue policy and cooldowns, the GPT layer (rolling in-memory transcript, judge, budget cap), the
+  judge providers (`JudgeProvider`: the GPT judge, the default, or `TypeSafeJudge` for TypeSafe System One), the
   engine (`LocalCoachEngine`), the Core Audio trigger (`CoachTrigger`, `AudioActivitySignal`) and
   `CoachSession`, which reaches capture, rendering and the key store only through protocols.
 - `ListenMoreMac` (macOS only): mic capture (AVAudioEngine with voice processing), call audio
   (ScreenCaptureKit audio-only, Chromium helper fallback, Core Audio process tap), the Core Audio
   running-state provider, URLSession transports (ephemeral, no cache or cookies), Keychain store,
   glow overlay and `CoachService`. The host injects the glow style and the Keychain service name.
+
+`judge.provider` (`gpt` | `typesafe`, default `gpt`) picks the judge for the judged cues; a host can
+override it per session (`LocalCoachEngine(judgeProvider:)`) and passes the TypeSafe key store
+(`judgeKeys:`, `KeychainStore.typeSafeAccount` under its own service). `judge.typesafe` holds the
+endpoint, model, confidence floor, timeout, window, error limit, the optional per-call price and
+the question criteria. The TypeSafe state is the minimal window only, redacted by `JudgeRedactor`.
 
 The call trigger reads Core Audio "is running" flags only (the default input device plus a call
 app's output); it never reads window titles. `PrivacyGuardTests` checks this, along with no disk
@@ -49,5 +56,6 @@ content-free text. Nothing is stored: no history, no summaries.
 ```sh
 swift test                      # Core tests (Linux or macOS); Mac tests too on macOS
 LISTEN_MORE_LIVE=1 OPENAI_API_KEY=... swift test --filter ListenMoreLiveTests   # paid, manual
+LISTEN_MORE_LIVE_TYPESAFE=1 TYPESAFE_API_KEY=... swift test --filter TypeSafeLiveTests   # opt-in, manual
 LISTEN_MORE_SCK_PROBE=1 swift test --filter ScreenShareProbeTests              # screen-share probe
 ```

@@ -20,6 +20,8 @@ The coach listens to two separate audio streams. Your microphone is "you", and t
 
 **GPT layer (under about 3 s).** A judge model reads the recent turns plus the local tone flags and returns at most one cue (aggressive, missed question, not listening, or occasionally an interruption the local layer missed) with a confidence score and a short reason. Requests use `store: false`, and each call has a budget cap (default $1).
 
+**Cue judge.** Settings picks who judges your reply (`judge.provider`). **OpenAI GPT** is the default and works as described above. **TypeSafe System One** asks a TypeSafe endpoint one fire / no-fire question per judged cue (aggressive, not listening, missed question). It sees only a minimal window: at most 8 transcript lines from the last 30 s, each labelled ME or OTHERS with how many seconds ago it was heard, and with links, email addresses, runs of five or more digits and your configured names redacted. No audio, tone flags or prompt go to it. A fire answer below confidence 0.7, an error or no answer within 6 s gives no cue. Three failed calls in a row stop judging for that call, while transcription and the transcript rules keep running. The transcript rules still raise heat and missed questions themselves; the cooldowns keep it to one glow. Each call's latency is recorded, and a per-call price (`cost_usd_per_call`, unset by default) counts toward the budget cap only when you configure one. Transcription stays with OpenAI.
+
 ## The cue
 
 A cue is a glow at the edge of your screen:
@@ -56,7 +58,7 @@ flowchart LR
     App["Call app output<br/>(everyone else)"] --> VAD
     Mic --> STT["OpenAI live transcription"]
     App --> STT
-    STT --> Judge["Judge model<br/>one cue + confidence (&lt;3 s)"]
+    STT --> Judge["Judge: OpenAI GPT (default)<br/>or TypeSafe System One<br/>cue + confidence (&lt;3 s)"]
     VAD -->|tone flags| Judge
     VAD -->|interrupt, talk-over,<br/>monologue, talk share| Glow["Screen-edge glow<br/>red or amber, 20 s cooldown"]
     Judge -->|confidence ≥ 0.7| Glow
