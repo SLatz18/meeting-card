@@ -52,11 +52,11 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     /// A CardStyle text role in the current appearance.
     static func color(_ t: CardStyle.Text) -> NSColor { Theme.text(t, Theme.style(dark: Theme.isDark)) }
 
-    static func text(_ s: String, font: Theme.FontSpec, color: NSColor = CoachSettingsWindow.color(.primary), maxWidth: CGFloat = innerWidth) -> NSTextField {
+    static func text(_ s: String, font: Theme.FontSpec, color: NSColor? = nil, maxWidth: CGFloat = innerWidth) -> NSTextField {
         let f = NSTextField(wrappingLabelWithString: s)
         f.font = Theme.font(font)
         f.preferredMaxLayoutWidth = maxWidth
-        f.textColor = color
+        f.textColor = color ?? Self.color(.primary)
         f.isSelectable = false
         return f
     }
