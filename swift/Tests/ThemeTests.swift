@@ -249,11 +249,45 @@ final class ThemeTests: XCTestCase {
         XCTAssertTrue(controller.contains("note(CoachCopy.coachMuted, Theme.CallControls.mutedSymbol)"))
     }
 
+    /// The caption strip reads as a sibling of the card: same surface, radius, width, insets and type
+    /// scale; the saving indicator is the card's secondary control shape; the notice is card-shaped.
+    func testCaptionsAndNoticeDeriveFromCardStyle() {
+        let c = Theme.Captions.self
+        XCTAssertEqual(c.width, Theme.Metrics.cardWidth)
+        XCTAssertEqual(c.radius, Theme.Metrics.cardRadius)
+        XCTAssertEqual(c.padding.h, Theme.Metrics.leadingInset)
+        XCTAssertEqual(c.padding.v, Theme.Metrics.buttonBottom)
+        XCTAssertEqual(c.textFont, Theme.Fonts.body)
+        XCTAssertEqual(c.speakerFont, Theme.Fonts.button)
+        XCTAssertEqual(c.noteFont, Theme.Fonts.caption)
+        XCTAssertEqual(c.margin, Theme.Metrics.cardMargin)
+        XCTAssertEqual(c.indicatorHeight, Theme.Coach.height)
+        XCTAssertEqual(c.indicatorRadius, Theme.Coach.radius)
+        XCTAssertEqual(c.hairlineWidth, Theme.Metrics.buttonHairline)
+        XCTAssertEqual(c.lineGap, CardStyle.Spacing.control / 2)
+        XCTAssertEqual(c.trailingReserve, Theme.Metrics.cardWidth + Theme.Metrics.cardMargin)
+        XCTAssertEqual(c.ownSpeaker, .accent)
+        let n = Theme.Notice.self
+        XCTAssertEqual(n.width, Theme.Metrics.cardWidth)
+        XCTAssertEqual(n.titleFont, Theme.Fonts.title)
+        XCTAssertEqual(n.bodyFont, Theme.Fonts.body)
+        XCTAssertEqual(n.buttonFont, Theme.Fonts.button)
+        XCTAssertEqual(n.buttonHeight, Theme.Metrics.buttonHeight)
+        XCTAssertEqual(n.buttonRadius, Theme.Metrics.buttonRadius)
+        for dark in [false, true] {
+            let t = CardStyle.for(dark: dark)
+            XCTAssertEqual(c.surface(style: t), Theme.palette(dark: dark).cardFill, "the card's own fill")
+            XCTAssertEqual(c.hairline(style: t), t.hairline)
+            XCTAssertEqual(c.dot(style: t), t.critical)
+            XCTAssertEqual(n.surface(style: t), t.surface)
+        }
+    }
+
     /// The coach UI files carry no literal sizes, radii or colors of their own.
     func testCoachUIHasNoOneOffValues() throws {
         let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
         for file in ["CoachChip.swift", "CoachSettingsWindow.swift", "CoachController.swift", "CoachCardView.swift",
-                     "CoachCardPanel.swift", "CoachCaptions.swift"] {
+                     "CoachCardPanel.swift", "CoachCaptions.swift", "CoachTranscript.swift", "CoachNotice.swift"] {
             let src = try String(contentsOf: app.appendingPathComponent(file), encoding: .utf8)
             for bad in ["pointSize: 1", "pointSize: 2", "cornerRadius = 1", "spacing = 1", "spacing = 8", "constant: 1",
                         "srgbRed:", "white: 0.", ".systemRed", ".secondaryLabelColor", ".tertiaryLabelColor",

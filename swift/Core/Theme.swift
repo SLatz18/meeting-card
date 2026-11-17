@@ -517,4 +517,63 @@ public enum Theme {
             return (0..<n).map { first + Double($0) * (button + buttonGap) }
         }
     }
+
+    /// Live captions: a sibling of the reminder card. The strip is the card surface (opaque, card
+    /// width and radius, no shadow, no outline, like a card without a link) with the card's text
+    /// insets and type scale: speaker labels in the button font, words in the body font. The saving
+    /// indicator above it is shaped like the card's secondary control (control height, radius and
+    /// hairline) on the same surface, with a critical-red dot one control gap wide.
+    public enum Captions {
+        public static let width = CardLayout.W
+        public static let radius = CardStyle.Radius.card
+        public static let padding = (h: CardStyle.Spacing.leading, v: CardStyle.Spacing.controlBottom)
+        public static let lineGap = CardStyle.Spacing.control / 2
+        public static let speakerGap = CardStyle.Spacing.control
+        public static let speakerFont = CardStyle.Typography.button
+        public static let textFont = CardStyle.Typography.body
+        public static let noteFont = CardStyle.Typography.caption
+        /// Caption lines on screen at once (the in-memory buffer holds no more).
+        public static let visibleLines = 3
+        public static let indicatorHeight = CardStyle.Size.control
+        public static let indicatorRadius = CardStyle.Radius.control
+        public static let indicatorPadding = CardStyle.Spacing.control
+        public static let indicatorFont = CardStyle.Typography.caption
+        public static let dotDiameter = CardStyle.Spacing.control
+        public static let hairlineWidth = CardStyle.Stroke.hairline
+        /// Indicator to strip.
+        public static let stackGap = CardStyle.Spacing.control
+        /// From the display's bottom edge, like the card.
+        public static let margin = CardStyle.Spacing.margin
+        /// Kept clear at the display's right: the card's slot.
+        public static let trailingReserve = CardLayout.W + CardStyle.Spacing.margin
+        public static func surface(style: CardStyle) -> RGBA { style.surface }
+        public static func hairline(style: CardStyle) -> RGBA { style.hairline }
+        public static func dot(style: CardStyle) -> RGBA { style.critical }
+        public static let text = CardStyle.Text.primary
+        public static let speaker = CardStyle.Text.secondary
+        /// The user's own label: the card's accent (Next up blue).
+        public static let ownSpeaker = CardStyle.Text.accent
+        public static let note = CardStyle.Text.secondary
+        /// Status menu entries for the saved transcript.
+        public static let menuSymbols = (saving: "record.circle", delete: "trash")
+    }
+
+    /// The one-time transcription notice: a card-shaped sheet (card width, surface, text insets) with
+    /// the card's title and body type and its two buttons (secondary = Ignore, primary = Join).
+    public enum Notice {
+        public static let width = CardLayout.W
+        public static let padding = (h: CardStyle.Spacing.leading, v: CardStyle.Spacing.stack)
+        public static let spacing = CardStyle.Spacing.control
+        public static let titleFont = CardStyle.Typography.title
+        public static let bodyFont = CardStyle.Typography.body
+        public static let draftFont = CardStyle.Typography.caption
+        public static let buttonFont = CardStyle.Typography.button
+        public static let buttonHeight = CardStyle.Size.control
+        public static let buttonRadius = CardStyle.Radius.control
+        public static let buttonGap = CardStyle.Spacing.control
+        public static let buttonPadding = CardStyle.Spacing.leading
+        public static func surface(style: CardStyle) -> RGBA { style.surface }
+        public static let body = CardStyle.Text.secondary
+        public static let draft = CardStyle.Text.warning
+    }
 }
