@@ -28,7 +28,7 @@ final class CoachController: NSObject {
     let defaults: UserDefaults
     let config: ListenMoreConfig
     let keychain: KeychainStore
-    /// The TypeSafe key: the same service as the OpenAI key, its own account.
+    /// The TypeSafe key: whatever service the OpenAI key uses, in its own account.
     let typeSafeKeychain: KeychainStore
     /// What the service reads the key through: nil while the stored key is known to be rejected.
     let keyGate: CoachKeyGate
@@ -70,7 +70,7 @@ final class CoachController: NSObject {
          showsStatusItem: Bool = true) throws {
         self.defaults = defaults
         self.keychain = keychain
-        typeSafeKeychain = KeychainStore(service: keychain.service, account: KeychainStore.typeSafeAccount)
+        typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
         self.showsStatusItem = showsStatusItem
         config = try ListenMoreConfig.builtIn()
@@ -103,6 +103,11 @@ final class CoachController: NSObject {
     nonisolated static func storedJudgeProvider(_ defaults: UserDefaults) -> JudgeProviderKind? {
         defaults.string(forKey: Keys.judgeProvider).flatMap(JudgeProviderKind.init(rawValue:))
     }
+
+    /// Why judging stopped on the latest call after repeated provider failures (nil while it runs).
+    var judgeStopped: JudgeFailure? { previewJudgeStop ?? service?.judgeStopped }
+    /// CI screenshots only: a stop reason to show without a call.
+    var previewJudgeStop: JudgeFailure?
 
     func setJudgeProvider(_ kind: JudgeProviderKind) {
         defaults.set(kind.rawValue, forKey: Keys.judgeProvider)

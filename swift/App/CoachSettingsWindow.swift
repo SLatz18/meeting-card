@@ -31,6 +31,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private var typeSafeKeyRow = NSStackView()
     private let typeSafeNote = CoachSettingsWindow.text(CoachCopy.typeSafeKeyMissing, font: Theme.Settings.helperFont,
                                                         color: CoachSettingsWindow.color(.secondary))
+    private let judgeStoppedNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let root = NSStackView()
     private let document = NSView()
     private let scroll = NSScrollView()
@@ -393,8 +394,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         lock.contentTintColor = Self.color(.secondary)
         typeSafeKeyRow = NSStackView(views: [typeSafeKeyField, lock])
         typeSafeKeyRow.orientation = .horizontal
-        let g = Self.group([judgeRow, judgeHelp, typeSafeKeyRow, typeSafeNote])
-        for v in [judgeRow, judgeHelp, typeSafeKeyRow, typeSafeNote] { pin(v, in: g) }
+        let g = Self.group([judgeRow, judgeHelp, typeSafeKeyRow, typeSafeNote, judgeStoppedNote])
+        for v in [judgeRow, judgeHelp, typeSafeKeyRow, typeSafeNote, judgeStoppedNote] { pin(v, in: g) }
         return g
     }
 
@@ -410,6 +411,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         typeSafeKeyRow.isHidden = !typeSafe
         typeSafeKeyField.placeholderString = coach.typeSafeKeyStored ? CoachCopy.typeSafeKeySavedPlaceholder : CoachCopy.typeSafeKeyPlaceholder
         typeSafeNote.isHidden = !(typeSafe && !coach.typeSafeKeyStored)
+        let stopped = typeSafe ? coach.judgeStopped : nil
+        judgeStoppedNote.stringValue = stopped.map(CoachCopy.judgeStopped) ?? ""
+        judgeStoppedNote.isHidden = stopped == nil
     }
 
     private func appName(_ bundleId: String) -> String {

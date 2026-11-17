@@ -72,7 +72,13 @@ final class CoachWiringTests: XCTestCase {
         let src = try read("App/CoachController.swift")
         XCTAssertTrue(src.contains("static let judgeProvider = \"coach.judgeProvider\""))
         XCTAssertTrue(src.contains("Self.storedJudgeProvider(defaults) ?? config.judge.provider"), "the config value unless set")
-        XCTAssertTrue(src.contains("typeSafeKeychain = KeychainStore(service: keychain.service, account: KeychainStore.typeSafeAccount)"))
+        XCTAssertTrue(src.contains("typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)"),
+                      "the TypeSafe key follows the OpenAI key's service, however that is derived")
+        for file in ["App/CoachController.swift", "App/CoachKeyActions.swift", "App/CoachSettingsWindow.swift", "App/UISnapshots.swift"] {
+            let text = try read(file)
+            XCTAssertFalse(text.contains("TYPESAFE_API_KEY"), "\(file) names the TypeSafe account")
+            XCTAssertFalse(text.contains(".typesafe\"") || text.contains("scoped(\"typesafe"), "\(file) builds a TypeSafe service string")
+        }
         XCTAssertTrue(src.contains("LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,"))
         XCTAssertTrue(src.contains("judgeProvider: { Self.storedJudgeProvider(defaults) })"))
         XCTAssertTrue(src.contains("keys: keyGate, callState: callControls, engine: engine"))
@@ -83,6 +89,23 @@ final class CoachWiringTests: XCTestCase {
             .components(separatedBy: "\n    }\n").first)
         XCTAssertTrue(save.contains("try? typeSafeKeychain.save(key)"))
         XCTAssertFalse(save.contains("KeyValidator") || save.contains("Task"), "nothing is sent to check the TypeSafe key")
+    }
+
+    /// Settings says why judging stopped from the failure's kind and status code only; the window
+    /// never reads a key or shows key text.
+    func testJudgeStopNoteCarriesNoKeyText() throws {
+        let window = try read("App/CoachSettingsWindow.swift")
+        XCTAssertTrue(window.contains("judgeStoppedNote.stringValue = stopped.map(CoachCopy.judgeStopped) ?? \"\""))
+        for keyAccess in ["readKey", "typeSafeKeychain", ".value"] {
+            XCTAssertFalse(window.contains(keyAccess), "Settings touches key material: \(keyAccess)")
+        }
+        let copy = try read("App/CoachCopy.swift")
+        let body = try XCTUnwrap(copy.components(separatedBy: "static func judgeStopped(_ failure: JudgeFailure) -> String {").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(body.contains("switch failure.kind {"))
+        XCTAssertTrue(body.contains("if case .http(let status) = failure"))
+        XCTAssertFalse(body.contains("description") || body.contains(".value"), "only the kind and the status code reach the text")
+        XCTAssertTrue(try read("App/CoachController.swift").contains("var judgeStopped: JudgeFailure? { previewJudgeStop ?? service?.judgeStopped }"))
     }
 
     /// Local-only: turning on never waits for or requires a key; a stored key is checked afterwards.
