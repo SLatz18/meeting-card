@@ -32,7 +32,7 @@ final class PrivacyGuardTests: XCTestCase {
         for (name, text) in try allSources() {
             for f in forbidden { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
         }
-        // The app stores two booleans for the opt-in; the Kit stores nothing.
+        // The app stores coach settings only (see testAppDefaultsAreSettingsOnly); the Kit stores nothing.
         for (name, text) in try kitSources() { XCTAssertFalse(text.contains("UserDefaults"), name) }
     }
 
@@ -68,6 +68,40 @@ final class PrivacyGuardTests: XCTestCase {
                 let arg = (text as NSString).substring(with: m.range(at: 1))
                 XCTAssertTrue(allowed.contains { arg.lowercased().contains($0.lowercased()) }, "\(name): public log of \(arg)")
             }
+        }
+    }
+
+    /// The coach keeps nothing: no daily summary, history, recap or stats, in memory or on disk.
+    func testNoSummaryOrHistory() throws {
+        let re = #"(?i)\b(summary|summaries|history|recap|daily|stats|statistics|journal|archive)\b"#
+        for (name, text) in try allSources() {
+            XCTAssertNil(text.range(of: re, options: .regularExpression), "\(name) mentions a stored-history concept")
+        }
+    }
+
+    /// The app's only defaults are coach settings, never call data.
+    func testAppDefaultsAreSettingsOnly() throws {
+        let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded"]
+        let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
+        for (name, text) in try appCoachSources() {
+            for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                let key = (text as NSString).substring(with: m.range(at: 1))
+                XCTAssertTrue(allowed.contains(key), "\(name) uses defaults key \(key)")
+            }
+            XCTAssertFalse(text.contains("overrideURL"), "\(name): the app ships the built-in generic config only")
+        }
+    }
+
+    /// No eval fixtures, recordings or example transcripts in the package: tests generate their
+    /// audio (Synthetic.swift) and use content-free tokens for text.
+    func testPackageHasNoDataFixtures() throws {
+        let e = try XCTUnwrap(FileManager.default.enumerator(at: Self.kitURL, includingPropertiesForKeys: nil))
+        for case let url as URL in e {
+            if url.pathComponents.contains(".build") || url.pathComponents.contains(".swiftpm") { e.skipDescendants(); continue }
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { continue }
+            let ok = url.pathExtension == "swift" || ["README.md", ".gitignore"].contains(url.lastPathComponent)
+            XCTAssertTrue(ok, "unexpected data file \(url.lastPathComponent)")
         }
     }
 

@@ -6,8 +6,8 @@ public protocol GptTransportFactory: AnyObject {
     func judge(config: ListenMoreConfig, key: APIKey) -> Judge
 }
 
-/// Counters only; safe to log.
-public struct EngineStats: Equatable, Sendable {
+/// Live counters for the running session only (reset on start, never kept); safe to log.
+public struct EngineCounters: Equatable, Sendable {
     public var frames = 0
     public var localCues = 0
     public var gptCues = 0
@@ -32,7 +32,7 @@ public final class LocalCoachEngine: CoachEngine {
     private var micFifo: [Float] = []
     private var callFifo: [Float] = []
     private var frameIndex = 0
-    private var _stats = EngineStats()
+    private var _counters = EngineCounters()
 
     public init(transport: GptTransportFactory? = nil, maxSkewFrames: Int = 10) {
         self.transport = transport
@@ -45,10 +45,10 @@ public final class LocalCoachEngine: CoachEngine {
         return running
     }
 
-    public var stats: EngineStats {
+    public var counters: EngineCounters {
         lock.lock()
         defer { lock.unlock() }
-        return _stats
+        return _counters
     }
 
     public var gptCost: CostTracker? { queue.sync { gpt?.cost } }
@@ -59,7 +59,7 @@ public final class LocalCoachEngine: CoachEngine {
     public func start(config: ListenMoreConfig, apiKey: APIKey?) {
         lock.lock()
         running = true
-        _stats = EngineStats()
+        _counters = EngineCounters()
         lock.unlock()
         queue.async { [self] in
             self.config = config
@@ -133,7 +133,7 @@ public final class LocalCoachEngine: CoachEngine {
             for ev in events {
                 gpt?.onLocal(ev)
                 if let type = ev.cueType {
-                    lock.lock(); _stats.localCues += 1; lock.unlock()
+                    lock.lock(); _counters.localCues += 1; lock.unlock()
                     delegate?.engine(self, didSuggest: CueSuggestion(type: type, t: t, onset: ev.onset, source: .local))
                 }
             }
@@ -141,17 +141,17 @@ public final class LocalCoachEngine: CoachEngine {
             gpt?.feed(.others, frame: call, onset: o.onset, offset: o.offset)
             micFifo.removeFirst(hop)
             callFifo.removeFirst(hop)
-            lock.lock(); _stats.frames += 1; lock.unlock()
+            lock.lock(); _counters.frames += 1; lock.unlock()
         }
     }
 
     private func bumpPadded() {
-        lock.lock(); _stats.paddedFrames += 1; lock.unlock()
+        lock.lock(); _counters.paddedFrames += 1; lock.unlock()
     }
 
     private func gptOffer(_ label: String, _ t: Double, _ ref: Double, _ conf: Double) {
         guard let type = CueType(gptLabel: label) else { return }
-        lock.lock(); _stats.gptCues += 1; lock.unlock()
+        lock.lock(); _counters.gptCues += 1; lock.unlock()
         delegate?.engine(self, didSuggest: CueSuggestion(type: type, t: t, onset: ref, source: .gpt, confidence: conf))
     }
 }

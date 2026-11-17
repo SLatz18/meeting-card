@@ -405,9 +405,10 @@ public final class MockTranscriber: Transcriber {
     public func close() { closed = true }
 }
 
-/// Crude keyword rules + fixed latency. NOT a measure of GPT quality.
+/// Test double: content-free marker rules + fixed latency. NOT a measure of GPT quality.
 public final class MockJudge: Judge {
-    static let hostile = ["ridiculous", "not listening", "never listen", "stupid", "waste of", "just do what"]
+    /// A ME line containing this marker is judged aggressive.
+    public static let hostileMarker = "[mock-hostile]"
     let latency: Double
     public private(set) var prompts: [String] = []
 
@@ -417,7 +418,7 @@ public final class MockJudge: Judge {
 
     public static func decide(_ prompt: String) -> JudgeResult {
         let lastMe = prompt.split(separator: "\n").last { $0.contains("] ME:") }?.lowercased() ?? ""
-        if hostile.contains(where: { lastMe.contains($0) }) { return JudgeResult(cue: "aggressive", confidence: 0.9) }
+        if lastMe.contains(hostileMarker) { return JudgeResult(cue: "aggressive", confidence: 0.9) }
         if prompt.contains("PENDING_QUESTION: yes") && prompt.contains("ME_ANSWERED_SINCE: no") {
             return JudgeResult(cue: "missed_question", confidence: 0.85)
         }

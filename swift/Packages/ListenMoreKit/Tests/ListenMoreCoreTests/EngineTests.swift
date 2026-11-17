@@ -56,7 +56,7 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(ints.count, 1)
         XCTAssertEqual(ints.first?.color, .red)
         XCTAssertGreaterThanOrEqual(policy.suppressed, 1)
-        XCTAssertEqual(e.stats.frames, 30 * 50)
+        XCTAssertEqual(e.counters.frames, 30 * 50)
         e.stop()
         e.flush()
         XCTAssertFalse(e.isRunning)
@@ -67,15 +67,15 @@ final class EngineTests: XCTestCase {
         let e = LocalCoachEngine()
         e.start(config: config, apiKey: nil)
         feed(e, mic: [Float](repeating: 0, count: 24000), call: [])
-        XCTAssertGreaterThan(e.stats.paddedFrames, 30)
-        XCTAssertGreaterThan(e.stats.frames, 30)
+        XCTAssertGreaterThan(e.counters.paddedFrames, 30)
+        XCTAssertGreaterThan(e.counters.frames, 30)
     }
 
     func testIngestBeforeStartIsDropped() throws {
         let e = LocalCoachEngine()
         e.ingest(.mic, samples: [Float](repeating: 0, count: 4800))
         e.flush()
-        XCTAssertEqual(e.stats.frames, 0)
+        XCTAssertEqual(e.counters.frames, 0)
     }
 
     /// With a key, the engine runs the GPT layer: turns are committed at VAD offsets and the judge's
@@ -85,7 +85,7 @@ final class EngineTests: XCTestCase {
         config.gpt.judgeMinIntervalS = 0
         let mic = S.track(6, [(1.0, 3.0)], f0: 120)
         let call = S.track(6, [], f0: 210)
-        let transport = MockTransport(script: [MockTranscriber.Utterance(speaker: .me, end: 3.0, text: "that's ridiculous")])
+        let transport = MockTransport(script: [MockTranscriber.Utterance(speaker: .me, end: 3.0, text: "utterance-1 \(MockJudge.hostileMarker)")])
         let e = LocalCoachEngine(transport: transport)
         let c = Collector()
         e.delegate = c
@@ -101,7 +101,7 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(gpt.confidence ?? 0, 0.9, accuracy: 1e-9)
         XCTAssertGreaterThan(transport.transcribers[.me]?.audioBytes ?? 0, 0)
         XCTAssertEqual(transport.transcribers[.others]?.audioBytes, 0, "silence is never streamed")
-        XCTAssertTrue(transport.judge.prompts.last?.contains("] ME: that's ridiculous") ?? false)
+        XCTAssertTrue(transport.judge.prompts.last?.contains("] ME: utterance-1") ?? false)
         XCTAssertTrue(c.disabled.isEmpty)
         e.stop()
     }

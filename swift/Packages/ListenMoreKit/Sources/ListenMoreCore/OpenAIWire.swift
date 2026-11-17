@@ -20,9 +20,9 @@ public enum OpenAIWire {
     You see the last ~90 seconds of a speaker-labelled transcript (ME = the user's mic, OTHERS = everyone
     else on the call), plus local acoustic flags. Decide if ME needs a nudge RIGHT NOW about the most recent turns.
     Labels:
-    - aggressive: ME's latest words are hostile, belittling, accusatory or contemptuous (e.g. insults,
-      "that's ridiculous", "you never listen"), especially if the prosody flag shows a loudness/rate jump.
-      Firm disagreement stated respectfully ("I disagree, we need to hold the date") is NOT aggressive.
+    - aggressive: ME's latest words are hostile, belittling, accusatory or contemptuous (insults,
+      dismissive put-downs, blanket accusations), especially if the prosody flag shows a loudness/rate
+      jump. Firm disagreement stated respectfully is NOT aggressive.
     - missed_question: OTHERS asked ME a direct question and ME has not answered it (silence, or a
       change of subject). Only use when the question is clearly unanswered.
     - not_listening: ME's reply ignores or contradicts what OTHERS just said, repeats itself over their

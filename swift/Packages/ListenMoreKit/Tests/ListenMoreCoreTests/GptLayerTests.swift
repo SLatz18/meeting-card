@@ -11,12 +11,12 @@ final class GptLayerTests: XCTestCase {
 
     func testRollingTranscriptPrunes() {
         var r = RollingTranscript(windowS: 90)
-        r.add(t: 0, speaker: .others, text: "hello")
-        r.add(t: 50, speaker: .me, text: "hi")
-        r.add(t: 100, speaker: .others, text: "still there?")
+        r.add(t: 0, speaker: .others, text: "token-a")
+        r.add(t: 50, speaker: .me, text: "token-b")
+        r.add(t: 100, speaker: .others, text: "token-c")
         let text = r.render(now: 100)
-        XCTAssertFalse(text.contains("hello"))
-        XCTAssertTrue(text.contains("ME: hi"))
+        XCTAssertFalse(text.contains("token-a"))
+        XCTAssertTrue(text.contains("ME: token-b"))
         r.clear()
         XCTAssertTrue(r.lines.isEmpty)
     }
@@ -77,8 +77,8 @@ final class GptLayerTests: XCTestCase {
 
     func testParseRealtimeEvents() {
         XCTAssertEqual(OpenAIWire.parseRealtime(Data(#"{"type":"input_audio_buffer.committed","item_id":"a"}"#.utf8)), .committed(itemId: "a"))
-        XCTAssertEqual(OpenAIWire.parseRealtime(Data(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"a","transcript":"hi","usage":{"type":"duration","seconds":1.5}}"#.utf8)),
-                       .transcript(itemId: "a", text: "hi", audioSeconds: 1.5))
+        XCTAssertEqual(OpenAIWire.parseRealtime(Data(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"a","transcript":"token","usage":{"type":"duration","seconds":1.5}}"#.utf8)),
+                       .transcript(itemId: "a", text: "token", audioSeconds: 1.5))
         XCTAssertEqual(OpenAIWire.parseRealtime(Data(#"{"type":"error","error":{"code":"x"}}"#.utf8)), .error)
         XCTAssertEqual(OpenAIWire.parseRealtime(Data("not json".utf8)), .other)
     }
@@ -104,9 +104,9 @@ final class GptLayerTests: XCTestCase {
     }
 
     func testMockJudge() {
-        XCTAssertEqual(MockJudge.decide("[-1.0s] ME: that's ridiculous").cue, "aggressive")
+        XCTAssertEqual(MockJudge.decide("[-1.0s] ME: token \(MockJudge.hostileMarker)").cue, "aggressive")
         XCTAssertEqual(MockJudge.decide("PENDING_QUESTION: yes ME_ANSWERED_SINCE: no").cue, "missed_question")
-        XCTAssertEqual(MockJudge.decide("[-1.0s] ME: sounds good").cue, "none")
+        XCTAssertEqual(MockJudge.decide("[-1.0s] ME: token").cue, "none")
     }
 
     // MARK: GptLayer
@@ -165,7 +165,7 @@ final class GptLayerTests: XCTestCase {
             XCTAssertEqual(kind, .judgeHTTP)
             done.fulfill()
         })
-        q.async { layer.onText(.me, "hello", 9) }
+        q.async { layer.onText(.me, "token", 9) }
         wait(for: [done], timeout: 2)
         q.sync { XCTAssertFalse(layer.enabled) }
     }

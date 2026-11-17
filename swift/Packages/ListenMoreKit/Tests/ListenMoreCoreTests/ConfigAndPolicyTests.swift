@@ -30,6 +30,14 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(c.trigger.excludeBundleIds.contains("com.listenmore.mac"))
     }
 
+    /// The shipped config is generic defaults only: known sections, no per-user data blocks.
+    func testBuiltInConfigIsGenericDefaultsOnly() throws {
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(DefaultConfig.json.utf8)) as? [String: Any])
+        XCTAssertEqual(Set(root.keys), ["audio", "vad", "local", "cues", "gpt", "trigger", "capture_targets"])
+        let cues = try XCTUnwrap(root["cues"] as? [String: Any])
+        XCTAssertEqual(Set(cues.keys), ["cooldown_s", "fade_s", "gpt_min_confidence", "colors"])
+    }
+
     func testDefaultAllowlist() throws {
         let ids = try TestConfig.load().captureTargets.map(\.bundleId)
         for id in ["us.zoom.xos", "com.google.Chrome", "company.thebrowser.dia", "com.microsoft.teams2",

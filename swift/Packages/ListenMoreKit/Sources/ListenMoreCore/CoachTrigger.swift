@@ -128,6 +128,18 @@ public struct CoachSession: Equatable, Sendable {
     public var paused = false
 }
 
+/// The coach chip's state. Hidden unless the coach is pre-warmed or running; a session ends (and
+/// the chip hides) `stopAfterS` (~30 s) after the call app's input or output goes off.
+public enum CoachIndicator: String, Equatable, Sendable {
+    case hidden
+    /// Enabled and pre-warmed, not streaming yet.
+    case on
+    /// Session running: audio is being analysed.
+    case listening
+    /// Session paused by the user: no capture, no streams.
+    case paused
+}
+
 public enum TriggerAction: Equatable, Sendable {
     case start(CoachSession)
     case stop(CoachStopReason)
@@ -155,6 +167,18 @@ public struct CoachTrigger: Sendable {
 
     public var isActive: Bool { session != nil }
     public var isCapturing: Bool { session.map { !$0.paused } ?? false }
+
+    /// Pre-warmed: enabled, no session yet, but a call looks imminent (Join was clicked on a card
+    /// for an event that hasn't ended, or a call app is inside the start debounce).
+    public var isPrewarmed: Bool {
+        guard enabled, session == nil else { return false }
+        return hintEndsAt != nil || qualifyingSince.keys.contains { !suppressed.contains($0) }
+    }
+
+    public var indicator: CoachIndicator {
+        if let s = session { return s.paused ? .paused : .listening }
+        return isPrewarmed ? .on : .hidden
+    }
 
     public mutating func setEnabled(_ on: Bool) -> [TriggerAction] {
         enabled = on
