@@ -121,8 +121,6 @@ public final class CoachService: CoachSessionDelegate {
     public func skipThisCall() { session.skipThisCall() }
     /// Off for the rest of this call, pre-warmed or in a session.
     public func stopForThisCall() { session.stopForThisCall() }
-    /// The coached call's app (lowercased bundle ID), once known.
-    public var appKey: String? { session.session?.appKey }
 
     /// The indicator's one control: skip this call while pre-warmed, Pause while listening, Resume while paused.
     public func chipControl() { session.toggleFromIndicator() }

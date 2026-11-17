@@ -115,28 +115,37 @@ enum UISnapshots {
 
     // MARK: coach card and pill
 
+    static let liveMute = CoachMuteCopy.presentation(reason: nil, isMuted: false)
+    static let mutedMute = CoachMuteCopy.presentation(reason: nil, isMuted: true)
+    static let amberNudge = CoachNudge(kind: .missedQuestion, tone: .amber)
+    static let roseNudge = CoachNudge(kind: .interrupt, tone: .rose)
+
+    static func shotState(_ st: CoachCardState.Status, _ m: MuteControlPresentation, _ n: CoachNudge?, _ mode: CoachCardState.Mode,
+                          ic: Bool = false) -> CoachCardState {
+        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, nudge: n, mode: mode, increasedContrast: ic)
+    }
+
+    static func disabledMute(_ r: MuteDisabledReason) -> MuteControlPresentation { CoachMuteCopy.presentation(reason: r, isMuted: false) }
+
     /// Each coach card and pill state as `coach-<name>-<appearance>.png`. Pills that can't mute
     /// also show the tooltip that says why.
-    static let coachCardStates: [(name: String, state: CoachCardState, tooltip: Bool)] = {
-        let live = CoachCardState.Mute.available(muted: false)
-        let amber = CoachNudge(kind: .missedQuestion, tone: .amber), rose = CoachNudge(kind: .interrupt, tone: .rose)
-        func s(_ st: CoachCardState.Status, _ m: CoachCardState.Mute = live, _ n: CoachNudge? = nil, _ mode: CoachCardState.Mode = .card,
-               ic: Bool = false) -> CoachCardState {
-            CoachCardState(status: st, mute: m, nudge: n, mode: mode, increasedContrast: ic)
-        }
-        return [
-            ("card-idle", s(.idle), false), ("card-listening", s(.listening), false), ("card-paused", s(.paused), false),
-            ("card-muted", s(.muted, .available(muted: true)), false),
-            ("card-nudge-amber", s(.listening, live, amber), false), ("card-nudge-rose", s(.listening, live, rose), false),
-            ("card-increased-contrast", s(.listening, live, amber, ic: true), false),
-            ("pill-idle", s(.idle, live, nil, .pill), false), ("pill-muted", s(.muted, .available(muted: true), nil, .pill), false),
-            ("pill-paused", s(.paused, live, nil, .pill), false),
-            ("pill-nudge-amber", s(.listening, live, amber, .pill), false), ("pill-nudge-rose", s(.listening, live, rose, .pill), false),
-            ("pill-mute-disabled-meet", s(.listening, .blocked(.meet), nil, .pill), true),
-            ("pill-mute-disabled-off", s(.listening, .blocked(.controlsOff), nil, .pill), true),
-            ("pill-mute-disabled-permission", s(.listening, .blocked(.permission), nil, .pill), true),
-        ]
-    }()
+    static let coachCardStates: [(name: String, state: CoachCardState, tooltip: Bool)] = [
+        ("card-idle", shotState(.idle, liveMute, nil, .card), false),
+        ("card-listening", shotState(.listening, liveMute, nil, .card), false),
+        ("card-paused", shotState(.paused, liveMute, nil, .card), false),
+        ("card-muted", shotState(.muted, mutedMute, nil, .card), false),
+        ("card-nudge-amber", shotState(.listening, liveMute, amberNudge, .card), false),
+        ("card-nudge-rose", shotState(.listening, liveMute, roseNudge, .card), false),
+        ("card-increased-contrast", shotState(.listening, liveMute, amberNudge, .card, ic: true), false),
+        ("pill-idle", shotState(.idle, liveMute, nil, .pill), false),
+        ("pill-muted", shotState(.muted, mutedMute, nil, .pill), false),
+        ("pill-paused", shotState(.paused, liveMute, nil, .pill), false),
+        ("pill-nudge-amber", shotState(.listening, liveMute, amberNudge, .pill), false),
+        ("pill-nudge-rose", shotState(.listening, liveMute, roseNudge, .pill), false),
+        ("pill-mute-disabled-meet", shotState(.listening, disabledMute(.meet), nil, .pill), true),
+        ("pill-mute-disabled-off", shotState(.listening, disabledMute(.toggleOff), nil, .pill), true),
+        ("pill-mute-disabled-permission", shotState(.listening, disabledMute(.permissionDenied), nil, .pill), true),
+    ]
 
     /// Every PNG `coachCardShots` writes, per appearance (the CI gate checks for them).
     static var coachCardShotNames: [String] { coachCardStates.map(\.name) + ["morph-end", "collapse-end"] }

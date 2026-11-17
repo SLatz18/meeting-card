@@ -51,20 +51,17 @@ final class CoachCardWiringTests: XCTestCase {
         }
     }
 
-    /// Mute is one press of Zoom's own control through CallControlsModel; it never pauses or stops the
-    /// coach's capture. Disabled Mute says why in its tooltip.
+    /// Mute is CallControlsModel's one press of Zoom's own control; it never pauses or stops the
+    /// coach's capture. The card shows CoachMuteCopy's presentation: disabled Mute says why in its tooltip.
     func testMuteUsesTheCallAppsOwnControl() throws {
         let controller = try read("App/CoachController.swift")
         let body = try XCTUnwrap(controller.components(separatedBy: "func toggleMute() {").dropFirst().first?
             .components(separatedBy: "\n    }").first)
-        XCTAssertTrue(body.contains("let model = callControlsModel"))
-        XCTAssertTrue(body.contains("guard model.canMute else { return }"))
-        XCTAssertTrue(body.contains("model.toggleMute()"))
-        for banned in ["pause", "stop", "setPaused", "capture", "service"] {
-            XCTAssertFalse(body.contains(banned), "Mute must not \(banned)")
-        }
-        XCTAssertTrue(controller.contains("callControlsModel = .live(provider: callControls)"), "the same opt-in setting")
-        XCTAssertTrue(controller.contains("m.muteUnavailableReason.map { .blocked(CoachCardCopy.MuteBlock($0)) } ?? .available(muted: m.isMuted)"))
+        XCTAssertEqual(body.trimmingCharacters(in: .whitespacesAndNewlines), "callControlsModel.toggleMute()")
+        XCTAssertTrue(controller.contains("mute: { [weak self] in self?.toggleMute() }"))
+        XCTAssertTrue(controller.contains("CallControlsModel(provider: callControls, sessionAppKey:"), "the same opt-in setting")
+        XCTAssertTrue(controller.contains("callControlsModel.onChange = { [weak self] in self?.refresh() }"), "follows the read-back")
+        XCTAssertTrue(controller.contains("CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted"))
         let view = try read("App/CoachCardView.swift")
         XCTAssertTrue(view.contains("b.toolTip = c.tooltip") && view.contains("b.setAccessibilityHelp(c.accessibilityHelp)"))
         XCTAssertTrue(view.contains("b.isEnabled = c.enabled"))
@@ -129,7 +126,7 @@ final class CoachCardWiringTests: XCTestCase {
     /// The CI gate checks for every coach card shot the App writes.
     func testSnapshotGateCoversEveryState() throws {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
-        let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", s\("#)
+        let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
         XCTAssertEqual(found.count, 15)
         for n in found + ["morph-end", "collapse-end"] {

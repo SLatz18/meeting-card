@@ -147,7 +147,8 @@ final class CoachCardPresenter {
         state = s
         if s.mode != old.mode {
             swap(current, for: s, transition: s.mode == .pill ? .collapse : .expand)
-        } else if s.mode == .pill, CoachPillView.width(for: s) != Double(current.frame.width) {
+        } else if s.mode == .pill, CoachPillView.width(for: s) != Double(current.frame.width)
+                    || (current as? CoachPillView)?.buttons != s.pillButtons {
             swap(current, for: s, transition: .widen)
         } else {
             current.apply(s)

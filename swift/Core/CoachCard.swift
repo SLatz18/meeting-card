@@ -6,6 +6,7 @@ import Foundation
 
 /// Approved copy for the coach card and pill. The nesting follows the spec's string IDs
 /// (`coach.button.stop` is `Button.stop`, `coach.a11y.skipped` is `A11y.skipped`, and so on).
+/// Mute's copy is `CoachMuteCopy`'s.
 public enum CoachCardCopy {
     public enum Button {
         /// Replaces "Skip this call": ends the coach for the rest of this call.
@@ -13,8 +14,6 @@ public enum CoachCardCopy {
     }
 
     public enum Tooltip {
-        public static let mute = "Mute your mic"
-        public static let unmute = "Unmute your mic"
         public static let pause = "Pause coach"
         public static let resume = "Resume coach"
         public static let stop = "Stop coach for this call"
@@ -24,8 +23,6 @@ public enum CoachCardCopy {
 
     public enum A11y {
         public static let skipped = "Call coach is off for the rest of this call."
-        public static let mute = "Mute your Zoom mic"
-        public static let unmute = "Unmute your Zoom mic"
         public static let pause = "Pause call coach"
         public static let resume = "Resume call coach"
         public static let stop = "Stop call coach for the rest of this call"
@@ -35,27 +32,6 @@ public enum CoachCardCopy {
 
     public enum Captions {
         public static let empty = "Captions will show here once someone talks."
-    }
-
-    /// Why Mute can't act from the card, shown as its tooltip and accessibility help.
-    public enum MuteBlock: String, CaseIterable, Equatable, Sendable {
-        /// The call is in Google Meet, whose mute can't be reached.
-        case meet
-        /// "Use Zoom/Meet controls" is off.
-        case controlsOff
-        /// Zoom, but MeetingCard isn't allowed under Accessibility.
-        case permission
-        /// Any other call app (or none yet).
-        case unsupportedApp
-
-        public var text: String {
-            switch self {
-            case .meet: "Mute from the Meet window"
-            case .controlsOff: "Turn on \"Use Zoom/Meet controls\" in Settings to mute here."
-            case .permission: "Allow MeetingCard in Privacy & Security to mute here."
-            case .unsupportedApp: "Mute from your call app's window"
-            }
-        }
     }
 }
 
@@ -177,8 +153,8 @@ public enum CoachNudgeColors {
 
 // MARK: controls
 
-/// What the coach card or pill shows: the coach's status, whether Mute can act, the nudge on show,
-/// and whether it's the full card or the pill.
+/// What the coach card or pill shows: the coach's status, the Mute control (`CoachMuteCopy`'s
+/// presentation, and Zoom's mute reading), the nudge on show, and whether it's the card or the pill.
 public struct CoachCardState: Equatable, Sendable {
     public enum Status: Equatable, Sendable, CaseIterable {
         /// Coach on, no session yet (`CoachCopy.coachOn`).
@@ -189,22 +165,21 @@ public struct CoachCardState: Equatable, Sendable {
         case muted
     }
 
-    public enum Mute: Equatable, Sendable {
-        case available(muted: Bool)
-        case blocked(CoachCardCopy.MuteBlock)
-    }
-
     public enum Mode: Equatable, Sendable { case card, pill }
 
     public var status: Status
-    public var mute: Mute
+    public var mute: MuteControlPresentation
+    /// Zoom reports the mic muted (Mute offers Unmute).
+    public var micMuted: Bool
     public var nudge: CoachNudge?
     public var mode: Mode
     public var increasedContrast: Bool
 
-    public init(status: Status, mute: Mute, nudge: CoachNudge? = nil, mode: Mode = .card, increasedContrast: Bool = false) {
+    public init(status: Status, mute: MuteControlPresentation, micMuted: Bool = false, nudge: CoachNudge? = nil, mode: Mode = .card,
+                increasedContrast: Bool = false) {
         self.status = status
         self.mute = mute
+        self.micMuted = micMuted
         self.nudge = nudge
         self.mode = mode
         self.increasedContrast = increasedContrast
@@ -215,6 +190,10 @@ public struct CoachCardState: Equatable, Sendable {
     /// Not capturing: drawn with the held text role, like the paused chip.
     public var held: Bool { status == .paused || status == .muted }
     public var tone: CoachNudge.Tone? { nudge?.tone }
+    /// Mute is left out with no Zoom call (nothing to mute).
+    public var showsMute: Bool { mute.visibility != .hidden }
+    /// The pill's buttons: Mute (when shown), Pause/Resume, Stop.
+    public var pillButtons: Int { showsMute ? 3 : 2 }
 }
 
 /// One control as drawn: SF Symbol, tooltip, VoiceOver label (and help when it can't act).
@@ -235,16 +214,12 @@ public struct CoachControl: Equatable, Sendable {
 }
 
 public extension CoachCardState {
+    /// Enabled: Mute your mic / Unmute your mic; disabled: the reason as tooltip and VoiceOver help.
     var muteControl: CoachControl {
         let s = Theme.CoachCard.Symbols.self
-        switch mute {
-        case .available(let muted):
-            return muted ? CoachControl(symbol: s.unmute, tooltip: CoachCardCopy.Tooltip.unmute, accessibilityLabel: CoachCardCopy.A11y.unmute)
-                         : CoachControl(symbol: s.mute, tooltip: CoachCardCopy.Tooltip.mute, accessibilityLabel: CoachCardCopy.A11y.mute)
-        case .blocked(let why):
-            return CoachControl(symbol: s.mute, tooltip: why.text, accessibilityLabel: CoachCardCopy.A11y.mute,
-                                accessibilityHelp: why.text, enabled: false)
-        }
+        return CoachControl(symbol: micMuted ? s.unmute : s.mute, tooltip: mute.tooltip ?? "",
+                            accessibilityLabel: mute.accessibilityLabel ?? "", accessibilityHelp: mute.accessibilityHelp,
+                            enabled: mute.visibility == .enabled)
     }
 
     /// Pause while listening or muted, Resume while paused; nothing to pause before a session starts.
@@ -276,7 +251,7 @@ public extension CoachCardState {
 
     /// The pill's width: wider while a nudge's words show.
     func pillWidth(wordsWidth: Double) -> Double {
-        Theme.CoachPill.width(wordsWidth: nudge == nil ? nil : wordsWidth)
+        Theme.CoachPill.width(wordsWidth: nudge == nil ? nil : wordsWidth, buttons: pillButtons)
     }
 }
 

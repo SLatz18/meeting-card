@@ -492,26 +492,27 @@ public enum Theme {
         public static let wordsFont = CoachCard.nudgeFont
         public static let maxWidth = CardLayout.W
         public static var glyphX: Double { CardStyle.Coach.nudgeBar + padding }
-        public static var buttonsWidth: Double { 3 * button + 2 * buttonGap }
+        /// Mute (hidden with no Zoom call), Pause/Resume and Stop.
+        public static func buttonsWidth(_ n: Int = 3) -> Double { Double(n) * button + Double(max(0, n - 1)) * buttonGap }
         /// The row's vertical center, under the grabber.
         public static var rowMidY: Double { (height - grabberTop - grabber.height) / 2 }
 
         /// Pill width for nudge words `wordsWidth` wide (nil: no nudge), between the pill and card widths.
-        public static func width(wordsWidth: Double?) -> Double {
+        public static func width(wordsWidth: Double?, buttons n: Int = 3) -> Double {
             guard let w = wordsWidth else { return width }
-            let need = glyphX + glyphSize + glyphGap + w + CardStyle.Spacing.control + buttonsWidth + padding
+            let need = glyphX + glyphSize + glyphGap + w + CardStyle.Spacing.control + buttonsWidth(n) + padding
             return min(maxWidth, max(width, need))
         }
 
         /// The words' room in a pill `pillWidth` wide.
-        public static func wordsRoom(pillWidth: Double) -> Double {
-            max(0, pillWidth - glyphX - glyphSize - glyphGap - CardStyle.Spacing.control - buttonsWidth - padding)
+        public static func wordsRoom(pillWidth: Double, buttons n: Int = 3) -> Double {
+            max(0, pillWidth - glyphX - glyphSize - glyphGap - CardStyle.Spacing.control - buttonsWidth(n) - padding)
         }
 
-        /// Mute, Pause/Resume, Stop: x positions (pill coordinates), right-aligned.
-        public static func buttonXs(pillWidth: Double) -> [Double] {
-            let first = pillWidth - padding - buttonsWidth
-            return (0..<3).map { first + Double($0) * (button + buttonGap) }
+        /// The buttons' x positions (pill coordinates), right-aligned.
+        public static func buttonXs(pillWidth: Double, buttons n: Int = 3) -> [Double] {
+            let first = pillWidth - padding - buttonsWidth(n)
+            return (0..<n).map { first + Double($0) * (button + buttonGap) }
         }
     }
 }

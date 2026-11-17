@@ -160,7 +160,6 @@ final class CoachServiceTests: XCTestCase {
         XCTAssertEqual(s.cuesShown, 1)
         XCTAssertEqual(cues, [.interrupt], "the host hears about each cue shown")
         XCTAssertEqual(s.glowScreen, callScreen, "the coach card can follow the glow's display without reading windows")
-        XCTAssertEqual(s.appKey, "us.zoom.xos")
         s.glow.hideAll()
         s.stopForThisCall()
         XCTAssertNil(s.glowScreen, "forgotten with the session")

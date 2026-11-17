@@ -52,6 +52,9 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(xs.count, 3)
         XCTAssertEqual(xs[2] + p.button + p.padding, p.width, accuracy: 1e-9)
         XCTAssertGreaterThan(xs[0], p.glyphX + p.glyphSize, "the glyph clears the buttons")
+        let two = p.buttonXs(pillWidth: p.width, buttons: 2)
+        XCTAssertEqual(two.count, 2, "no Zoom call: Mute is left out")
+        XCTAssertEqual(two[1], xs[2], accuracy: 1e-9, "Stop stays at the trailing edge")
         XCTAssertLessThan(p.rowMidY + p.button / 2, p.height - p.grabberTop - p.grabber.height, "buttons sit under the grabber")
     }
 
@@ -115,25 +118,34 @@ final class CoachCardTests: XCTestCase {
 
     // MARK: controls
 
+    static let live = CoachMuteCopy.presentation(reason: nil, isMuted: false)
+    static let muted = CoachMuteCopy.presentation(reason: nil, isMuted: true)
+
     func testPillStateMapping() {
         let s = Theme.CoachCard.Symbols.self
-        func st(_ status: CoachCardState.Status, _ mute: CoachCardState.Mute = .available(muted: false),
+        func st(_ status: CoachCardState.Status, _ mute: MuteControlPresentation = Self.live, micMuted: Bool = false,
                 _ nudge: CoachNudge? = nil) -> CoachCardState {
-            CoachCardState(status: status, mute: mute, nudge: nudge, mode: .pill)
+            CoachCardState(status: status, mute: mute, micMuted: micMuted, nudge: nudge, mode: .pill)
         }
         XCTAssertEqual(st(.idle).pauseControl.enabled, false, "nothing to pause before a session")
         XCTAssertEqual(st(.listening).pauseControl, CoachControl(symbol: s.pause, tooltip: "Pause coach", accessibilityLabel: "Pause call coach"))
         XCTAssertEqual(st(.muted).pauseControl.symbol, s.pause, "the user's pause wins over mute")
         XCTAssertEqual(st(.paused).pauseControl, CoachControl(symbol: s.resume, tooltip: "Resume coach", accessibilityLabel: "Resume call coach"))
         XCTAssertEqual(st(.listening).muteControl, CoachControl(symbol: s.mute, tooltip: "Mute your mic", accessibilityLabel: "Mute your Zoom mic"))
-        XCTAssertEqual(st(.muted, .available(muted: true)).muteControl,
+        XCTAssertEqual(st(.muted, Self.muted, micMuted: true).muteControl,
                        CoachControl(symbol: s.unmute, tooltip: "Unmute your mic", accessibilityLabel: "Unmute your Zoom mic"))
-        for why in CoachCardCopy.MuteBlock.allCases {
-            let m = st(.listening, .blocked(why)).muteControl
+        for why in [MuteDisabledReason.meet, .toggleOff, .permissionDenied] {
+            let state = st(.listening, CoachMuteCopy.presentation(reason: why, isMuted: false))
+            let m = state.muteControl
             XCTAssertFalse(m.enabled)
-            XCTAssertEqual(m.tooltip, why.text)
-            XCTAssertEqual(m.accessibilityHelp, why.text)
+            XCTAssertEqual(m.tooltip, CoachMuteCopy.strings[CoachMuteCopy.disabledKey(why) ?? ""])
+            XCTAssertEqual(m.accessibilityHelp, m.tooltip)
+            XCTAssertTrue(state.showsMute, "disabled, not hidden: the tooltip says why")
+            XCTAssertEqual(state.pillButtons, 3)
         }
+        let noCall = st(.idle, CoachMuteCopy.presentation(reason: .noZoomCall, isMuted: false))
+        XCTAssertFalse(noCall.showsMute, "no Zoom call: Mute is left out")
+        XCTAssertEqual(noCall.pillButtons, 2)
         for status in CoachCardState.Status.allCases {
             XCTAssertEqual(st(status).stopControl,
                            CoachControl(symbol: s.stop, tooltip: "Stop coach for this call", accessibilityLabel: "Stop call coach for the rest of this call"))
@@ -146,9 +158,9 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(card.sizeControl.tooltip, "Minimize coach")
         XCTAssertEqual(card.sizeControl.accessibilityLabel, "Minimize call coach card")
         // A nudge tints and widens; the words are always there, so color is never the only cue.
-        let amber = st(.listening, .available(muted: false), CoachNudge(kind: .missedQuestion, tone: .amber))
+        let amber = st(.listening, Self.live, CoachNudge(kind: .missedQuestion, tone: .amber))
         XCTAssertEqual(amber.tone, .amber)
-        XCTAssertEqual(st(.listening, .available(muted: false), CoachNudge(kind: .interrupt, tone: .rose)).tone, .rose)
+        XCTAssertEqual(st(.listening, Self.live, CoachNudge(kind: .interrupt, tone: .rose)).tone, .rose)
         XCTAssertNil(st(.listening).tone)
         XCTAssertEqual(st(.listening).pillWidth(wordsWidth: 150), Theme.CoachPill.width, "no nudge: the pill's width")
         XCTAssertGreaterThan(amber.pillWidth(wordsWidth: 150), Theme.CoachPill.width)
@@ -160,23 +172,28 @@ final class CoachCardTests: XCTestCase {
         }
     }
 
-    func testMuteBlockedReasonStrings() {
-        XCTAssertEqual(CoachCardCopy.MuteBlock.meet.text, "Mute from the Meet window")
-        XCTAssertEqual(CoachCardCopy.MuteBlock.controlsOff.text, "Turn on \"Use Zoom/Meet controls\" in Settings to mute here.")
-        XCTAssertEqual(CoachCardCopy.MuteBlock.permission.text, "Allow MeetingCard in Privacy & Security to mute here.")
-        XCTAssertEqual(Set(CoachCardCopy.MuteBlock.allCases.map(\.text)).count, CoachCardCopy.MuteBlock.allCases.count)
+    /// Each reason Mute can't act maps to its approved tooltip on the card and pill.
+    func testMuteDisabledReasonStrings() {
+        func tip(_ r: MuteDisabledReason) -> String {
+            CoachCardState(status: .listening, mute: CoachMuteCopy.presentation(reason: r, isMuted: false)).muteControl.tooltip
+        }
+        XCTAssertEqual(tip(.meet), "Mute from the Meet window")
+        XCTAssertEqual(tip(.toggleOff), "Turn on \"Use Zoom/Meet controls\" in Settings to mute here.")
+        XCTAssertEqual(tip(.permissionDenied), "Allow MeetingCard in Privacy & Security to mute here.")
+        XCTAssertEqual(CoachCardState(status: .listening, mute: Self.live).muteControl.tooltip, "Mute your mic")
+        XCTAssertEqual(CoachCardState(status: .muted, mute: Self.muted, micMuted: true).muteControl.tooltip, "Unmute your mic")
     }
 
     func testCopy() {
         XCTAssertEqual(CoachCardCopy.Button.stop, "Stop coach")
         XCTAssertEqual(CoachCardCopy.A11y.skipped, "Call coach is off for the rest of this call.")
         XCTAssertEqual(CoachCardCopy.Captions.empty, "Captions will show here once someone talks.")
-        XCTAssertEqual([CoachCardCopy.Tooltip.mute, CoachCardCopy.Tooltip.unmute, CoachCardCopy.Tooltip.pause, CoachCardCopy.Tooltip.resume,
+        XCTAssertEqual([CoachMuteCopy.muteTooltip, CoachMuteCopy.unmuteTooltip, CoachCardCopy.Tooltip.pause, CoachCardCopy.Tooltip.resume,
                         CoachCardCopy.Tooltip.stop, CoachCardCopy.Tooltip.expand, CoachCardCopy.Tooltip.minimize],
                        ["Mute your mic", "Unmute your mic", "Pause coach", "Resume coach", "Stop coach for this call", "Expand coach",
                         "Minimize coach"])
-        XCTAssertEqual([CoachCardCopy.A11y.mute, CoachCardCopy.A11y.unmute, CoachCardCopy.A11y.pause, CoachCardCopy.A11y.resume,
-                        CoachCardCopy.A11y.stop, CoachCardCopy.A11y.expand, CoachCardCopy.A11y.minimize],
+        XCTAssertEqual([CoachMuteCopy.muteAccessibilityLabel, CoachMuteCopy.unmuteAccessibilityLabel, CoachCardCopy.A11y.pause,
+                        CoachCardCopy.A11y.resume, CoachCardCopy.A11y.stop, CoachCardCopy.A11y.expand, CoachCardCopy.A11y.minimize],
                        ["Mute your Zoom mic", "Unmute your Zoom mic", "Pause call coach", "Resume call coach",
                         "Stop call coach for the rest of this call", "Expand call coach card", "Minimize call coach card"])
     }
@@ -273,7 +290,7 @@ final class CoachCardTests: XCTestCase {
             for nudge in [nil, CoachNudge(kind: .interrupt, tone: .rose)] {
                 for status in CoachCardState.Status.allCases {
                     for moving in [false, true] {
-                        let state = CoachCardState(status: status, mute: .available(muted: false), nudge: nudge, mode: mode)
+                        let state = CoachCardState(status: status, mute: Self.live, nudge: nudge, mode: mode)
                         let s = CoachSurface.surface(for: state, transitioning: moving)
                         XCTAssertEqual(s.sharing, .excluded)
                         seen.insert("\(s)")

@@ -34,17 +34,6 @@ extension CoachCardState.Status {
     }
 }
 
-extension CoachCardCopy.MuteBlock {
-    init(_ reason: MuteUnavailableReason) {
-        switch reason {
-        case .meet: self = .meet
-        case .controlsOff: self = .controlsOff
-        case .permission: self = .permission
-        case .unsupportedApp: self = .unsupportedApp
-        }
-    }
-}
-
 extension CoachNudge {
     init?(_ cue: Cue) {
         guard let kind = Kind(rawValue: cue.type.rawValue) else { return nil }
@@ -300,6 +289,7 @@ final class CoachFullCardView: CoachSurfaceView {
         let icon = k.iconGlyph
         set(minimize, s.sizeControl, glyph: icon)
         set(mute, s.muteControl, glyph: icon)
+        mute.isHidden = !s.showsMute
         set(pause, s.pauseControl, glyph: icon)
         let stopControl = s.stopControl
         stop.attributedTitle = Card.attr(CoachCardCopy.Button.stop, Theme.font(k.buttonFont), Theme.text(.primary, style))
@@ -319,6 +309,8 @@ final class CoachPillView: CoachSurfaceView {
     private(set) var mute: CardButton!
     private(set) var pause: CardButton!
     private(set) var stop: CardButton!
+    /// Laid out for this many buttons (Mute is left out with no Zoom call).
+    let buttons: Int
 
     override var surfaceRadius: Double { Theme.CoachPill.radius }
 
@@ -333,6 +325,7 @@ final class CoachPillView: CoachSurfaceView {
     init(state: CoachCardState, actions: CoachCardActions) {
         let p = Theme.CoachPill.self
         let w = Self.width(for: state)
+        buttons = state.pillButtons
         super.init(state: state, actions: actions, size: NSSize(width: w, height: p.height))
         layer?.cornerRadius = Theme.cg(p.radius)
         layer?.cornerCurve = .continuous
@@ -350,17 +343,18 @@ final class CoachPillView: CoachSurfaceView {
         glyph.setAccessibilityElement(false)
         addSubview(glyph)
         let wx = p.glyphX + p.glyphSize + p.glyphGap
-        words.frame = NSRect(x: wx, y: p.rowMidY, width: p.wordsRoom(pillWidth: w), height: 0)
+        words.frame = NSRect(x: wx, y: p.rowMidY, width: p.wordsRoom(pillWidth: w, buttons: buttons), height: 0)
         addSubview(words)
 
-        let xs = p.buttonXs(pillWidth: w)
         mute = button(radius: p.buttonRadius, action: #selector(mutePressed(_:)))
         pause = button(radius: p.buttonRadius, action: #selector(pausePressed(_:)))
         stop = button(radius: p.buttonRadius, action: #selector(stopPressed(_:)))
-        for (b, x) in zip([mute!, pause!, stop!], xs) {
+        let shown: [CardButton] = state.showsMute ? [mute, pause, stop] : [pause, stop]
+        mute.isHidden = !state.showsMute
+        for (b, x) in zip(shown, p.buttonXs(pillWidth: w, buttons: buttons)) {
             b.frame = NSRect(x: x, y: p.rowMidY - p.button / 2, width: p.button, height: p.button)
-            addSubview(b)
         }
+        for b in [mute!, pause!, stop!] { addSubview(b) }
         onClick = { [weak self] in self?.actions.resize() }
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
