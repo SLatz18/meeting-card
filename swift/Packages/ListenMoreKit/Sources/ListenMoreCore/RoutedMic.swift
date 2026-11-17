@@ -124,11 +124,16 @@ public final class RoutedMic: MicSource {
 
     /// Muted closes the input completely and keeps the session's handler; unmuting reopens it on the
     /// current routes. Call capture is not this type's concern. `stop()` clears it.
-    public func setMuted(_ muted: Bool) {
-        guard muted != isMuted else { return }
+    @discardableResult
+    public func setMuted(_ muted: Bool) -> Bool {
+        guard muted != isMuted else { return true }
         isMuted = muted
-        guard isStarted else { return }
-        if muted { close() } else { openReporting() }
+        guard isStarted else { return true }
+        if muted {
+            close()
+            return true
+        }
+        return openReporting()
     }
 
     /// Applies at once: the mic reopens if the plan changes.
@@ -175,8 +180,15 @@ public final class RoutedMic: MicSource {
         openReporting()
     }
 
-    private func openReporting() {
-        do { try open() } catch { events?(.openFailed(currentPlan())) }
+    @discardableResult
+    private func openReporting() -> Bool {
+        do {
+            try open()
+            return true
+        } catch {
+            events?(.openFailed(currentPlan()))
+            return false
+        }
     }
 
     private func open() throws {

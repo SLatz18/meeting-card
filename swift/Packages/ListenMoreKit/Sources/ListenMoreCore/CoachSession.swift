@@ -8,8 +8,9 @@ public protocol MicSource: AnyObject {
     func stop()
     /// Muted closes the input device (no audio, the device released) and keeps the handler; unmuting
     /// reopens it. Muted before `start`, `start` opens nothing until unmuted. Call capture is
-    /// unaffected. `stop()` clears it.
-    func setMuted(_ muted: Bool)
+    /// unaffected. `stop()` clears it. Returns false when unmuting couldn't reopen the device.
+    @discardableResult
+    func setMuted(_ muted: Bool) -> Bool
 }
 
 /// Call output ("everyone else"). Restarted with a higher `stage` when the helper fallback engages.
@@ -221,7 +222,11 @@ public final class CoachSession {
     private func setMicDevice(on: Bool) {
         if on {
             micGate.resume()
-            mic.setMuted(false)
+            if !mic.setMuted(false) {
+                micGate.pause()
+                captureProblem = true
+                delegate?.coachSession(self, didReport: .micUnavailable)
+            }
         } else {
             micGate.pause()
             mic.setMuted(true)

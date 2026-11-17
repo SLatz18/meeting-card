@@ -24,7 +24,8 @@ public final class MicCapture: MicSource {
     public func stop() { mic.stop() }
 
     /// The coach Mute: closes the input device and keeps the session's handler; unmuting reopens it.
-    public func setMuted(_ muted: Bool) { mic.setMuted(muted) }
+    @discardableResult
+    public func setMuted(_ muted: Bool) -> Bool { mic.setMuted(muted) }
 
     /// Test-build switches for the speakers route; the shipping app never sets them.
     public var diagnostics: MicDiagnostics {

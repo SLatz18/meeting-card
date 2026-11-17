@@ -83,8 +83,9 @@ final class MicMuteSessionTests: XCTestCase {
         s.setMicMuted(true)
         XCTAssertTrue(s.micMuted)
         XCTAssertEqual(s.indicator, .micOff)
-        XCTAssertEqual(mic.stopped, 1)
-        XCTAssertNil(mic.handler)
+        XCTAssertEqual(mic.muted, [true], "the device is closed through MicSource.setMuted")
+        XCTAssertFalse(mic.isOpen)
+        XCTAssertEqual(mic.stopped, 0, "the mic stays started with the session's handler")
         XCTAssertTrue(s.isCapturing)
         XCTAssertEqual(s.capturingBundleIds, ["company.thebrowser.dia"])
         s.drainEngineForTesting()
@@ -98,15 +99,16 @@ final class MicMuteSessionTests: XCTestCase {
         XCTAssertTrue(delegate.indicators.contains(.micOff))
     }
 
-    /// Unmute starts the mic again on the same engine and goes back to Listening.
+    /// Unmute reopens the device for the kept handler on the same engine and goes back to Listening.
     func testUnmuteRestartsTheMic() async {
         let s = await listening()
         s.setMicMuted(true)
         s.setMicMuted(false)
         XCTAssertFalse(s.micMuted)
         XCTAssertEqual(s.indicator, .listening)
-        XCTAssertEqual(mic.started, 2)
-        XCTAssertNotNil(mic.handler)
+        XCTAssertEqual(mic.muted, [true, false])
+        XCTAssertTrue(mic.isOpen)
+        XCTAssertEqual(mic.started, 1, "the kept handler: no second start")
         s.drainEngineForTesting()
         XCTAssertEqual(engine.micMutes, [true, false])
         XCTAssertEqual(engine.startedWithKey.count, 1, "the engine keeps running")
@@ -127,8 +129,8 @@ final class MicMuteSessionTests: XCTestCase {
         XCTAssertEqual(engine.micMutes, [])
         s.setPaused(false)
         XCTAssertEqual(s.indicator, .micOff)
-        XCTAssertEqual(mic.started, 1, "the mic is not restarted")
-        XCTAssertNil(mic.handler)
+        XCTAssertEqual(mic.muted.last, true, "muted before it starts")
+        XCTAssertFalse(mic.isOpen, "the device is never opened")
         s.drainEngineForTesting()
         XCTAssertEqual(engine.startedWithKey.count, 2)
         XCTAssertEqual(engine.micMutes, [true])
@@ -177,8 +179,8 @@ final class MicMuteSessionTests: XCTestCase {
         s.tick()
         XCTAssertEqual(s.indicator, .micOff)
         XCTAssertTrue(s.isCapturing)
-        XCTAssertEqual(mic.started, 1, "no mic start")
-        XCTAssertNil(mic.handler)
+        XCTAssertEqual(mic.muted.last, true, "muted before it starts")
+        XCTAssertFalse(mic.isOpen, "the device is never opened")
         s.drainEngineForTesting()
         XCTAssertEqual(engine.startedWithKey.count, 2)
         XCTAssertEqual(engine.micMutes, [true])
@@ -240,7 +242,7 @@ final class MicMuteSessionTests: XCTestCase {
         s.setMicMuted(true)
         s.setMicMuted(true)
         XCTAssertEqual(mic.started, 1)
-        XCTAssertEqual(mic.stopped, 1)
+        XCTAssertEqual(mic.muted, [true])
         s.drainEngineForTesting()
         XCTAssertEqual(engine.micMutes, [true])
     }
@@ -255,12 +257,14 @@ final class MicMuteSessionTests: XCTestCase {
         XCTAssertTrue(s.micMuted)
         s.toggleFromIndicator()
         XCTAssertEqual(s.indicator, .micOff)
-        XCTAssertEqual(mic.started, 1)
+        XCTAssertFalse(mic.isOpen, "Resume never opens the device while muted")
         s.drainEngineForTesting()
         XCTAssertEqual(engine.micMutes, [true, true])
     }
 
-    /// A buffer the mic was already delivering when muted never reaches the engine, nor after unmute; call buffers still do.
+    /// A buffer the mic was already delivering when muted never reaches the engine while muted; call
+    /// buffers still do. Unmute reopens the gate for the kept handler; a handler from before a Pause
+    /// (an earlier capture) never gets in again.
     func testLateMicBufferAfterMuteNeverReachesTheEngine() async {
         let s = await listening()
         let lateMic = mic.handler
@@ -275,12 +279,15 @@ final class MicMuteSessionTests: XCTestCase {
         XCTAssertEqual(engine.ingested[.mic], 480)
         XCTAssertEqual(engine.ingested[.call], 240)
         s.setMicMuted(false)
-        lateMic?(buffer)
-        s.drainEngineForTesting()
-        XCTAssertEqual(engine.ingested[.mic], 480, "a pre-mute buffer stays out after unmute")
+        XCTAssertTrue(mic.handler != nil && mic.isOpen, "the same handler, the device open again")
         mic.handler?(buffer)
         s.drainEngineForTesting()
         XCTAssertEqual(engine.ingested[.mic], 960)
+        s.setPaused(true)
+        s.setPaused(false)
+        lateMic?(buffer)
+        s.drainEngineForTesting()
+        XCTAssertEqual(engine.ingested[.mic], 960, "a handler from before the Pause stays out")
     }
 
     /// A mic that fails to start again on unmute is reported like at session start.
@@ -292,7 +299,7 @@ final class MicMuteSessionTests: XCTestCase {
         s.setMicMuted(false)
         XCTAssertTrue(s.captureProblem)
         XCTAssertEqual(delegate.problems.filter { $0 == .micUnavailable }.count, 1)
-        XCTAssertNil(mic.handler)
+        XCTAssertFalse(mic.isOpen)
         XCTAssertFalse(s.micMuted)
         XCTAssertEqual(s.indicator, .listening)
     }
@@ -370,8 +377,8 @@ final class MicMuteSendsNoMicAudioTests: XCTestCase {
         let lateCall = call.handler
         session.setMicMuted(true)
         XCTAssertEqual(session.indicator, .micOff)
-        XCTAssertNil(mic.handler, "the mic engine is stopped")
-        XCTAssertEqual(mic.stopped, 1)
+        XCTAssertFalse(mic.isOpen, "the mic device is closed")
+        XCTAssertEqual(mic.muted, [true])
         let cleared = await eventually { me.sent.contains { $0.contains("\"input_audio_buffer.clear\"") } }
         XCTAssertTrue(cleared, "the user's uncommitted audio is cleared")
         XCTAssertFalse(others.sent.contains { $0.contains("\"input_audio_buffer.clear\"") })
@@ -457,10 +464,11 @@ final class MicMuteSendsNoMicAudioTests: XCTestCase {
         XCTAssertEqual(session.indicator, .micOff)
         let reopened = await eventually { self.sockets.filter { !$0.isClosed }.count == 2 && self.call.starts.count == 2 }
         XCTAssertTrue(reopened)
-        XCTAssertNil(mic.handler)
+        XCTAssertFalse(mic.isOpen, "the device is never opened while muted")
         let fresh = sockets.filter { !$0.isClosed }
         let me = fresh[0], others = fresh[1]
         feed(mic: lateMic, call: call.handler, seconds: 2)
+        feed(mic: mic.handler, call: nil, seconds: 1, seed: 5)
         let theirsFlow = await eventually { others.appends > 0 }
         XCTAssertTrue(theirsFlow)
         try await Task.sleep(nanoseconds: 200_000_000)
