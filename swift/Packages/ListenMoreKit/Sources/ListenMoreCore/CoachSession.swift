@@ -6,6 +6,9 @@ import Foundation
 public protocol MicSource: AnyObject {
     func start(sampleRate: Int, handler: @escaping @Sendable ([Float]) -> Void) throws
     func stop()
+    /// Muted closes the input device (no audio, the device released) and keeps the handler; unmuting
+    /// reopens it. Call capture is unaffected. `stop()` clears it.
+    func setMuted(_ muted: Bool)
 }
 
 /// Call output ("everyone else"). Restarted with a higher `stage` when the helper fallback engages.

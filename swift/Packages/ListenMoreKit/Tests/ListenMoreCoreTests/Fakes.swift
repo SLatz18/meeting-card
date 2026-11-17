@@ -22,6 +22,9 @@ final class FakeMic: MicSource {
         stopped += 1
         handler = nil
     }
+
+    var muted: [Bool] = []
+    func setMuted(_ muted: Bool) { self.muted.append(muted) }
 }
 
 final class FakeCall: CallSource, @unchecked Sendable {
