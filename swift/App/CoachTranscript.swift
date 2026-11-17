@@ -26,7 +26,7 @@ final class CoachTranscript {
 
     init(defaults: UserDefaults, store: TranscriptStore = FileTranscriptStore()) {
         self.defaults = defaults
-        live = LiveTranscript(settings: .init(folder: FileTranscriptStore.defaultFolder()), store: store,
+        live = LiveTranscript(settings: .init(folder: Self.defaultFolder), store: store,
                               captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines), labels: Self.speakerLabels)
         live.update(settings(keyUsable: false))
     }
@@ -36,9 +36,12 @@ final class CoachTranscript {
     var captionsOn: Bool { defaults.bool(forKey: Keys.captions) }
     var savingOn: Bool { defaults.bool(forKey: Keys.saveTranscripts) }
     var noticeSeen: Bool { defaults.bool(forKey: Keys.noticeSeen) }
+    /// This identity's default transcripts folder, so a `--test-id` build saves apart from the shipping app.
+    static var defaultFolder: URL { AppPaths.transcripts(for: .current) }
+
     var folder: URL {
         defaults.string(forKey: Keys.transcriptFolder).map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? FileTranscriptStore.defaultFolder()
+            ?? Self.defaultFolder
     }
 
     func settings(keyUsable: Bool) -> LiveTranscript.Settings {

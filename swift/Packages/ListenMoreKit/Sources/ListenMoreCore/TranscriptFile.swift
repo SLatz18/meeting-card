@@ -5,12 +5,8 @@ import Foundation
 /// and the file is readable by the user only. Audio has no path here. PrivacyGuardTests checks that
 /// no other coach source writes to disk.
 public final class FileTranscriptStore: TranscriptStore {
+    /// The host picks the folder (MeetingCard: per app identity, or the user's choice).
     public init() {}
-
-    /// ~/Library/Application Support/MeetingCard/Transcripts
-    public static func defaultFolder(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
-        home.appendingPathComponent("Library/Application Support/MeetingCard/Transcripts", isDirectory: true)
-    }
 
     public func prepare(folder: URL) throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,

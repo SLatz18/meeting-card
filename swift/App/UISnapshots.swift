@@ -56,10 +56,10 @@ enum UISnapshots {
     @MainActor
     static func transcriptShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
                                 done: @escaping () -> Void) {
-        let suite = "com.slatz.meetingcard.swift.snapshots"
+        let suite = AppIdentity.current.scoped("transcript-snapshots")
         guard let defaults = UserDefaults(suiteName: suite) else { return done() }
         defaults.removePersistentDomain(forName: suite)
-        let live = LiveTranscript(settings: .init(captions: true, saving: true, folder: FileTranscriptStore.defaultFolder(), keyUsable: true),
+        let live = LiveTranscript(settings: .init(captions: true, saving: true, folder: CoachTranscript.defaultFolder, keyUsable: true),
                                   store: MemoryTranscriptStore(), captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines),
                                   labels: CoachTranscript.speakerLabels)
         live.callStarted()

@@ -35,6 +35,11 @@ public struct AppIdentity: Equatable, Sendable {
         return "\(base)-\(rest.prefix(1).uppercased())\(rest.dropFirst())"
     }
 
+    /// The Application Support dir that holds saved call transcripts (opt-in): `MeetingCard` for the
+    /// shipping app, `MeetingCard-Test` for `com.slatz.meetingcard.swift.test`, `MeetingCard-<id>`
+    /// otherwise (the `fileStem` suffix on the user-facing name).
+    public var transcriptsDirName: String { "MeetingCard" + fileStem.dropFirst("MeetingCardSwift".count) }
+
     /// The installed copy's bundle name, the only copy that may register as a login item
     /// (`~/Applications/MeetingCardSwift.app`); nil for any other identity, so a test build never
     /// becomes a login item.

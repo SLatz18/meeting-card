@@ -18,6 +18,7 @@ The test build has its own identity, and nothing else changes:
 | Keychain service (account `OPENAI_API_KEY`) | `com.slatz.meetingcard.swift.openai` | `com.slatz.meetingcard.swift.test.openai` |
 | Log | `~/Library/Logs/MeetingCardSwift.log` | `~/Library/Logs/MeetingCardSwift-Test.log` |
 | State | `~/Library/Application Support/MeetingCardSwift/` | `~/Library/Application Support/MeetingCardSwift-Test/` |
+| Saved transcripts (Save transcripts on, default folder) | `~/Library/Application Support/MeetingCard/Transcripts/` | `~/Library/Application Support/MeetingCard-Test/Transcripts/` |
 | Login item | `~/Applications/MeetingCardSwift.app` only | never |
 
 macOS asks for Microphone and Screen & System Audio Recording again for "MeetingCard (Test)"; grant them there.
@@ -98,8 +99,8 @@ Call Coach while off).
 | X1 | Zoom desktop | Captions (needs the coach card) | Captions on, join a call, both sides talk | Lines labelled You and Them inside the coach card; gone when the call ends; no separate caption window appears |
 | X3 | All | Captions need a key | Remove the key | Both switches are disabled with the needs-a-key note; no captions appear in a call |
 | X4 | All | Speaker names | During a call, type a name for Them in Settings and press Return | Caption lines and the saved file use the name; next call is back to Them |
-| T2 | All | Saving off writes nothing | Captions on, saving off, run a call; then `ls ~/Library/Application\ Support/MeetingCard/Transcripts` | Folder absent or unchanged; no other new files from the app |
-| T3 | All | Saving on | Saving on (default folder, then a chosen folder), run a call | Saving indicator shows during the call; exactly one `Call <date> <time>.md` per call in the folder, mode `-rw-------`, with times and speaker labels; no audio files anywhere |
+| T2 | All | Saving off writes nothing | Captions on, saving off, run a call; then `ls ~/Library/Application\ Support/MeetingCard-Test/Transcripts` | Folder absent or unchanged; no other new files from the app |
+| T3 | All | Saving on | Saving on (default folder `MeetingCard-Test/Transcripts`, then a chosen folder), run a call | Saving indicator shows during the call; exactly one `Call <date> <time>.md` per call in the folder, mode `-rw-------`, with times and speaker labels; no audio files anywhere |
 | T4 | All | Delete | Settings → Delete Transcript (during a call, then after one) | File removed; during a call, saving stops for that call |
 | T5 | All | Cost cap | Set a tiny `budget_usd_per_call` in a dev build, run a call | Captions show they stopped, the indicator goes away, local cues still fire |
 

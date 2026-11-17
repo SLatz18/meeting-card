@@ -14,6 +14,13 @@ public struct AppPaths: Sendable, Equatable {
     /// `--fixture` runs (renders, eyeball checks): own log + state, never the live ones.
     public static func fixture(for id: AppIdentity) -> AppPaths { named(id.fileStem + "-fixture") }
 
+    /// The default folder for saved transcripts (Save transcripts, off by default; the user can pick
+    /// another): `~/Library/Application Support/MeetingCard/Transcripts` for the shipping app.
+    public static func transcripts(for id: AppIdentity) -> URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support/\(id.transcriptsDirName)/Transcripts", isDirectory: true)
+    }
+
     public static func forRun(fixture: Bool, identity: AppIdentity) -> AppPaths {
         fixture ? AppPaths.fixture(for: identity) : AppPaths.production(for: identity)
     }
