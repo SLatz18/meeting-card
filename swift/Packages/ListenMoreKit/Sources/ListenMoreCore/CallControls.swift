@@ -2,11 +2,12 @@ import Foundation
 
 // App-level call controls as a `CallStateProvider`: Zoom's in-meeting menu shortcuts (Accessibility)
 // and an open Google Meet meeting tab in Chrome or Dia (AppleScript). Readers see structure only:
-// keyboard shortcuts of Zoom's menu items, the label of Zoom's one audio toggle reduced to a Bool,
+// menu shortcuts of Zoom's menu items, the label of Zoom's one audio toggle reduced to a Bool,
 // and a count of Meet meeting tabs computed inside the browser's script. No window or meeting
 // title, participant name, chat, page text or other URL is read, kept or logged. Any reader that
 // can't answer (permission missing or revoked, scripting unsupported, a failed read) reports
-// nothing for its app, so Core Audio decides as before.
+// nothing for its app, so Core Audio decides as before. The one action is `ZoomControlsReader.toggleMute()`:
+// a single Accessibility press on Zoom's own Mute/Unmute menu item (no synthesized input of any kind).
 
 /// One reading of a call app's controls.
 public enum CallObservation: Equatable, Sendable {
@@ -133,6 +134,15 @@ public final class CallControlsProvider: CallStateProvider, @unchecked Sendable 
         return states
     }
 
+    /// The last reading, without starting a refresh.
+    public var currentStates: [String: CallState] { lock.withLock { enabled ? tracker.states : [:] } }
+
+    /// Runs `work` where readings run (the refresh queue, else inline), so an action and the
+    /// reading after it never overlap another read.
+    public func perform(_ work: @escaping () -> Void) {
+        if let queue { queue.async(execute: work) } else { work() }
+    }
+
     /// Reads every app once (no-op while off). Readings taken across an off/on switch are dropped.
     public func refresh() {
         let gen = lock.withLock { enabled ? generation : nil }
@@ -151,7 +161,7 @@ public final class CallControlsProvider: CallStateProvider, @unchecked Sendable 
 
 // MARK: Zoom
 
-/// A menu item in a call app's menu bar as the Accessibility reader sees it: its keyboard shortcut
+/// A menu item in a call app's menu bar as the Accessibility reader sees it: its menu shortcut
 /// (`kAXMenuItemCmdChar` / `kAXMenuItemCmdModifiers`) and, for the audio toggle only, whether it
 /// offers Unmute.
 public struct MenuShortcut: Equatable, Sendable {
@@ -180,6 +190,16 @@ public protocol ZoomAccessibility: AnyObject {
     var isRunning: Bool { get }
     /// Shortcuts of the items in Zoom's menu bar menus; nil if the read failed.
     func menuShortcuts() -> [MenuShortcut]?
+    /// One Accessibility press on the ⇧⌘A item (Zoom's Mute/Unmute audio), found by its shortcut
+    /// alone (no label read).
+    func pressAudioToggle() -> AudioTogglePress
+}
+
+public enum AudioTogglePress: Equatable, Sendable {
+    case pressed
+    /// No ⇧⌘A item: Zoom isn't in a meeting (or the menu bar couldn't be read).
+    case noItem
+    case failed
 }
 
 /// Zoom (`us.zoom.xos`): in a meeting while its menu bar has the in-meeting shortcuts (Zoom's
@@ -197,6 +217,8 @@ public final class ZoomControlsReader: CallControlsReader {
         self.ax = ax
     }
 
+    public var isTrusted: Bool { ax.isTrusted }
+
     public func read() -> CallObservation {
         guard ax.isTrusted else { return .unavailable(.accessibilityDenied) }
         guard ax.isRunning else { return .noCall }
@@ -205,6 +227,18 @@ public final class ZoomControlsReader: CallControlsReader {
         guard inMeeting else { return .noCall }
         let audio = items.first { $0.matches(key: Self.audioToggle.key, modifiers: Self.audioToggle.modifiers) }
         return .inCall(muted: audio?.offersUnmute)
+    }
+
+    /// Mute or unmute in Zoom: exactly one press on Zoom's own ⇧⌘A item, only while trusted and in a
+    /// meeting. Callers check the "Use Zoom/Meet controls" setting (`CallControlsModel`).
+    public func toggleMute() -> MuteActionResult {
+        guard ax.isTrusted else { return .unavailable(.permissionDenied) }
+        guard ax.isRunning else { return .unavailable(.noZoomCall) }
+        switch ax.pressAudioToggle() {
+        case .pressed: return .pressed
+        case .noItem: return .unavailable(.noZoomCall)
+        case .failed: return .failed
+        }
     }
 
     /// The ⇧⌘A item's label is "Mute audio" while live and "Unmute audio" while muted (or "... telephone").

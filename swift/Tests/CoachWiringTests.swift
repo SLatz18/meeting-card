@@ -34,6 +34,8 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("var callControlsOn: Bool { defaults.bool(forKey: Keys.callControls) }"), "false until set")
         XCTAssertTrue(src.contains("callControls.isEnabled = callControlsOn"))
         XCTAssertTrue(src.contains("keys: keyGate, callState: callControls"))
+        XCTAssertTrue(src.contains("lazy var callControlsModel = CallControlsModel(provider: callControls"),
+                      "the Mute control's model runs on the same provider (and its toggle)")
         let body = try XCTUnwrap(src.components(separatedBy: "func setCallControls(_ on: Bool)").dropFirst().first?
             .components(separatedBy: "func requestCallControlsAccess").first)
         XCTAssertTrue(body.contains("if on { requestCallControlsAccess() }"), "asks in context, only when turned on")

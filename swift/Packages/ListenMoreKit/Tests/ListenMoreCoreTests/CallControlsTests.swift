@@ -13,10 +13,24 @@ final class CallControlsTests: XCTestCase {
         var isRunning = true
         var items: [MenuShortcut]? = []
         var reads = 0
+        var presses = 0
+        var pressFails = false
 
         func menuShortcuts() -> [MenuShortcut]? {
             reads += 1
             return items
+        }
+
+        /// Like Zoom: pressing ⇧⌘A flips what the item offers (Mute audio <-> Unmute audio).
+        func pressAudioToggle() -> AudioTogglePress {
+            presses += 1
+            guard var list = items, let i = list.firstIndex(where: { $0.matches(key: "A", modifiers: MenuShortcut.shift) }) else {
+                return .noItem
+            }
+            if pressFails { return .failed }
+            list[i].offersUnmute = !(list[i].offersUnmute ?? false)
+            items = list
+            return .pressed
         }
 
         /// The Meeting menu while in a meeting: ⇧⌘A (offering Mute or Unmute), ⇧⌘V, plus everyday items.
@@ -338,5 +352,107 @@ final class CallControlsTests: XCTestCase {
                 XCTAssertTrue(source.contains("return n"), "returns a count only")
             }
         }
+    }
+
+    // MARK: Mute action (CallControlsModel)
+
+    func makeModel(session: String? = nil) -> (CallControlsModel, () -> Int) {
+        var changes = 0
+        let model = CallControlsModel(provider: provider, sessionAppKey: { session }, deliver: { $0() })
+        model.onChange = { changes += 1 }
+        return (model, { changes })
+    }
+
+    func testOnePressPerCallAndTheStateIsReadBack() {
+        ax.inMeeting(muted: false)
+        _ = provider.callStates()
+        let (model, changes) = makeModel(session: Self.zoom)
+        XCTAssertTrue(model.canMute)
+        XCTAssertNil(model.muteUnavailableReason)
+        XCTAssertFalse(model.isMuted)
+        XCTAssertEqual(model.toggleMute(), .requested)
+        XCTAssertEqual(ax.presses, 1, "exactly one press")
+        XCTAssertTrue(model.isMuted, "Zoom's own reading, refreshed after the press")
+        XCTAssertEqual(model.lastResult, .pressed)
+        XCTAssertEqual(changes(), 1)
+        XCTAssertEqual(model.toggleMute(), .requested)
+        XCTAssertEqual(ax.presses, 2, "one more press for one more call")
+        XCTAssertFalse(model.isMuted)
+    }
+
+    func testFailedPressIsReported() {
+        ax.inMeeting(muted: false)
+        ax.pressFails = true
+        _ = provider.callStates()
+        let (model, _) = makeModel()
+        model.toggleMute()
+        XCTAssertEqual(ax.presses, 1)
+        XCTAssertEqual(model.lastResult, .failed)
+        XCTAssertFalse(model.isMuted)
+    }
+
+    func testToggleOffIsANoOp() {
+        ax.inMeeting()
+        provider.isEnabled = false
+        let (model, changes) = makeModel(session: Self.zoom)
+        XCTAssertFalse(model.canMute)
+        XCTAssertEqual(model.muteUnavailableReason, .toggleOff)
+        XCTAssertEqual(model.toggleMute(), .unavailable(.toggleOff))
+        XCTAssertEqual(ax.presses, 0)
+        XCTAssertEqual(ax.reads, 0, "off reads nothing")
+        XCTAssertEqual(changes(), 0)
+    }
+
+    func testPermissionDeniedIsANoOp() {
+        ax.inMeeting()
+        ax.isTrusted = false
+        _ = provider.callStates()
+        let (model, _) = makeModel(session: Self.zoom)
+        XCTAssertEqual(model.muteUnavailableReason, .permissionDenied)
+        XCTAssertEqual(model.toggleMute(), .unavailable(.permissionDenied))
+        XCTAssertEqual(ax.presses, 0)
+        XCTAssertEqual(ZoomControlsReader(ax: ax).toggleMute(), .unavailable(.permissionDenied), "the reader checks again")
+        XCTAssertEqual(ax.presses, 0)
+    }
+
+    func testNoZoomCallIsANoOp() {
+        ax.home()
+        _ = provider.callStates()
+        let (model, _) = makeModel()
+        XCTAssertEqual(model.muteUnavailableReason, .noZoomCall)
+        XCTAssertEqual(model.toggleMute(), .unavailable(.noZoomCall))
+        ax.isRunning = false
+        XCTAssertEqual(ZoomControlsReader(ax: ax).toggleMute(), .unavailable(.noZoomCall))
+        XCTAssertEqual(ax.presses, 0)
+    }
+
+    func testMeetCannotMuteAndCaptureIsUntouched() {
+        scripts.meetTabs[Self.chrome] = 1
+        audio.live("com.google.Chrome.helper")
+        run(0, 5)
+        XCTAssertTrue(monitor.trigger.isCapturing)
+        let (model, _) = makeModel(session: monitor.trigger.session?.appKey)
+        XCTAssertFalse(model.canMute)
+        XCTAssertEqual(model.muteUnavailableReason, .meet, "the UI shows Mute from Meet")
+        XCTAssertEqual(model.toggleMute(), .unavailable(.meet))
+        XCTAssertEqual(ax.presses, 0)
+        XCTAssertTrue(monitor.trigger.isCapturing, "never mutes by stopping the coach's own capture")
+        XCTAssertFalse(model.isMuted)
+        let (noSession, _) = makeModel()
+        XCTAssertEqual(noSession.muteUnavailableReason, .meet, "a Meet tab alone also means Mute from Meet")
+    }
+
+    func testPressRunsOnTheProviderQueue() {
+        let q = DispatchQueue(label: "test.callcontrols.press")
+        ax.inMeeting(muted: false)
+        let p = CallControlsProvider(readers: [ZoomControlsReader(ax: ax)], endedHoldS: 30, queue: q, clock: { 0 })
+        p.isEnabled = true
+        _ = p.callStates()
+        q.sync {}
+        let model = CallControlsModel(provider: p, deliver: { $0() })
+        XCTAssertEqual(model.toggleMute(), .requested)
+        q.sync {}
+        XCTAssertEqual(ax.presses, 1)
+        XCTAssertTrue(model.isMuted)
     }
 }

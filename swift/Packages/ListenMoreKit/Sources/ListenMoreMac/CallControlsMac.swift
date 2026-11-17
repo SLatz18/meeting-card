@@ -7,9 +7,10 @@ import ListenMoreCore
 // prompts except `CallControlsPermissions.request...`, which only the host's Settings toggle calls.
 // Nothing is logged.
 
-/// Zoom's menu bar through the Accessibility API. Reads menu items' keyboard shortcuts
+/// Zoom's menu bar through the Accessibility API. Reads menu items' shortcuts
 /// (`kAXMenuItemCmdChar`, `kAXMenuItemCmdModifiers`) and, for the ⇧⌘A audio toggle only, its label
 /// reduced to a Bool at once. Never reads windows, window or meeting titles, participants or chat.
+/// Its one action is a single Accessibility press on that same ⇧⌘A item (`pressAudioToggle`).
 public final class AXZoomAccessibility: ZoomAccessibility {
     public let bundleId: String
     /// Per-call timeout so a busy Zoom never stalls a refresh.
@@ -27,23 +28,47 @@ public final class AXZoomAccessibility: ZoomAccessibility {
     }
 
     public func menuShortcuts() -> [MenuShortcut]? {
-        guard let pid else { return nil }
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
-        guard let bar = element(app, kAXMenuBarAttribute) else { return nil }
         let toggle = ZoomControlsReader.audioToggle
         var out: [MenuShortcut] = []
+        let read = forEachShortcut { item, shortcut in
+            var s = shortcut
+            if s.matches(key: toggle.key, modifiers: toggle.modifiers) { s.offersUnmute = audioToggleOffersUnmute(item) }
+            out.append(s)
+            return true
+        }
+        return read ? out : nil
+    }
+
+    /// The ⇧⌘A item, found by its shortcut alone, pressed exactly once.
+    public func pressAudioToggle() -> AudioTogglePress {
+        let toggle = ZoomControlsReader.audioToggle
+        var found: AXUIElement?
+        _ = forEachShortcut { item, s in
+            guard s.matches(key: toggle.key, modifiers: toggle.modifiers) else { return true }
+            found = item
+            return false
+        }
+        guard let item = found else { return .noItem }
+        return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success ? .pressed : .failed
+    }
+
+    /// Visits each menu-bar menu item that has a shortcut, until `visit` returns false. Reads only
+    /// the menu bar, children and the two shortcut attributes. False if the menu bar can't be read.
+    private func forEachShortcut(_ visit: (AXUIElement, MenuShortcut) -> Bool) -> Bool {
+        guard let pid else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
+        guard let bar = element(app, kAXMenuBarAttribute) else { return false }
         for barItem in children(bar) {
             for menu in children(barItem) {
                 for item in children(menu) {
                     guard let key = string(item, kAXMenuItemCmdCharAttribute), !key.isEmpty else { continue }
-                    var s = MenuShortcut(key: key, modifiers: int(item, kAXMenuItemCmdModifiersAttribute) ?? 0)
-                    if s.matches(key: toggle.key, modifiers: toggle.modifiers) { s.offersUnmute = audioToggleOffersUnmute(item) }
-                    out.append(s)
+                    let s = MenuShortcut(key: key, modifiers: int(item, kAXMenuItemCmdModifiersAttribute) ?? 0)
+                    if !visit(item, s) { return true }
                 }
             }
         }
-        return out
+        return true
     }
 
     /// The only label read anywhere: Zoom's own ⇧⌘A item ("Mute audio" / "Unmute audio"), kept as a Bool.

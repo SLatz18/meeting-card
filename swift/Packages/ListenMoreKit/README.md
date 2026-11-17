@@ -32,7 +32,9 @@ session's capture (the pause path) until unmute; without a provider, Core Audio 
 `CallControlsProvider.live(config:)` in ListenMoreMac) is that provider for Zoom (Accessibility:
 menu-bar shortcuts only, plus the ⇧⌘A audio toggle's label reduced to a Bool) and Google Meet in
 Chrome and Dia (AppleScript: the browser filters tabs to the Meet host and the script returns a
-count; Meet mute is not detected, so only Zoom reports `muted`). Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
+count; Meet mute is not detected, so only Zoom reports `muted`). `CallControlsModel` (`isMuted`, `canMute`,
+`muteUnavailableReason`, `toggleMute()`, `onChange`) is a host's Mute control: one Accessibility press on Zoom's own ⇧⌘A item
+per call, read back right after; a no-op with a reason (`toggleOff`, `permissionDenied`, `noZoomCall`, `meet`) otherwise. Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
 revoked or unsupported backend reports nothing for its app. `CallControlsPermissions.request...`
 shows the system prompts and is for a host's opt-in toggle only.
 

@@ -141,7 +141,7 @@ final class PrivacyGuardTests: XCTestCase {
 
     // MARK: "Use Zoom/Meet controls" providers
 
-    static let providerFiles = ["CallControls.swift", "CallControlsMac.swift"]
+    static let providerFiles = ["CallControls.swift", "CallControlsModel.swift", "CallControlsMac.swift"]
 
     func providerSources() throws -> [(String, String)] {
         let found = try librarySources().filter { Self.providerFiles.contains($0.0) }
@@ -164,7 +164,7 @@ final class PrivacyGuardTests: XCTestCase {
         let used = Set(re.matches(in: code(mac), range: NSRange(code(mac).startIndex..., in: code(mac)))
             .map { (code(mac) as NSString).substring(with: $0.range) })
         XCTAssertEqual(used, ["kAXMenuBarAttribute", "kAXChildrenAttribute", "kAXMenuItemCmdCharAttribute",
-                              "kAXMenuItemCmdModifiersAttribute", "kAXTitleAttribute"])
+                              "kAXMenuItemCmdModifiersAttribute", "kAXTitleAttribute", "kAXPressAction"])
         let titleLines = code(mac).components(separatedBy: "\n").filter { $0.contains("kAXTitleAttribute") }
         XCTAssertEqual(titleLines.count, 1, "one label read")
         XCTAssertTrue(titleLines.first?.contains(".flatMap(ZoomControlsReader.offersUnmute(label:))") == true,
@@ -199,6 +199,42 @@ final class PrivacyGuardTests: XCTestCase {
         XCTAssertTrue(mac.contains("result.int32Value"))
         for banned in ["stringValue", "coerce(", "descriptor(at"] {
             XCTAssertFalse(code(mac).contains(banned), "the runner reads \(banned) from a script result")
+        }
+    }
+
+    /// The Mute action is one Accessibility press on Zoom's own ⇧⌘A item, located by shortcut (no
+    /// label read), reached only through ZoomControlsReader.toggleMute and the model. No synthesized
+    /// input anywhere in the readers or actions, and Mute never touches the coach's own capture.
+    func testMuteIsOneAccessibilityPressNoSynthesizedInput() throws {
+        let sources = try providerSources()
+        for (name, text) in sources {
+            for banned in ["cgevent", "keyboard", "keystroke", "nsevent", "iohid", "postevent", "cgpost", "sendevent"] {
+                XCTAssertFalse(text.lowercased().contains(banned), "\(name) mentions \(banned)")
+            }
+        }
+        for (name, text) in try allSources() where name != "CallControlsMac.swift" {
+            XCTAssertFalse(code(text).contains("AXUIElementPerformAction"), "\(name) performs an Accessibility action")
+            XCTAssertFalse(code(text).contains("CGEvent"), "\(name) synthesizes input")
+        }
+        let mac = code(try XCTUnwrap(sources.first { $0.0 == "CallControlsMac.swift" }).1)
+        let actions = mac.components(separatedBy: "\n").filter { $0.contains("AXUIElementPerformAction") }
+        XCTAssertEqual(actions.count, 1, "one action call site")
+        XCTAssertTrue(actions.first?.contains("AXUIElementPerformAction(item, kAXPressAction as CFString)") == true)
+        let press = try XCTUnwrap(mac.components(separatedBy: "public func pressAudioToggle()").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(press.contains("AXUIElementPerformAction"), "the press lives in pressAudioToggle")
+        XCTAssertFalse(press.contains("audioToggleOffersUnmute") || press.contains("kAXTitleAttribute"), "pressing reads no label")
+        XCTAssertFalse(press.contains("for "), "no loop around the press")
+
+        let core = code(try XCTUnwrap(sources.first { $0.0 == "CallControls.swift" }).1)
+        let model = code(try XCTUnwrap(sources.first { $0.0 == "CallControlsModel.swift" }).1)
+        XCTAssertEqual(core.components(separatedBy: "ax.pressAudioToggle()").count - 1, 1, "pressed only from toggleMute")
+        XCTAssertEqual(model.components(separatedBy: "zoom.toggleMute()").count - 1, 1, "one press per model call")
+        for (name, text) in try allSources() where !["CallControls.swift", "CallControlsModel.swift"].contains(name) {
+            XCTAssertFalse(code(text).contains(".pressAudioToggle()"), "\(name) presses directly")
+        }
+        for banned in ["setPaused", "stopManual", "stopCapture", "MicSource", "CallSource", "CoachSession"] {
+            XCTAssertFalse(model.contains(banned), "Mute must never work by stopping the coach's own capture (\(banned))")
         }
     }
 

@@ -20,7 +20,7 @@ enum CoachCopy {
     static let coachMuted = "Coach paused while you're muted"
     static let chipMuted = "Muted"
     static let callControlsToggle = "Use Zoom/Meet controls"
-    static let callControlsHelp = "Stops the coach a few seconds after you leave a Zoom call or close a Meet tab, and pauses it while you're muted in Zoom. Reads only Zoom's meeting controls and whether a Meet tab is open: never titles, names, chat or other tabs. Off by default."
+    static let callControlsHelp = "Stops the coach a few seconds after you leave a Zoom call or close a Meet tab, and pauses it while you're muted in Zoom. Reads only Zoom's meeting controls and whether a Meet tab is open: never titles, names, chat or other tabs. With Accessibility it can also press Zoom's own Mute button when you ask. Off by default."
     static let requestAccess = "Request access"
     static let callControlsDiaUnsupported = "This version of Dia can't share its tabs, so for Dia the coach goes by audio activity."
 

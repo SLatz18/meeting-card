@@ -30,6 +30,11 @@ final class CoachController: NSObject {
     let keyGate: CoachKeyGate
     /// App-level call state for the service; reads nothing while the setting is off.
     let callControls: CallControlsProvider
+    /// The coach's Mute control for a host surface to show (Zoom only: one press on Zoom's own
+    /// Mute/Unmute item; Meet: unavailable, mute from Meet). No surface hosts it yet.
+    private(set) lazy var callControlsModel = CallControlsModel(provider: callControls, sessionAppKey: { [weak self] in
+        MainActor.assumeIsolated { self?.service?.session.session?.appKey }
+    })
     /// Cards on screen, newest last (the chip goes on each).
     var visibleCards: () -> [Card] = { [] }
     /// The coach status menu: always there, so the coach can be enabled from it while off.
