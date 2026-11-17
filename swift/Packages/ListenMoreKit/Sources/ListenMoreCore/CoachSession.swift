@@ -97,6 +97,8 @@ public final class CoachSession {
     private var timer: Timer?
     private var callTask: Task<Void, Never>?
     private var bridge: EngineDelegateBridge?
+    /// The mic was released because the session's app reported its call ended (see `syncMic`).
+    public private(set) var micReleasedForCallEnd = false
 
     public init(config: ListenMoreConfig, engine: CoachEngine, mic: MicSource, call: CallSource, signal: CallSignal,
                 keys: APIKeyProvider, renderer: CueRenderer, settings: TriggerSettings, enabled: Bool = true,
@@ -224,7 +226,9 @@ public final class CoachSession {
                                    callStates: callState?.callStates() ?? [:])
         apply(actions)
         // A manual session adopting the call app changes what to capture without an action.
-        if actions.isEmpty && (syncCapture() || indicator != before) { changed() }
+        let captureChanged = actions.isEmpty && syncCapture()
+        let micChanged = syncMic()
+        if actions.isEmpty && (captureChanged || micChanged || indicator != before) { changed() }
         checkCallFallback()
     }
 
@@ -289,15 +293,8 @@ public final class CoachSession {
             }
             gateGeneration = gate.openNew()
             engine.start(config: config, apiKey: key)
-            let gen = gateGeneration
-            do {
-                try mic.start(sampleRate: config.audio.sampleRate) { samples in
-                    if gate.admits(gen) { engine.ingest(.mic, samples: samples, time: 0) }
-                }
-            } catch {
-                captureProblem = true
-                delegate?.coachSession(self, didReport: .micUnavailable)
-            }
+            micReleasedForCallEnd = trigger.callEndPending
+            if !micReleasedForCallEnd { startMic() }
         }
         let level = callLevel
         let call = call
@@ -325,6 +322,32 @@ public final class CoachSession {
         }
     }
 
+    private func startMic() {
+        let engine = engine
+        let gate = gate
+        let gen = gateGeneration
+        do {
+            try mic.start(sampleRate: config.audio.sampleRate) { samples in
+                if gate.admits(gen) { engine.ingest(.mic, samples: samples, time: 0) }
+            }
+        } catch {
+            captureProblem = true
+            delegate?.coachSession(self, didReport: .micUnavailable)
+        }
+    }
+
+    /// A call-end report releases the mic at once (and with it voice processing's ducking and any
+    /// Bluetooth headset hold), ahead of the session's own end; the engine and call capture keep
+    /// running, so a report that flips back only reopens the mic. Without a report for the session's
+    /// app, the mic runs until the session ends.
+    @discardableResult
+    private func syncMic() -> Bool {
+        guard isCapturing, micReleasedForCallEnd != trigger.callEndPending else { return false }
+        micReleasedForCallEnd = trigger.callEndPending
+        if micReleasedForCallEnd { mic.stop() } else { startMic() }
+        return true
+    }
+
     private func stopCapture() {
         guard !capturingBundleIds.isEmpty else { return }
         // Closed first and synchronously: not one buffer reaches the engine (or OpenAI) after this,
@@ -334,7 +357,8 @@ public final class CoachSession {
         captureStage = .parentApps
         let previous = callTask
         previous?.cancel()
-        mic.stop()
+        if !micReleasedForCallEnd { mic.stop() }
+        micReleasedForCallEnd = false
         let call = call
         callTask = Task {
             await previous?.value

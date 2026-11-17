@@ -209,6 +209,8 @@ public struct CoachTrigger: Sendable {
 
     public var isActive: Bool { session != nil }
     public var isCapturing: Bool { session.map { !$0.held } ?? false }
+    /// The session's app reports its call ended; the session itself ends `endedStopAfterS` later.
+    public var callEndPending: Bool { session != nil && endedSince != nil }
 
     /// Pre-warmed: enabled, no session yet, but a call looks imminent (Join was clicked on a card
     /// for an event that hasn't ended, or a call app is inside the start debounce).
