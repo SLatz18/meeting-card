@@ -1,4 +1,5 @@
 import XCTest
+@testable import MeetingCardCore
 
 /// The call coach is wired in as an opt-in: a local package (the coach's single source, no remote
 /// dependency), permission strings present, the opt-in a UserDefaults boolean (false until set), the
@@ -89,6 +90,31 @@ final class CoachWiringTests: XCTestCase {
             .components(separatedBy: "\n    }\n").first)
         XCTAssertTrue(save.contains("try? typeSafeKeychain.save(key)"))
         XCTAssertFalse(save.contains("KeyValidator") || save.contains("Task"), "nothing is sent to check the TypeSafe key")
+    }
+
+    /// The TypeSafe key resolves to `AppIdentity.current.keychainService` in every build: the bundle id
+    /// gives the OpenAI key's service, the controller's store uses it, and the TypeSafe store is that
+    /// store's sibling (same service and access group, account TYPESAFE_API_KEY). So the shipping build
+    /// and `build.sh --test-id` each keep their TypeSafe key beside their own OpenAI key, never the other's.
+    func testTypeSafeKeyFollowsAppIdentityInBothBuilds() throws {
+        let controller = try read("App/CoachController.swift")
+        XCTAssertTrue(controller.contains("static let keychainService = AppIdentity.current.keychainService"))
+        XCTAssertTrue(controller.contains("keychain: KeychainStore = KeychainStore(service: CoachController.keychainService)"))
+        XCTAssertTrue(controller.contains("typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)"))
+        let kit = try read("Packages/ListenMoreKit/Sources/ListenMoreMac/KeychainStore.swift")
+        XCTAssertTrue(kit.contains("public static let typeSafeAccount = \"TYPESAFE_API_KEY\""))
+        XCTAssertTrue(kit.contains("KeychainStore(service: service, account: account, accessGroup: accessGroup)"),
+                      "sibling keeps the service and access group")
+        var typeSafeStores = 0
+        for file in try FileManager.default.contentsOfDirectory(atPath: Self.swiftDir.appendingPathComponent("App").path)
+        where file.hasSuffix(".swift") {
+            typeSafeStores += try read("App/" + file).components(separatedBy: "typeSafeAccount").count - 1
+        }
+        XCTAssertEqual(typeSafeStores, 1, "the controller's sibling is the only TypeSafe store in the app")
+        XCTAssertEqual(AppIdentity.release.keychainService, AppIdentity.release.scoped("openai"))
+        XCTAssertEqual(AppIdentity.test.keychainService, AppIdentity.test.scoped("openai"))
+        XCTAssertNotEqual(AppIdentity.release.keychainService.lowercased(), AppIdentity.test.keychainService.lowercased(),
+                          "the test build's TypeSafe key never shares the shipping build's item")
     }
 
     /// Settings says why judging stopped from the failure's kind and status code only; the window
