@@ -426,8 +426,8 @@ public enum Theme {
         /// What the tip adds below the card's usual content: Dismiss on the card's bottom inset, a gap,
         /// the text, then the title. (The usual bottom inset stays between the button row and the title.)
         public static var tipExtra: Double { vertical + tipButtonHeight + rowGap + tipTextHeight + tipTitleHeight }
-        /// The card's height, with the tip row when it shows.
-        public static func cardHeight(callModeTip: Bool) -> Double { callModeTip ? height + tipExtra : height }
+        /// The card's height, with the tip row (the call-mode tip or the no-mic notice) when it shows.
+        public static func cardHeight(tipRow: Bool) -> Double { tipRow ? height + tipExtra : height }
 
         public static let statusFont = CardStyle.Typography.body
         /// The status line reads like the chip: primary, held (paused or muted) secondary.
@@ -505,7 +505,7 @@ public enum Theme {
         public static func stopButton(labelWidth: Double) -> Frame {
             Frame(x: leading, y: vertical, width: labelWidth + 2 * textButtonPadding, height: rowHeight)
         }
-        /// The tip row's frames, in card coordinates of a card `cardHeight(callModeTip: true)` tall: the
+        /// The tip row's frames, in card coordinates of a card `cardHeight(tipRow: true)` tall: the
         /// usual content sits `tipExtra` higher than in a card without the tip.
         public static func tipDismissButton(labelWidth: Double) -> Frame {
             Frame(x: leading, y: vertical, width: labelWidth + 2 * Coach.controlInset, height: tipButtonHeight)

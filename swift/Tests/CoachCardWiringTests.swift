@@ -161,20 +161,24 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(controller.contains("state.callModeTip = callModeTracker.visible"))
         let body = try XCTUnwrap(controller.components(separatedBy: "func dismissCallModeTip() {").dropFirst().first?
             .components(separatedBy: "\n    }").first)
-        XCTAssertEqual(body.trimmingCharacters(in: .whitespacesAndNewlines), "callModeTracker.dismiss()\n        refresh()")
+        XCTAssertEqual(body.trimmingCharacters(in: .whitespacesAndNewlines),
+                       "if noMicTracker.visible { noMicTracker.dismiss() } else { callModeTracker.dismiss() }\n        refresh()",
+                       "one Dismiss: the no-mic notice first, otherwise the call-mode tip")
         XCTAssertTrue(controller.contains("dismissCallModeTip: { [weak self] in self?.dismissCallModeTip() }"))
 
         let view = try read("App/CoachCardView.swift")
         XCTAssertTrue(view.contains("var dismissCallModeTip: () -> Void = {}"))
         XCTAssertTrue(view.contains("@objc func dismissCallModeTipPressed(_ sender: Any?) { actions.dismissCallModeTip() }"))
-        XCTAssertTrue(view.contains("tipTitle.stringValue = CoachCardCopy.CallModeTip.title"))
-        XCTAssertTrue(view.contains("tipLabel.stringValue = CoachCardCopy.CallModeTip.body"))
-        XCTAssertTrue(view.contains("tipLabel.setAccessibilityLabel(CoachCardCopy.CallModeTip.accessibilityLabel)"))
-        XCTAssertTrue(view.contains("tipLabel.isHidden = !s.callModeTip"))
-        XCTAssertTrue(view.contains("dismissTip.isHidden = !s.callModeTip"))
-        XCTAssertTrue(view.contains("height: Theme.CoachCard.cardHeight(callModeTip: s.callModeTip)"), "the card's size counts the row")
+        XCTAssertTrue(view.contains("tipTitle.stringValue = s.noMicNotice ? CoachCardCopy.NoMicNotice.title : CoachCardCopy.CallModeTip.title"))
+        XCTAssertTrue(view.contains("tipLabel.stringValue = s.noMicNotice ? CoachCardCopy.NoMicNotice.body : CoachCardCopy.CallModeTip.body"))
+        XCTAssertTrue(view.contains("tipLabel.setAccessibilityLabel(s.noMicNotice ? CoachCardCopy.NoMicNotice.accessibilityLabel : CoachCardCopy.CallModeTip.accessibilityLabel)"))
+        XCTAssertTrue(view.contains("Card.attr(s.noMicNotice ? CoachCardCopy.NoMicNotice.dismiss : CoachCardCopy.CallModeTip.dismiss,"))
+        XCTAssertTrue(view.contains("tipLabel.isHidden = !s.tipRow"))
+        XCTAssertTrue(view.contains("dismissTip.isHidden = !s.tipRow"))
+        XCTAssertTrue(view.contains("height: Theme.CoachCard.cardHeight(tipRow: s.tipRow)"), "the card's size counts the row")
         let pill = try XCTUnwrap(view.components(separatedBy: "final class CoachPillView").dropFirst().first)
-        XCTAssertFalse(pill.contains("callModeTip") || pill.contains("CallModeTip"), "the pill never shows the tip")
+        XCTAssertFalse(pill.contains("callModeTip") || pill.contains("CallModeTip") || pill.contains("noMicNotice") || pill.contains("NoMicNotice"),
+                       "the pill never shows the tip or the notice")
         let panel = try read("App/CoachCardPanel.swift")
         XCTAssertTrue(panel.contains("CoachFullCardView.frameSize(for: s) != current.frame.size"), "the panel resizes when the row comes or goes")
         for f in Self.cardFiles + ["App/CoachController.swift"] {
@@ -183,13 +187,37 @@ final class CoachCardWiringTests: XCTestCase {
         }
     }
 
+    /// The no-mic notice: the controller feeds a second once-per-call tracker from the mic's `noMicStatus`, only while
+    /// listening; one Dismiss handles it and the call-mode tip; Settings shows its note only behind the Kit's check.
+    func testNoMicNoticeIsFedFromTheMicAndShownInSettings() throws {
+        let controller = try read("App/CoachController.swift")
+        XCTAssertTrue(controller.contains("private var noMicTracker = OncePerCallNotice()"))
+        XCTAssertTrue(controller.contains("noMicTracker.update(call: service?.session.session?.startedAt,"), "the call is its start time")
+        XCTAssertTrue(controller.contains("callMode: listening && ((service?.mic as? MicCapture)?.noMicStatus ?? false))"),
+                      "only while listening, from the mic's route")
+        XCTAssertTrue(controller.contains("state.noMicNotice = noMicTracker.visible"))
+        let body = try XCTUnwrap(controller.components(separatedBy: "func dismissCallModeTip() {").dropFirst().first?
+            .components(separatedBy: "\n    }").first)
+        XCTAssertTrue(body.contains("noMicTracker.dismiss()") && body.contains("callModeTracker.dismiss()"), "Dismiss handles both")
+
+        let settings = try read("App/CoachSettingsWindow.swift")
+        XCTAssertTrue(settings.contains("import ListenMoreMac"))
+        XCTAssertTrue(settings.contains("CoachSettingsWindow.text(CoachCardCopy.NoMicNotice.settingsNote, font: Theme.Settings.helperFont,"))
+        XCTAssertTrue(settings.contains("NoMicNotice.showsSettingsNote(builtInMicPresent: CoreAudioRoutes().snapshot().builtInInput != nil)"))
+        XCTAssertTrue(settings.contains("noMicNote.isHidden = !(window.isVisible && NoMicNotice.showsSettingsNote("), "hidden unless the Kit says to show it")
+        XCTAssertTrue(settings.contains("let g1 = Self.group([toggleRow, help, noMicNote, gptNote,"))
+        let view = try read("App/CoachCardView.swift")
+        XCTAssertFalse(code(view).contains("noMicTracker"), "the view reads the state only")
+    }
+
     /// The CI gate checks for every coach card shot the App writes.
     func testSnapshotGateCoversEveryState() throws {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
         let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
-        XCTAssertEqual(found.count, 20, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), and the call-mode tip")
+        XCTAssertEqual(found.count, 21, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), the call-mode tip and the no-mic notice")
         XCTAssertTrue(found.contains("card-call-mode-tip"), "the call-mode tip card has a shot")
+        XCTAssertTrue(found.contains("card-no-mic-notice"), "the no-mic notice card has a shot")
         for n in found + ["morph-end", "collapse-end"] {
             XCTAssertNotNil(script.range(of: #"(\s|\\\n)\#(n)(\s|;)"#, options: .regularExpression), "snapshots.sh doesn't check \(n)")
         }

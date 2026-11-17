@@ -39,6 +39,31 @@ final class CallModeHintTests: XCTestCase {
         XCTAssertTrue(callMode(.bluetooth, active: true, rate: 16000, output: 2, ourMic: nil), "coach mic closed or none")
     }
 
+    // MARK: no-mic notice
+
+    func testNoMicStatusOnlyForBluetoothWithoutABuiltInMic() {
+        XCTAssertTrue(NoMicNotice.showsStatus(route: .bluetooth, micSource: MicSourceKind.none, builtInMicPresent: false))
+        XCTAssertFalse(NoMicNotice.showsStatus(route: .bluetooth, micSource: MicSourceKind.none, builtInMicPresent: true),
+                       "a built-in mic set aside (closed lid) is not 'no built-in mic'")
+        XCTAssertFalse(NoMicNotice.showsStatus(route: .bluetooth, micSource: .builtIn, builtInMicPresent: true))
+        for route in [OutputRoute.speakers, .wiredHeadphones, .other] {
+            XCTAssertFalse(NoMicNotice.showsStatus(route: route, micSource: MicSourceKind.none, builtInMicPresent: false), "\(route)")
+        }
+        XCTAssertFalse(NoMicNotice.showsStatus(route: nil, micSource: nil, builtInMicPresent: false), "mic closed")
+    }
+
+    func testNoMicSettingsNoteOnlyWithoutABuiltInMic() {
+        XCTAssertTrue(NoMicNotice.showsSettingsNote(builtInMicPresent: false))
+        XCTAssertFalse(NoMicNotice.showsSettingsNote(builtInMicPresent: true))
+    }
+
+    func testTheNoMicPlanFeedsTheNotice() {
+        let mac15 = OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0)
+        let routes = AudioRoutes(output: AudioDeviceInfo(id: 2, transport: .bluetooth),
+                                 defaultInput: AudioDeviceInfo(id: 2, transport: .bluetooth), builtInInput: nil)
+        let p = MicPlan.plan(routes: routes, macOS: mac15)
+        XCTAssertTrue(NoMicNotice.showsStatus(route: p.route, micSource: p.micSource, builtInMicPresent: routes.builtInInput != nil))
+    }
 
     // MARK: once per call, dismissible
 

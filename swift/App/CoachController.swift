@@ -81,6 +81,8 @@ final class CoachController: NSObject {
     private var nudgeTimer: Timer?
     /// Shows the headphones-in-call-mode tip on the card at most once per call.
     private var callModeTracker = CallModeHintTracker()
+    /// Shows the mic-cues-off notice (Bluetooth headphones, no built-in mic) at most once per call.
+    private var noMicTracker = OncePerCallNotice()
     /// The coach card is the pill (for the rest of this showing).
     private(set) var minimized = false
 
@@ -403,6 +405,8 @@ final class CoachController: NSObject {
         let listening = enabled && indicator == .listening
         callModeTracker.update(call: service?.session.session?.startedAt,
                                callMode: listening && ((service?.mic as? MicCapture)?.headphonesInCallMode() ?? false))
+        noMicTracker.update(call: service?.session.session?.startedAt,
+                            callMode: listening && ((service?.mic as? MicCapture)?.noMicStatus ?? false))
         guard enabled, let status = CoachCardState.Status(indicator) else { return nil }
         let now = ProcessInfo.processInfo.systemUptime
         nudges.expire(now: now)
@@ -412,11 +416,12 @@ final class CoachController: NSObject {
                                    increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
                                    savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
         state.callModeTip = callModeTracker.visible
+        state.noMicNotice = noMicTracker.visible
         return state
     }
 
     func dismissCallModeTip() {
-        callModeTracker.dismiss()
+        if noMicTracker.visible { noMicTracker.dismiss() } else { callModeTracker.dismiss() }
         refresh()
     }
 

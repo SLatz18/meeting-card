@@ -40,8 +40,13 @@ public final class MicCapture: MicSource {
     public var restartCount: Int { mic.restartCount }
     /// Inputs set aside for delivering no sound (a closed lid), until the routes change or the call ends.
     public var unavailableInputs: Set<UInt32> { mic.unavailableInputs }
+    public var builtInMicPresent: Bool { mic.routes.snapshot().builtInInput != nil }
     /// How the default output is connected (USB headsets count as speakers; this tells them apart).
     public var outputTransport: AudioDeviceInfo.Transport? { mic.routes.snapshot().output?.transport }
+    /// Bluetooth headphones on a Mac with no built-in mic: no mic, so mic-based cues are off.
+    public var noMicStatus: Bool {
+        NoMicNotice.showsStatus(route: mic.plan?.route, micSource: mic.plan?.micSource, builtInMicPresent: builtInMicPresent)
+    }
     /// The input devices this app is actually doing IO on, read back from Core Audio (not the request).
     public func inputDevicesInUse() -> [UInt32]? { CoreAudioRoutes.inputDevicesInUse() }
     public func currentPlan() -> MicPlan { mic.currentPlan() }

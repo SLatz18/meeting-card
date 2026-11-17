@@ -22,10 +22,23 @@ public enum CallModeHint {
     }
 }
 
+/// "Mic-based cues are off": Bluetooth headphones on a Mac with no built-in mic, where the coach
+/// opens no mic (it never opens a headset's) and runs on call audio only.
+public enum NoMicNotice {
+    /// The once-per-call status line, for the current plan.
+    public static func showsStatus(route: OutputRoute?, micSource: MicSourceKind?, builtInMicPresent: Bool) -> Bool {
+        route == .bluetooth && micSource == MicSourceKind.none && !builtInMicPresent
+    }
 
-/// Shows the call-mode hint at most once per call: from the first poll that sees call mode during a
-/// listening session until it's dismissed, call mode ends, or the call ends.
-public struct CallModeHintTracker: Equatable, Sendable {
+    /// The Settings note: this Mac has no built-in mic.
+    public static func showsSettingsNote(builtInMicPresent: Bool) -> Bool { !builtInMicPresent }
+}
+
+public typealias CallModeHintTracker = OncePerCallNotice
+
+/// Shows a notice at most once per call: from the first poll that sees its condition during a
+/// listening session until it's dismissed, the condition ends, or the call ends.
+public struct OncePerCallNotice: Equatable, Sendable {
     public private(set) var visible = false
     private var call: Double?
     private var used = false

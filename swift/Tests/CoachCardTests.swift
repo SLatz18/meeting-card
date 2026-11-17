@@ -30,6 +30,47 @@ final class CoachCardTests: XCTestCase {
         XCTAssertFalse(CoachCardState(status: .listening, mute: Self.live, savingBadge: "Saving transcript").callModeTip)
     }
 
+    /// The no-mic notice is off unless the host sets it, and changes the state when set.
+    func testNoMicNoticeIsOffByDefault() {
+        let plain = CoachCardState(status: .listening, mute: Self.live)
+        XCTAssertFalse(plain.noMicNotice)
+        var notice = plain
+        notice.noMicNotice = true
+        XCTAssertNotEqual(plain, notice)
+        XCTAssertEqual(CoachCardState(status: .listening, mute: Self.live, noMicNotice: true), notice)
+        XCTAssertFalse(CoachCardState(status: .listening, mute: Self.live, savingBadge: "Saving transcript", callModeTip: true).noMicNotice)
+        XCTAssertFalse(notice.callModeTip, "the two are separate flags")
+    }
+
+    /// The tip row (and the card's extra height) shows when either flag is set, and the card is as tall for both.
+    func testTipRowShowsForEitherFlag() {
+        let k = Theme.CoachCard.self
+        let none = CoachCardState(status: .listening, mute: Self.live)
+        let tip = CoachCardState(status: .listening, mute: Self.live, callModeTip: true)
+        let notice = CoachCardState(status: .listening, mute: Self.live, noMicNotice: true)
+        let both = CoachCardState(status: .listening, mute: Self.live, callModeTip: true, noMicNotice: true)
+        XCTAssertFalse(none.tipRow)
+        for s in [tip, notice, both] {
+            XCTAssertTrue(s.tipRow)
+            XCTAssertEqual(k.cardHeight(tipRow: s.tipRow), k.height + k.tipExtra, accuracy: 1e-9)
+        }
+        XCTAssertEqual(k.cardHeight(tipRow: none.tipRow), k.height)
+    }
+
+    /// The no-mic notice is draft copy: its words, exactly, and nothing naming a call app.
+    func testNoMicNoticeDraftCopy() {
+        let c = CoachCardCopy.NoMicNotice.self
+        XCTAssertTrue(c.isDraft, "not yet copy-reviewed")
+        XCTAssertEqual(c.title, "Mic cues are off")
+        XCTAssertEqual(c.body, "This Mac has no built-in mic, and Call coach doesn't use headset mics, so cues about how you speak are off with Bluetooth headphones.")
+        XCTAssertEqual(c.dismiss, "Got it")
+        XCTAssertEqual(c.accessibilityLabel, "Mic cues are off. This Mac has no built-in mic, and Call coach doesn't use headset mics, so cues about how you speak are off with Bluetooth headphones.")
+        XCTAssertEqual(c.settingsNote, "On a Mac without a built-in mic, Call coach can't hear you while you use Bluetooth headphones, so cues about how you speak are off. Wired headphones or speakers keep them.")
+        for app in ["Zoom", "Meet", "Teams", "Slack", "Webex", "FaceTime"] {
+            for s in [c.title, c.body, c.dismiss, c.accessibilityLabel, c.settingsNote] { XCTAssertFalse(s.contains(app), "the notice names \(app)") }
+        }
+    }
+
     /// The tip's approved words, exactly, and nothing naming a call app.
     func testCallModeTipApprovedCopy() {
         let c = CoachCardCopy.CallModeTip.self
@@ -46,8 +87,8 @@ final class CoachCardTests: XCTestCase {
     /// The tip row adds `tipExtra` to the card's height and sits under the usual content, in the captions' font and role.
     func testCallModeTipRowAddsToTheCardHeight() {
         let k = Theme.CoachCard.self
-        XCTAssertEqual(k.cardHeight(callModeTip: false), k.height)
-        XCTAssertEqual(k.cardHeight(callModeTip: true), k.height + k.tipExtra, accuracy: 1e-9)
+        XCTAssertEqual(k.cardHeight(tipRow: false), k.height)
+        XCTAssertEqual(k.cardHeight(tipRow: true), k.height + k.tipExtra, accuracy: 1e-9)
         XCTAssertGreaterThan(k.tipExtra, 0)
         XCTAssertEqual(k.tipFont, CardStyle.Typography.caption)
         XCTAssertEqual(k.tipTextColor, CardStyle.Text.secondary)

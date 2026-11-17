@@ -13,7 +13,7 @@ struct CoachCardActions {
     var pause: () -> Void = {}
     /// Minimize on the card, Expand on the pill.
     var resize: () -> Void = {}
-    /// The call-mode tip's Dismiss.
+    /// The tip row's Dismiss: the no-mic notice's, or the call-mode tip's.
     var dismissCallModeTip: () -> Void = {}
 }
 
@@ -213,8 +213,8 @@ class CoachSurfaceView: NSView {
 
 /// The full coach card: status line (the nudge band while a nudge holds) with Minimize, the
 /// captions area, and Stop Coach, Mute and Pause/Resume on the button row. While the call-mode tip
-/// shows, one more row sits below them: the tip text and a borderless Dismiss (the card is taller
-/// by `Theme.CoachCard.tipExtra`, and is laid out for it when it is made).
+/// or the no-mic notice shows, one more row sits below them: its text and a borderless Dismiss (the
+/// card is taller by `Theme.CoachCard.tipExtra`, and is laid out for it when it is made).
 final class CoachFullCardView: CoachSurfaceView {
     private let band = CoachSurfaceView.layerView()
     private let bar = CoachSurfaceView.layerView()
@@ -237,9 +237,9 @@ final class CoachFullCardView: CoachSurfaceView {
 
     static var size: NSSize { NSSize(width: Theme.CoachCard.width, height: Theme.CoachCard.height) }
 
-    /// The card's size for `s`: taller while the call-mode tip row shows.
+    /// The card's size for `s`: taller while the tip row shows.
     static func frameSize(for s: CoachCardState) -> NSSize {
-        NSSize(width: Theme.CoachCard.width, height: Theme.CoachCard.cardHeight(callModeTip: s.callModeTip))
+        NSSize(width: Theme.CoachCard.width, height: Theme.CoachCard.cardHeight(tipRow: s.tipRow))
     }
 
     static func stopLabelWidth() -> Double {
@@ -252,14 +252,18 @@ final class CoachFullCardView: CoachSurfaceView {
     static func dismissLabelWidth() -> Double {
         let f = CoachSurfaceView.label()
         f.font = Theme.font(Theme.CoachCard.tipButtonFont)
-        f.stringValue = CoachCardCopy.CallModeTip.dismiss
-        return Double(f.intrinsicContentSize.width.rounded(.up))
+        var widest = 0.0
+        for label in [CoachCardCopy.CallModeTip.dismiss, CoachCardCopy.NoMicNotice.dismiss] {
+            f.stringValue = label
+            widest = max(widest, Double(f.intrinsicContentSize.width.rounded(.up)))
+        }
+        return widest
     }
 
     init(state: CoachCardState, actions: CoachCardActions, captions: NSView) {
         super.init(state: state, actions: actions, size: Self.frameSize(for: state))
         let k = Theme.CoachCard.self
-        let lift = state.callModeTip ? k.tipExtra : 0
+        let lift = state.tipRow ? k.tipExtra : 0
         func rect(_ f: Theme.CoachCard.Frame) -> NSRect { NSRect(x: f.x, y: f.y + lift, width: f.width, height: f.height) }
 
         let row = k.statusRow
@@ -314,20 +318,20 @@ final class CoachFullCardView: CoachSurfaceView {
         tipTitle.frame = NSRect(x: titleArea.x, y: titleArea.y, width: titleArea.width, height: titleArea.height)
         tipTitle.isSelectable = false
         tipTitle.setAccessibilityElement(false)
-        tipTitle.isHidden = !state.callModeTip
+        tipTitle.isHidden = !state.tipRow
         addSubview(tipTitle)
         let tipArea = k.tipText
         tipLabel.frame = NSRect(x: tipArea.x, y: tipArea.y, width: tipArea.width, height: tipArea.height)
         tipLabel.maximumNumberOfLines = k.tipLines
         tipLabel.isSelectable = false
-        tipLabel.isHidden = !state.callModeTip
+        tipLabel.isHidden = !state.tipRow
         addSubview(tipLabel)
         let dismissFrame = k.tipDismissButton(labelWidth: Self.dismissLabelWidth())
         dismissTip = NSButton(title: "", target: self, action: #selector(dismissCallModeTipPressed(_:)))
         dismissTip.isBordered = false
         dismissTip.alignment = .left
         dismissTip.frame = NSRect(x: dismissFrame.x, y: dismissFrame.y, width: dismissFrame.width, height: dismissFrame.height)
-        dismissTip.isHidden = !state.callModeTip
+        dismissTip.isHidden = !state.tipRow
         addSubview(dismissTip)
 
         setAccessibilityElement(true)
@@ -370,16 +374,16 @@ final class CoachFullCardView: CoachSurfaceView {
 
         tipTitle.font = Theme.font(k.tipTitleFont)
         tipTitle.textColor = Theme.text(k.tipTitleColor, style)
-        tipTitle.stringValue = CoachCardCopy.CallModeTip.title
-        tipTitle.isHidden = !s.callModeTip
+        tipTitle.stringValue = s.noMicNotice ? CoachCardCopy.NoMicNotice.title : CoachCardCopy.CallModeTip.title
+        tipTitle.isHidden = !s.tipRow
         tipLabel.font = Theme.font(k.tipFont)
         tipLabel.textColor = Theme.text(k.tipTextColor, style)
-        tipLabel.stringValue = CoachCardCopy.CallModeTip.body
-        tipLabel.setAccessibilityLabel(CoachCardCopy.CallModeTip.accessibilityLabel)
-        tipLabel.isHidden = !s.callModeTip
-        dismissTip.attributedTitle = Card.attr(CoachCardCopy.CallModeTip.dismiss, Theme.font(k.tipButtonFont),
-                                               Theme.text(k.tipButtonTextColor, style))
-        dismissTip.isHidden = !s.callModeTip
+        tipLabel.stringValue = s.noMicNotice ? CoachCardCopy.NoMicNotice.body : CoachCardCopy.CallModeTip.body
+        tipLabel.setAccessibilityLabel(s.noMicNotice ? CoachCardCopy.NoMicNotice.accessibilityLabel : CoachCardCopy.CallModeTip.accessibilityLabel)
+        tipLabel.isHidden = !s.tipRow
+        dismissTip.attributedTitle = Card.attr(s.noMicNotice ? CoachCardCopy.NoMicNotice.dismiss : CoachCardCopy.CallModeTip.dismiss,
+                                               Theme.font(k.tipButtonFont), Theme.text(k.tipButtonTextColor, style))
+        dismissTip.isHidden = !s.tipRow
     }
 
     /// The saving badge at the band's right end, sized to its label (measured as a plain label, so
