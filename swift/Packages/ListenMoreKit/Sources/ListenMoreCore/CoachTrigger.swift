@@ -18,10 +18,10 @@ public enum CallState: String, Equatable, Sendable {
 }
 
 /// Optional app-level call state per app key (lowercased bundle ID, as `TriggerSettings.appKey`
-/// makes them). Apps without an entry fall back to Core Audio. Only `ended` changes the trigger:
-/// it stops the session after `endedStopAfterS` and keeps that app from auto-starting while it
-/// stays ended. `started` and `muted` never start a session or hold one open, so a stale provider
-/// can't keep the coach listening.
+/// makes them). Apps without an entry fall back to Core Audio. `ended` stops the session after
+/// `endedStopAfterS` and keeps that app from auto-starting while it stays ended; `muted` holds the
+/// session's capture (the pause path) until the app reports anything else. `started` and `muted`
+/// never start a session or hold one open, so a stale provider can't keep the coach listening.
 public protocol CallStateProvider: AnyObject {
     func callStates() -> [String: CallState]
 }
@@ -157,7 +157,12 @@ public struct TriggerSession: Equatable, Sendable {
     public var startedAt: Double
     /// Calendar end of the event joined from a card (a hint, never a requirement).
     public var endsAt: Double?
+    /// Paused by the user.
     public var paused = false
+    /// The session's app reports its mic muted: capture is held like a pause, without the user's pause.
+    public var muted = false
+    /// No capture: paused by the user or muted in the call app.
+    public var held: Bool { paused || muted }
 }
 
 /// What a host shows for the coach (MeetingCard: the chip on the card; the standalone app: the menu
@@ -171,11 +176,14 @@ public enum CoachIndicator: String, Equatable, Sendable {
     case listening
     /// Session paused by the user: no capture, no streams.
     case paused
+    /// Session held because the call app reports the mic muted: no capture, no streams.
+    case muted
 }
 
 public enum TriggerAction: Equatable, Sendable {
     case start(TriggerSession)
     case stop(CoachStopReason)
+    /// Capture held (true) or resumed (false): the user's pause or the call app's mute.
     case pause(Bool)
 }
 
@@ -200,7 +208,7 @@ public struct CoachTrigger: Sendable {
     }
 
     public var isActive: Bool { session != nil }
-    public var isCapturing: Bool { session.map { !$0.paused } ?? false }
+    public var isCapturing: Bool { session.map { !$0.held } ?? false }
 
     /// Pre-warmed: enabled, no session yet, but a call looks imminent (Join was clicked on a card
     /// for an event that hasn't ended, or a call app is inside the start debounce).
@@ -210,7 +218,7 @@ public struct CoachTrigger: Sendable {
     }
 
     public var indicator: CoachIndicator {
-        if let s = session { return s.paused ? .paused : .listening }
+        if let s = session { return s.paused ? .paused : s.muted ? .muted : .listening }
         return isPrewarmed ? .on : .hidden
     }
 
@@ -232,7 +240,8 @@ public struct CoachTrigger: Sendable {
     public mutating func tick(liveApps audioLive: Set<String>, inputRunning: Bool, now: Double,
                               callStates: [String: CallState] = [:]) -> [TriggerAction] {
         guard enabled else { return session == nil ? [] : end(.disabled) }
-        let ended = Set(callStates.filter { $0.value == .ended }.keys.map { $0.lowercased() })
+        let states = Dictionary(callStates.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { a, _ in a })
+        let ended = Set(states.filter { $0.value == .ended }.keys)
         // Suppression and event-end bookkeeping follow Core Audio, so an app that still holds its
         // devices after its call ended doesn't restart the coach when the provider loses track.
         lastLive = audioLive
@@ -267,10 +276,16 @@ public struct CoachTrigger: Sendable {
                 offSince = since
                 if now - since >= settings.stopAfterS - 1e-9 { return end(.audioEnded) }
             }
-            return []
+            let muted = states[key] == .muted
+            guard s.muted != muted else { return [] }
+            let wasHeld = s.held
+            s.muted = muted
+            session = s
+            return wasHeld == s.held ? [] : [.pause(s.held)]
         }
         guard let key = qualified(now: now) else { return [] }
-        let s = TriggerSession(reason: .audio, appKey: key, startedAt: now, endsAt: hintEndsAt)
+        var s = TriggerSession(reason: .audio, appKey: key, startedAt: now, endsAt: hintEndsAt)
+        s.muted = states[key] == .muted
         session = s
         offSince = nil
         return [.start(s)]
@@ -289,7 +304,7 @@ public struct CoachTrigger: Sendable {
             guard s.paused else { return [] }
             s.paused = false
             session = s
-            return [.pause(false)]
+            return [.pause(s.held)]
         }
         let key = qualified(now: now)
         let s = TriggerSession(reason: .manual, appKey: key, startedAt: now, endsAt: nil)
@@ -307,7 +322,7 @@ public struct CoachTrigger: Sendable {
         guard var s = session, s.paused != on else { return [] }
         s.paused = on
         session = s
-        return [.pause(on)]
+        return [.pause(s.held)]
     }
 
     /// Pause while pre-warmed (indicator `.on`, no session yet): skip this call. Clears the Join

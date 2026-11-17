@@ -86,6 +86,57 @@ final class PauseSendsNoAudioTests: XCTestCase {
         XCTAssertNil(mic.handler)
     }
 
+    final class FakeCallState: CallStateProvider {
+        var states: [String: CallState] = [:]
+        func callStates() -> [String: CallState] { states }
+    }
+
+    /// Muted in the call app (a "Use Zoom/Meet controls" report) takes the same path as Pause.
+    func testMuteInTheCallAppSendsNoAudioFramesUntilUnmute() async {
+        session.shutdown()
+        let audio = FakeAudioStateProvider()
+        audio.zoomCall()
+        let calls = FakeCallState()
+        var settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: nil)
+        settings.startAfterS = 0
+        session = CoachSession(config: config, engine: LocalCoachEngine(transports: GptTransports(http: FakeHTTP(), webSocket: connector)),
+                               mic: mic, call: call, signal: AudioActivitySignal(provider: audio),
+                               keys: FakeKeys(key: APIKey("sk-test-not-real")), renderer: FakeRenderer(), settings: settings,
+                               callState: calls)
+        session.tick()
+        XCTAssertEqual(session.indicator, .listening)
+        let connected = await eventually { self.call.handler != nil && self.open.count == 2 }
+        XCTAssertTrue(connected)
+        feed(mic: mic.handler, call: call.handler, seconds: 2)
+        let streamed = await eventually { self.appends > 0 }
+        XCTAssertTrue(streamed)
+
+        let lateMic = mic.handler
+        let lateCall = call.handler
+        calls.states = ["us.zoom.xos": .muted]
+        session.tick()
+        XCTAssertEqual(session.indicator, .muted)
+        XCTAssertNil(mic.handler, "mic capture stopped while muted")
+        let closed = await eventually { self.open.isEmpty }
+        XCTAssertTrue(closed, "every realtime socket closed while muted")
+        let appendsAtMute = appends
+        feed(mic: lateMic, call: lateCall, seconds: 2)
+        session.tick()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(appends, appendsAtMute, "no audio frames sent while muted")
+        XCTAssertEqual(sockets.reduce(0) { $0 + $1.sendsAfterClose }, 0)
+
+        calls.states = ["us.zoom.xos": .started]
+        session.tick()
+        XCTAssertEqual(session.indicator, .listening)
+        let reopened = await eventually { self.open.count == 2 && self.mic.handler != nil }
+        XCTAssertTrue(reopened, "unmute resumes on fresh sockets")
+        let fresh = open
+        feed(mic: mic.handler, call: call.handler, seconds: 2)
+        let resumed = await eventually { fresh.contains { $0.appends > 0 } }
+        XCTAssertTrue(resumed)
+    }
+
     func testSwitchingOffClosesEverything() async {
         session.startManual()
         _ = await eventually { self.open.count == 2 }
