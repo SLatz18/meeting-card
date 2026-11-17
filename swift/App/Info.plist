@@ -27,10 +27,10 @@
 	<key>NSAppleEventsUsageDescription</key>
 	<string>With Use Zoom/Meet controls on, MeetingCard asks your browser only whether a Google Meet call tab is open, so Call coach can stop when you leave. It never reads page titles or other tabs.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>MeetingCard needs system audio so Call coach can hear the other people on your call. Nothing is saved unless you turn on Save transcripts.</string>
+	<string>MeetingCard needs system audio so Call coach can hear the other people on your call. Call audio goes to OpenAI for transcription only if you add an OpenAI key. Nothing is saved unless you turn on Save transcripts.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MeetingCard uses your mic during calls so Call coach can notice interruptions and missed questions. Nothing is saved unless you turn on Save transcripts.</string>
+	<string>MeetingCard uses your mic during calls so Call coach can notice interruptions and missed questions. Call audio goes to OpenAI for transcription only if you add an OpenAI key. Nothing is saved unless you turn on Save transcripts.</string>
 </dict>
 </plist>

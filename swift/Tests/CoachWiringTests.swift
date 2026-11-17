@@ -185,6 +185,24 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertTrue(try read("../README.md").contains("- \(line)"), "README privacy bullet")
     }
 
+    /// The mic and system audio prompts disclose OpenAI and name the Save transcripts switch, and
+    /// project.yml (where they're edited) and Info.plist (xcodegen's output) say exactly the same.
+    func testPermissionStringsDiscloseOpenAIAndMatch() throws {
+        let plistData = Data(try read("App/Info.plist").utf8)
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any])
+        let specLines = try read("project.yml").components(separatedBy: "\n")
+        for key in ["NSMicrophoneUsageDescription", "NSAudioCaptureUsageDescription"] {
+            let inPlist = try XCTUnwrap(plist[key] as? String, key)
+            let line = try XCTUnwrap(specLines.first { $0.trimmingCharacters(in: .whitespaces).hasPrefix(key + ": ") }, key)
+            let value = String(line.drop { $0 != ":" }.dropFirst()).trimmingCharacters(in: .whitespaces)
+            XCTAssertTrue(value.hasPrefix("\"") && value.hasSuffix("\""), "\(key) is one quoted line in project.yml")
+            let inSpec = String(value.dropFirst().dropLast())
+            XCTAssertEqual(inSpec, inPlist, "\(key): project.yml and Info.plist differ")
+            XCTAssertTrue(inPlist.contains("OpenAI"), "\(key) discloses OpenAI")
+            XCTAssertTrue(inPlist.contains("Save transcripts"), "\(key) names the Save transcripts switch")
+        }
+    }
+
     /// VP Comms' final strings, verbatim; the saving footnote shows only while the switch is on.
     func testFinalCaptionAndOnboardingCopy() throws {
         let copy = try read("App/CoachCopy.swift")
