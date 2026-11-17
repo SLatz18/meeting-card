@@ -134,7 +134,7 @@ enum UISnapshots {
     /// window's layer render.
     @MainActor
     static func menuShots(dir: String, tag: String, controller: Controller, packet: (String, CGImage?) -> Void) {
-        let suite = "com.slatz.meetingcard.swift.snapshots"
+        let suite = AppIdentity.scoped("snapshots")
         guard let defaults = UserDefaults(suiteName: suite),
               let coach = try? CoachController(defaults: defaults, keychain: KeychainStore(service: suite, account: "none"),
                                                showsStatusItem: false) else { return }
@@ -254,10 +254,10 @@ enum UISnapshots {
     @MainActor
     static func settingsShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
                               done: @escaping () -> Void) {
-        let suite = "com.slatz.meetingcard.swift.snapshots"
+        let suite = AppIdentity.scoped("snapshots")
         guard let defaults = UserDefaults(suiteName: suite) else { return done() }
         defaults.removePersistentDomain(forName: suite)
-        let keychain = KeychainStore(service: "com.slatz.meetingcard.swift.snapshots", account: "none")
+        let keychain = KeychainStore(service: suite, account: "none")
         let onboarding: [(String, () -> CoachSettingsWindow?)] = (0..<CoachCopy.onboarding.count).map { i in
             ("onboarding-\(i + 1)", {
                 guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }

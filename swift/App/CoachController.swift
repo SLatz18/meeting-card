@@ -16,8 +16,8 @@ final class CoachController: NSObject {
         static let onboarded = "coach.onboarded"
     }
 
-    /// MeetingCard's Keychain item for the OpenAI key (the Kit's default service is not ours).
-    static let keychainService = "com.slatz.meetingcard.swift.openai"
+    /// MeetingCard's Keychain item for the OpenAI key, `<bundle id>.openai` (the Kit's default service is not ours).
+    static let keychainService = AppIdentity.keychainService()
 
     let defaults: UserDefaults
     let config: ListenMoreConfig

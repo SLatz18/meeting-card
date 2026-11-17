@@ -49,7 +49,7 @@ final class Controller: NSObject, NSApplicationDelegate {
     let gws: Gws
     let state: StateWriter
     let dryJoin = ProcessInfo.processInfo.environment["MEETING_CARD_DRY_JOIN"] == "1"
-    let gwsQueue = DispatchQueue(label: "com.slatz.meetingcard.swift.gws", attributes: .concurrent)
+    let gwsQueue = DispatchQueue(label: AppIdentity.scoped("gws"), attributes: .concurrent)
     var coord: Coordinator<Card>!
     var pollInFlight = false
     var timers: [Timer] = []
