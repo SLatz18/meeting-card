@@ -217,6 +217,26 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertNil(s.judgeStopped)
     }
 
+    func testCaptionsReachTheHostOnlyWhileCapturingAndCuesOutliveAGptStop() async {
+        let s = makeSession(keys: FakeKeys(key: APIKey("sk-test")))
+        s.deliverCaptionForTesting(.final(.others, text: "idle"))
+        XCTAssertEqual(delegate.captions, [], "no session: dropped")
+        meetInDia()
+        s.tick()
+        _ = await eventually { self.engine.isRunning }
+        engine.emitCaption(.partial(.others, item: "a", text: "alpha"))
+        engine.emitMeter(CostReading(transcribeUsd: 0.01))
+        let got = await eventually { self.delegate.captions.count == 1 && self.delegate.meters.count == 1 }
+        XCTAssertTrue(got)
+        engine.stopGpt(.budgetCap)
+        _ = await eventually { s.gptStopped == .budgetCap }
+        s.deliverForTesting(CueSuggestion(type: .interrupt, t: 1, onset: 1, source: .local))
+        XCTAssertEqual(renderer.rendered.count, 1, "local cues continue after the cap")
+        s.setPaused(true)
+        s.deliverCaptionForTesting(.final(.others, text: "paused"))
+        XCTAssertEqual(delegate.captions.count, 1, "paused: nothing is captured, nothing is forwarded")
+    }
+
     func testCueWhileIdleIsDropped() async {
         let s = makeSession()
         s.deliverForTesting(CueSuggestion(type: .interrupt, t: 1, onset: 1, source: .local))

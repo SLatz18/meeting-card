@@ -98,12 +98,16 @@ final class RecordingDelegate: CoachSessionDelegate {
     var indicators: [CoachIndicator] = []
     var cues: [Cue] = []
     var problems: [CoachSession.Problem] = []
+    var captions: [CaptionEvent] = []
+    var meters: [CostReading] = []
 
     func coachSessionDidChange(_ session: CoachSession) {
         if indicators.last != session.indicator { indicators.append(session.indicator) }
     }
     func coachSession(_ session: CoachSession, didShow cue: Cue) { cues.append(cue) }
     func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) { problems.append(problem) }
+    func coachSession(_ session: CoachSession, didCaption event: CaptionEvent) { captions.append(event) }
+    func coachSession(_ session: CoachSession, didMeter reading: CostReading) { meters.append(reading) }
 }
 
 /// Engine double that records calls and lets tests emit suggestions.
@@ -153,6 +157,14 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
 
     func stopJudge(_ failure: JudgeFailure) {
         delegate?.engine(self, judgeStopped: failure)
+    }
+
+    func emitCaption(_ e: CaptionEvent) {
+        delegate?.engine(self, caption: e)
+    }
+
+    func emitMeter(_ r: CostReading) {
+        delegate?.engine(self, meter: r)
     }
 }
 
