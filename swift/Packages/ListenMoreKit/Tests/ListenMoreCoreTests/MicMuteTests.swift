@@ -404,6 +404,46 @@ final class MicMuteSendsNoMicAudioTests: XCTestCase {
         XCTAssertEqual(sockets.count, 2)
     }
 
+    /// The server rejecting the clear is not fatal: the session reports it (the service logs the event
+    /// type only), the other side keeps streaming and being captioned, and Unmute sends the clear again
+    /// before any new mic audio.
+    func testRejectedClearKeepsTheOtherSideStreaming() async throws {
+        session.startManual()
+        let connected = await eventually { self.call.handler != nil && self.sockets.count == 2 }
+        XCTAssertTrue(connected)
+        let me = sockets[0], others = sockets[1]
+        feed(mic: mic.handler, call: call.handler, seconds: 2)
+        _ = await eventually { me.appends > 0 && others.appends > 0 }
+        let lateCall = call.handler
+        session.setMicMuted(true)
+        let clearSent = await eventually { me.sent.contains { $0.contains("\"input_audio_buffer.clear\"") } }
+        XCTAssertTrue(clearSent)
+        let clear = try XCTUnwrap(me.sent.last { $0.contains("\"input_audio_buffer.clear\"") })
+        let id = try XCTUnwrap((try JSONSerialization.jsonObject(with: Data(clear.utf8)) as? [String: Any])?["event_id"] as? String)
+        me.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"rejected","event_id":"\#(id)"}}"#)
+        let reported = await eventually { self.delegate.problems.contains(.transcriberClearRejected) }
+        XCTAssertTrue(reported, "the rejection is reported, for the event-type-only log")
+
+        let othersAtReject = others.appends
+        feed(mic: nil, call: lateCall, seconds: 2, seed: 3)
+        let theirsFlow = await eventually { others.appends > othersAtReject }
+        XCTAssertTrue(theirsFlow, "the other side keeps streaming")
+        others.push(completed("i3", "echo foxtrot"))
+        let caption = await eventually { self.delegate.captions.contains(.final(.others, text: "echo foxtrot")) }
+        XCTAssertTrue(caption, "and keeps being captioned")
+        XCTAssertNil(session.gptStopped, "the GPT layer didn't stop")
+        XCTAssertTrue(sockets.allSatisfy { !$0.isClosed })
+
+        let meAtUnmute = me.appends, sentAtUnmute = me.sent.count
+        session.setMicMuted(false)
+        feed(mic: mic.handler, call: call.handler, seconds: 2, seed: 4)
+        let resumed = await eventually { me.appends > meAtUnmute }
+        XCTAssertTrue(resumed)
+        let after = Array(me.sent.dropFirst(sentAtUnmute))
+        XCTAssertTrue(after.first?.contains("\"input_audio_buffer.clear\"") == true, "the clear goes again before any new mic audio")
+        XCTAssertEqual(after.filter { $0.contains("\"input_audio_buffer.clear\"") }.count, 1)
+    }
+
     /// Resuming from Pause with the mic off opens fresh sockets and streams only the call.
     func testResumingWithTheMicOffStreamsOnlyTheCall() async throws {
         session.startManual()
@@ -502,6 +542,18 @@ final class GptCoreMicMuteTests: XCTestCase {
         core.fail("stopped")
         XCTAssertEqual(core.setMeMuted(true), [])
         XCTAssertTrue(core.meMuted)
+    }
+
+    /// A refused clear is retried once, at Unmute, and then forgotten.
+    func testRejectedClearIsRetriedAtUnmute() {
+        let core = GptCore(config: config)
+        _ = core.feed(.me, frame: v, vad: GptFrames.vad(raw: true, onset: 0.2), now: 0.22)
+        XCTAssertEqual(core.setMeMuted(true), [.clear(.me)])
+        core.clearRejected(.me)
+        XCTAssertTrue(core.enabled, "a refused clear never stops the layer")
+        XCTAssertEqual(core.setMeMuted(false), [.clear(.me)])
+        XCTAssertEqual(core.setMeMuted(true), [])
+        XCTAssertEqual(core.setMeMuted(false), [])
     }
 
     /// The user's text while muted is neither kept in the transcript nor judged; the other side's is kept.
@@ -879,7 +931,7 @@ final class LiveTranscriberClearTests: XCTestCase {
                         connector: connector, onEvent: { _ in })
     }
 
-    /// Clear sends exactly `input_audio_buffer.clear` on the open socket.
+    /// Clear sends exactly `input_audio_buffer.clear`, tagged with an event id, on the open socket.
     func testClearSendsOnlyTheBufferClear() async throws {
         let connector = FakeConnector()
         let t = try transcriber(connector)
@@ -889,8 +941,30 @@ final class LiveTranscriberClearTests: XCTestCase {
         try await t.clear()
         XCTAssertEqual(socket.sent.count, before + 1)
         let msg = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(socket.sent.last).utf8)) as? [String: Any])
-        XCTAssertEqual(msg.count, 1)
+        XCTAssertEqual(msg.count, 2)
         XCTAssertEqual(msg["type"] as? String, "input_audio_buffer.clear")
+        XCTAssertEqual(msg["event_id"] as? String, "lm_clear_1")
+        await t.close()
+    }
+
+    /// A server error naming a clear's event id is that clear's rejection (non-fatal); any other
+    /// error, or one naming a clear the server already acknowledged, is still a session error.
+    func testServerErrorForAClearIsARejectionNotAFailure() async throws {
+        let connector = FakeConnector()
+        let events = EventBox()
+        let t = LiveTranscriber(config: try TestConfig.load(), key: try XCTUnwrap(APIKey("sk-test")), speaker: .me,
+                                connector: connector) { events.append($0) }
+        try await t.start()
+        try await t.clear()
+        try await t.clear()
+        t.handle(#"{"type":"error","error":{"type":"invalid_request_error","code":"x","event_id":"lm_clear_2"}}"#)
+        XCTAssertEqual(events.clearRejections, [.me])
+        XCTAssertEqual(events.errors, [])
+        t.handle(#"{"type":"input_audio_buffer.cleared","event_id":"server_1"}"#)
+        t.handle(#"{"type":"error","error":{"type":"invalid_request_error","code":"x","event_id":"lm_clear_1"}}"#)
+        t.handle(#"{"type":"error","error":{"type":"server_error","code":"y"}}"#)
+        XCTAssertEqual(events.clearRejections, [.me])
+        XCTAssertEqual(events.errors, ["realtime error invalid_request_error/x", "realtime error server_error/y"])
         await t.close()
     }
 

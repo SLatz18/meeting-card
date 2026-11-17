@@ -63,6 +63,8 @@ public protocol CoachEngineDelegate: AnyObject {
     /// Live transcription text (content: RAM only, never logged).
     func engine(_ engine: CoachEngine, caption: CaptionEvent)
     func engine(_ engine: CoachEngine, meter: CostReading)
+    /// A transcriber refused to clear a speaker's uncommitted audio (non-fatal; transcription goes on).
+    func engine(_ engine: CoachEngine, clearRejected speaker: Speaker)
 }
 
 public extension CoachEngineDelegate {
@@ -70,6 +72,7 @@ public extension CoachEngineDelegate {
     func engine(_ engine: CoachEngine, judgeStopped failure: JudgeFailure) {}
     func engine(_ engine: CoachEngine, caption: CaptionEvent) {}
     func engine(_ engine: CoachEngine, meter: CostReading) {}
+    func engine(_ engine: CoachEngine, clearRejected speaker: Speaker) {}
 }
 
 /// Boundary between the host and the coaching engine (`LocalCoachEngine`; the Python core in

@@ -138,6 +138,10 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
                                  onMeter: { [weak self] reading in
                                      guard let self else { return }
                                      self.delegate?.engine(self, meter: reading)
+                                 },
+                                 onClearRejected: { [weak self] speaker in
+                                     guard let self else { return }
+                                     self.delegate?.engine(self, clearRejected: speaker)
                                  })
             box.layer = layer
             layer.start()
