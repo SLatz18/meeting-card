@@ -1,9 +1,12 @@
 import XCTest
+import ListenMoreCore
 
 /// Static guard over the coach sources: the package's library targets plus MeetingCard's
-/// `App/Coach*.swift`. Audio and text stay in memory, nothing content-like is printed or persisted,
-/// the key is only touched through KeychainStore, public log arguments are counters, enums and
-/// booleans, and nothing reads window titles.
+/// `App/Coach*.swift`. Audio stays in memory in every mode; text stays in memory unless the user
+/// turns on saved transcripts, and then only `TranscriptFile.swift` writes, one file per call in the
+/// chosen folder (the runtime tests below check what reaches disk with saving off and on). Nothing
+/// content-like is printed or logged, the key is only touched through KeychainStore, public log
+/// arguments are counters, enums and booleans, and nothing reads window titles.
 final class PrivacyGuardTests: XCTestCase {
     static let packageURL = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -42,14 +45,100 @@ final class PrivacyGuardTests: XCTestCase {
         XCTAssertGreaterThan(try appSources().count, 0)
     }
 
+    /// The one source allowed to touch disk: the opt-in saved transcript (text, in the user's folder).
+    static let transcriptWriter = "TranscriptFile.swift"
+
     func testNoDiskWritesOrPersistence() throws {
-        let forbidden = ["write(to:", "createFile(", "FileHandle(forWriting", "NSKeyedArchiver",
-                         "AVAudioFile(forWriting", "AVAssetWriter", "SCRecordingOutput", "fopen(", "SCScreenshotManager"]
+        // Audio and screen content are never written, by any source.
+        let neverAnywhere = ["AVAudioFile(forWriting", "AVAssetWriter", "SCRecordingOutput", "SCScreenshotManager",
+                             "NSKeyedArchiver", "fopen(", "createFile(", "FileHandle(forWriting"]
+        // Disk writes: only the transcript writer.
+        let writerOnly = ["write(to:", "createDirectory(", "removeItem(", "moveItem(", "copyItem(", "setAttributes("]
         for (name, text) in try allSources() {
-            for f in forbidden { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
+            for f in neverAnywhere { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
+            guard name != Self.transcriptWriter else { continue }
+            for f in writerOnly { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
         }
         // A host app may store coach settings (see testHostDefaultsAreSettingsOnly); the libraries store nothing.
         for (name, text) in try librarySources() { XCTAssertFalse(text.contains("UserDefaults"), name) }
+    }
+
+    /// The writer takes text only (no audio type can reach it) and writes the file in place: no
+    /// atomic temp copy in another folder.
+    func testTranscriptWriterTakesTextAndWritesInPlace() throws {
+        let writer = try XCTUnwrap(try librarySources().first { $0.0 == Self.transcriptWriter }).1
+        XCTAssertTrue(writer.contains("func write(_ text: String, to url: URL)"))
+        for f in ["[Float]", "AVAudio", "pcm", ".atomic", "temporaryDirectory", "NSTemporaryDirectory"] {
+            XCTAssertFalse(writer.contains(f), "\(Self.transcriptWriter) contains \(f)")
+        }
+        XCTAssertEqual(writer.components(separatedBy: "write(to:").count - 1, 1, "one write call")
+    }
+
+    /// Caption and transcript code never logs: transcript text and keys stay out of every log.
+    func testCaptionAndTranscriptSourcesNeverLog() throws {
+        let names: Set<String> = ["Captions.swift", "Transcript.swift", Self.transcriptWriter, "LiveTranscript.swift",
+                                  "CaptionPanel.swift", "CoachTranscript.swift"]
+        let sources = try allSources().filter { names.contains($0.0) }
+        XCTAssertGreaterThanOrEqual(sources.count, 4)
+        for (name, text) in sources {
+            for f in ["Log.", "Logger(", "os_log", "NSLog"] { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
+        }
+    }
+
+    // MARK: runtime: what reaches disk
+
+    func tempRoot() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lm-privacy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    func everything(under root: URL) throws -> [String] {
+        let e = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+        let base = root.resolvingSymlinksInPath().path
+        return e.compactMap { ($0 as? URL)?.resolvingSymlinksInPath().path.replacingOccurrences(of: base + "/", with: "") }.sorted()
+    }
+
+    /// A synthetic call: partial and final text from both sides, a speaker tag, then the end.
+    func runCall(_ live: LiveTranscript) {
+        live.callStarted()
+        live.receive(.partial(.others, item: "a", text: "alpha"))
+        live.receive(.final(.others, text: "Alpha bravo."))
+        live.receive(.final(.me, text: "Charlie delta."))
+        live.rename(.others, to: "Guest")
+        live.callEnded()
+    }
+
+    func testSavingOffWritesNothingToDisk() throws {
+        let root = try tempRoot()
+        let folder = root.appendingPathComponent("Transcripts", isDirectory: true)
+        let live = LiveTranscript(settings: .init(captions: true, saving: false, folder: folder, keyUsable: true),
+                                  store: FileTranscriptStore())
+        runCall(live)
+        XCTAssertEqual(try everything(under: root), [], "captions on, saving off: not even the folder is created")
+        XCTAssertFalse(try live.deleteTranscript(), "nothing to delete")
+    }
+
+    func testSavingOnWritesOnlyTheOneTranscriptFile() throws {
+        let root = try tempRoot()
+        let folder = root.appendingPathComponent("Transcripts", isDirectory: true)
+        let live = LiveTranscript(settings: .init(captions: true, saving: true, folder: folder, keyUsable: true),
+                                  store: FileTranscriptStore())
+        runCall(live)
+        let files = try everything(under: root)
+        XCTAssertEqual(files.count, 2, "the folder and one file: \(files)")
+        XCTAssertEqual(files.first, "Transcripts")
+        let name = try XCTUnwrap(files.last)
+        XCTAssertTrue(name.hasPrefix("Transcripts/Call ") && name.hasSuffix(".md"), name)
+        let url = root.appendingPathComponent(name)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("] Guest:** Alpha bravo."))
+        XCTAssertTrue(text.contains("] You:** Charlie delta."))
+        let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(perms?.intValue, 0o600, "readable by the user only")
+        XCTAssertTrue(try live.deleteTranscript())
+        XCTAssertEqual(try everything(under: root), ["Transcripts"], "delete removes the file")
     }
 
     func testNoPrintOrNSLog() throws {
@@ -115,7 +204,8 @@ final class PrivacyGuardTests: XCTestCase {
     /// user last dragged the coach card (an offset in points).
     func testHostDefaultsAreSettingsOnly() throws {
         let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
-                                    "coach.judgeProvider", "coach.cardPosition"]
+                                    "coach.judgeProvider", "coach.cardPosition", "coach.captions", "coach.saveTranscripts",
+                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
         for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {

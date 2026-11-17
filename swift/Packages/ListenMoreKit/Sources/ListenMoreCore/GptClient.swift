@@ -15,6 +15,8 @@ public protocol CueJudge: Sendable {
 
 public enum TranscriptEvent: Sendable {
     case text(Speaker, String, refT: TimeInterval)
+    /// Newly available text of the turn `item` (live captions only; the cue rules wait for `text`).
+    case delta(Speaker, String, item: String)
     /// Billed audio seconds the API reported for one committed segment.
     case usage(Speaker, Double)
     case error(String)
@@ -112,6 +114,9 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
                 let ref = commitRefs.isEmpty ? -1 : commitRefs.removeFirst()
                 itemRef[item] = ref
             }
+        case "conversation.item.input_audio_transcription.delta":
+            let delta = ev["delta"] as? String ?? ""
+            if !delta.isEmpty { onEvent(.delta(speaker, delta, item: ev["item_id"] as? String ?? "")) }
         case "conversation.item.input_audio_transcription.completed":
             let item = ev["item_id"] as? String ?? ""
             if let usage = ev["usage"] as? [String: Any], usage["type"] as? String == "duration" {
