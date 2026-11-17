@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// Which display gets the glow: the one holding the call app's largest normal window, else the
 /// card's display. Window owner PIDs and bounds come from CGWindowListCopyWindowInfo (no window
