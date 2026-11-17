@@ -1,4 +1,5 @@
 import Foundation
+import ListenMoreCore
 
 /// User-facing call coach strings (approved copy; edits only where the build differs, see the PR).
 enum CoachCopy {
