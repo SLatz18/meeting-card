@@ -8,7 +8,8 @@ import Foundation
 /// - meters billed seconds against the per-call budget; at the cap it stops cleanly (no further API
 ///   calls, transcribers closed) while the local layer keeps cueing;
 /// - judges only the user's first line after a substantive OTHERS turn, never mid-monologue, and drops
-///   not_listening below `not_listening_min_confidence`;
+///   not_listening below `not_listening_min_confidence`; never judges while every cue the provider
+///   decides is in `cues.disabled` (GPT decides only not_listening);
 /// - stops on the first hard error; transient judge errors skip a verdict up to `judge_max_transient_errors`.
 ///
 /// The judge is a `JudgeProvider` (`judge.provider`). The GPT judge's prompt, verdict rules and errors
@@ -117,9 +118,11 @@ public final class GptCore {
     public private(set) var judgeModel: String?
     public private(set) var callSeconds = 0.0
     private var failuresInARow = 0
+    private let judges: Bool
 
     public init(config: ListenMoreConfig) {
         self.config = config
+        judges = !CueType.decided(by: config.judge.provider).isSubset(of: config.cues.disabledTypes)
         transcript = RollingTranscript(windowS: config.gpt.judgeWindowS)
         cost = CostTracker(prices: config.gpt.pricesUsd, budget: config.gpt.budgetUsdPerCall)
         let prerollSamples = Int(Double(config.gpt.transcribePrerollMs) / 1000 * Double(config.audio.sampleRate))
@@ -252,7 +255,7 @@ public final class GptCore {
             return (ref, nil)
         }
         var start: JudgeRequest?
-        if othersSpoke && !inLongRun { start = request(JudgeRequest(refT: ref, reason: "me_reply")) }
+        if othersSpoke && !inLongRun && judges { start = request(JudgeRequest(refT: ref, reason: "me_reply")) }
         othersSpoke = false
         return (ref, start)
     }

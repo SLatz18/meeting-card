@@ -120,6 +120,10 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var fadeS: Double
         public var gptMinConfidence: Double
         public var colors: [String: CueColor]
+        /// Cue types that never show (cue type raw values): a host's choice, none in the generic config.
+        public var disabled: [String]?
+
+        public var disabledTypes: Set<CueType> { Set((disabled ?? []).compactMap(CueType.init(rawValue:))) }
     }
 
     public struct Gpt: Decodable, Equatable, Sendable {
@@ -272,6 +276,7 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
             throw ConfigError.invalid("no color for cue type \(type.rawValue)")
         }
         guard cues.priority.allSatisfy({ CueType(rawValue: $0) != nil }) else { throw ConfigError.invalid("unknown cue type in priority") }
+        guard (cues.disabled ?? []).allSatisfy({ CueType(rawValue: $0) != nil }) else { throw ConfigError.invalid("unknown cue type in disabled") }
         guard (try? NSRegularExpression(pattern: meetTitleRegex)) != nil else { throw ConfigError.invalid("bad meet_title_regex") }
         guard (0...3).contains(audio.vadAggressiveness) else { throw ConfigError.invalid("vad_aggressiveness out of range") }
         let hop = audio.vadRate * audio.frameMs / 1000

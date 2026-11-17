@@ -31,6 +31,16 @@ final class ConfigTests: XCTestCase {
         XCTAssertNotNil(raw["capture_targets"])
     }
 
+    func testDisabledCuesAreAHostChoice() throws {
+        XCTAssertNil(try TestConfig.load().cues.disabled, "the generic config switches nothing off")
+        let c = try ListenMoreConfig.load(overrides: ["cues": ["disabled": ["not_listening"]]])
+        XCTAssertEqual(c.cues.disabledTypes, [.notListening])
+        XCTAssertEqual(c.cues.cooldownS, 20, "the rest of the section is kept")
+        XCTAssertThrowsError(try ListenMoreConfig.load(overrides: ["cues": ["disabled": ["shouting"]]])) { error in
+            XCTAssertEqual(error as? ConfigError, .invalid("unknown cue type in disabled"))
+        }
+    }
+
     func testRejectsBadTriggerTiming() throws {
         XCTAssertThrowsError(try ListenMoreConfig.load(overrides: ["trigger": ["poll_s": 0]])) { error in
             XCTAssertEqual(error as? ConfigError, .invalid("bad trigger timing"))
