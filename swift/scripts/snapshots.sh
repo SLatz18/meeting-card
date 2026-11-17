@@ -5,7 +5,8 @@
 #       <out>/head; a pair is re-rendered once if they differ (the clock minute can roll over
 #       between the two renders and the card shows absolute times)
 #   scripts/snapshots.sh coach <out-dir>
-#       coach chip states (incl. the multi-link card, full and collapsed), glow, Settings, onboarding, status menu and the design packet
+#       coach chip states (incl. the multi-link card, full and collapsed), glow, Settings (incl. the
+#       TypeSafe cue judge), onboarding, status menu and the design packet
 #       (packet-<surface>-<appearance>.png, listed in packet-list.txt) from this checkout's build;
 #       fails if a Use Zoom/Meet controls packet is missing
 set -euo pipefail

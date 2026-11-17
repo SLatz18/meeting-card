@@ -268,8 +268,8 @@ enum UISnapshots {
     }
 
     /// Settings (toggles off, the default), Settings local-only, Settings with "Use Zoom/Meet controls"
-    /// on (its permission explainer: CI grants nothing) and the three onboarding screens, from
-    /// scratch defaults.
+    /// on (its permission explainer: CI grants nothing), the TypeSafe cue judge without its key and
+    /// after judging stopped on an auth failure, and the three onboarding screens, from scratch defaults.
     /// Each window is shown briefly so AppKit draws it, captured, then closed.
     @MainActor
     static func settingsShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
@@ -306,6 +306,21 @@ enum UISnapshots {
             defaults.set(false, forKey: CoachController.Keys.enabled)
             defaults.set(true, forKey: CoachController.Keys.callControls)
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            let w = CoachSettingsWindow(coach: coach)
+            w.update()
+            return w
+        }), ("settings-judge-typesafe", {
+            defaults.set(false, forKey: CoachController.Keys.enabled)
+            defaults.set(JudgeProviderKind.typesafe.rawValue, forKey: CoachController.Keys.judgeProvider)
+            defaults.set(false, forKey: CoachController.Keys.callControls)
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            let w = CoachSettingsWindow(coach: coach)
+            w.update()
+            return w
+        }), ("settings-judge-stopped", {
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            coach.typeSafeKeyStored = true
+            coach.previewJudgeStop = .http(401)
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w

@@ -57,10 +57,14 @@ public enum GptStopReason: String, Equatable, Sendable {
 public protocol CoachEngineDelegate: AnyObject {
     func engine(_ engine: CoachEngine, didSuggest cue: CueSuggestion)
     func engine(_ engine: CoachEngine, gptStopped reason: GptStopReason)
+    /// Judging stopped for the session after repeated provider failures; `failure` is the one that
+    /// stopped it (a status code or a class, never content or a key).
+    func engine(_ engine: CoachEngine, judgeStopped failure: JudgeFailure)
 }
 
 public extension CoachEngineDelegate {
     func engine(_ engine: CoachEngine, gptStopped reason: GptStopReason) {}
+    func engine(_ engine: CoachEngine, judgeStopped failure: JudgeFailure) {}
 }
 
 /// Boundary between the host and the coaching engine (`LocalCoachEngine`; the Python core in

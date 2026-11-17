@@ -1,4 +1,5 @@
 import XCTest
+@testable import MeetingCardCore
 
 /// The call coach is wired in as an opt-in: a local package (the coach's single source, no remote
 /// dependency), permission strings present, the opt-in a UserDefaults boolean (false until set), the
@@ -63,6 +64,74 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("keys: keyGate"), "the service reads the key from that item only, through the gate")
         XCTAssertTrue(try read("App/CoachKeyActions.swift").contains("func readKey() throws -> APIKey? { rejected ? nil : try store.readKey() }"),
                       "a rejected key is withheld, so only GPT cues stop")
+    }
+
+    /// The cue judge is a setting (gpt, the config's value, unless the user picks TypeSafe), read by
+    /// the engine at each call start; the TypeSafe key is its own account under MeetingCard's service
+    /// and is never sent anywhere to check it.
+    func testCueJudgeIsASettingWithItsOwnKeychainAccount() throws {
+        let src = try read("App/CoachController.swift")
+        XCTAssertTrue(src.contains("static let judgeProvider = \"coach.judgeProvider\""))
+        XCTAssertTrue(src.contains("Self.storedJudgeProvider(defaults) ?? config.judge.provider"), "the config value unless set")
+        XCTAssertTrue(src.contains("typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)"),
+                      "the TypeSafe key follows the OpenAI key's service, however that is derived")
+        for file in ["App/CoachController.swift", "App/CoachKeyActions.swift", "App/CoachSettingsWindow.swift", "App/UISnapshots.swift"] {
+            let text = try read(file)
+            XCTAssertFalse(text.contains("TYPESAFE_API_KEY"), "\(file) names the TypeSafe account")
+            XCTAssertFalse(text.contains(".typesafe\"") || text.contains("scoped(\"typesafe"), "\(file) builds a TypeSafe service string")
+        }
+        XCTAssertTrue(src.contains("LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,"))
+        XCTAssertTrue(src.contains("judgeProvider: { Self.storedJudgeProvider(defaults) })"))
+        XCTAssertTrue(src.contains("keys: keyGate, callState: callControls, engine: engine"))
+        let kitDefaults = try read("Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift")
+        XCTAssertTrue(kitDefaults.contains("\"provider\": \"gpt\""), "GPT stays the default judge")
+        let keys = try read("App/CoachKeyActions.swift")
+        let save = try XCTUnwrap(keys.components(separatedBy: "func saveTypeSafeKey").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(save.contains("try? typeSafeKeychain.save(key)"))
+        XCTAssertFalse(save.contains("KeyValidator") || save.contains("Task"), "nothing is sent to check the TypeSafe key")
+    }
+
+    /// The TypeSafe key resolves to `AppIdentity.current.keychainService` in every build: the bundle id
+    /// gives the OpenAI key's service, the controller's store uses it, and the TypeSafe store is that
+    /// store's sibling (same service and access group, account TYPESAFE_API_KEY). So the shipping build
+    /// and `build.sh --test-id` each keep their TypeSafe key beside their own OpenAI key, never the other's.
+    func testTypeSafeKeyFollowsAppIdentityInBothBuilds() throws {
+        let controller = try read("App/CoachController.swift")
+        XCTAssertTrue(controller.contains("static let keychainService = AppIdentity.current.keychainService"))
+        XCTAssertTrue(controller.contains("keychain: KeychainStore = KeychainStore(service: CoachController.keychainService)"))
+        XCTAssertTrue(controller.contains("typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)"))
+        let kit = try read("Packages/ListenMoreKit/Sources/ListenMoreMac/KeychainStore.swift")
+        XCTAssertTrue(kit.contains("public static let typeSafeAccount = \"TYPESAFE_API_KEY\""))
+        XCTAssertTrue(kit.contains("KeychainStore(service: service, account: account, accessGroup: accessGroup)"),
+                      "sibling keeps the service and access group")
+        var typeSafeStores = 0
+        for file in try FileManager.default.contentsOfDirectory(atPath: Self.swiftDir.appendingPathComponent("App").path)
+        where file.hasSuffix(".swift") {
+            typeSafeStores += try read("App/" + file).components(separatedBy: "typeSafeAccount").count - 1
+        }
+        XCTAssertEqual(typeSafeStores, 1, "the controller's sibling is the only TypeSafe store in the app")
+        XCTAssertEqual(AppIdentity.release.keychainService, AppIdentity.release.scoped("openai"))
+        XCTAssertEqual(AppIdentity.test.keychainService, AppIdentity.test.scoped("openai"))
+        XCTAssertNotEqual(AppIdentity.release.keychainService.lowercased(), AppIdentity.test.keychainService.lowercased(),
+                          "the test build's TypeSafe key never shares the shipping build's item")
+    }
+
+    /// Settings says why judging stopped from the failure's kind and status code only; the window
+    /// never reads a key or shows key text.
+    func testJudgeStopNoteCarriesNoKeyText() throws {
+        let window = try read("App/CoachSettingsWindow.swift")
+        XCTAssertTrue(window.contains("judgeStoppedNote.stringValue = stopped.map(CoachCopy.judgeStopped) ?? \"\""))
+        for keyAccess in ["readKey", "typeSafeKeychain", ".value"] {
+            XCTAssertFalse(window.contains(keyAccess), "Settings touches key material: \(keyAccess)")
+        }
+        let copy = try read("App/CoachCopy.swift")
+        let body = try XCTUnwrap(copy.components(separatedBy: "static func judgeStopped(_ failure: JudgeFailure) -> String {").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(body.contains("switch failure.kind {"))
+        XCTAssertTrue(body.contains("if case .http(let status) = failure"))
+        XCTAssertFalse(body.contains("description") || body.contains(".value"), "only the kind and the status code reach the text")
+        XCTAssertTrue(try read("App/CoachController.swift").contains("var judgeStopped: JudgeFailure? { previewJudgeStop ?? service?.judgeStopped }"))
     }
 
     /// Local-only: turning on never waits for or requires a key; a stored key is checked afterwards.

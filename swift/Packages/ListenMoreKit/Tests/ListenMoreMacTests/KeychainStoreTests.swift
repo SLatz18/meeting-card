@@ -103,6 +103,32 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertNil(try other.readKey())
     }
 
+    /// The TypeSafe key is its own account under the same service: saving, replacing or deleting one
+    /// key never touches the other.
+    func testTypeSafeKeyHasItsOwnAccountUnderTheSameService() throws {
+        XCTAssertEqual(KeychainStore.typeSafeAccount, "TYPESAFE_API_KEY")
+        XCTAssertNotEqual(KeychainStore.typeSafeAccount, KeychainStore.defaultAccount)
+        let grouped = KeychainStore(service: "com.example.derived.openai", account: KeychainStore.defaultAccount, accessGroup: "ABCDE12345.com.example")
+        let sibling = grouped.sibling(account: KeychainStore.typeSafeAccount)
+        XCTAssertEqual(sibling.service, "com.example.derived.openai", "follows whatever service the host derives")
+        XCTAssertEqual(sibling.accessGroup, "ABCDE12345.com.example")
+        XCTAssertEqual(sibling.account, KeychainStore.typeSafeAccount)
+        let ts = store.sibling(account: KeychainStore.typeSafeAccount)
+        for loc in [KeychainStore.Location.dataProtection, .login] {
+            XCTAssertEqual(ts.baseQuery(loc)[kSecAttrService as String] as? String, store.service)
+            XCTAssertEqual(ts.baseQuery(loc)[kSecAttrAccount as String] as? String, "TYPESAFE_API_KEY")
+        }
+        try requireKeychain()
+        defer { try? ts.delete() }
+        try store.save(APIKey("openai-test-a")!)
+        try ts.save(APIKey("typesafe-test-b")!)
+        XCTAssertEqual(try store.readKey()?.value, "openai-test-a")
+        XCTAssertEqual(try ts.readKey()?.value, "typesafe-test-b")
+        try ts.delete()
+        XCTAssertNil(try ts.readKey())
+        XCTAssertEqual(try store.readKey()?.value, "openai-test-a", "deleting the TypeSafe key keeps the OpenAI key")
+    }
+
     func testIsTheSessionKeyProvider() throws {
         try requireKeychain()
         try store.save(APIKey("sk-test-provider")!)

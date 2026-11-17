@@ -64,6 +64,8 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     private let transports: GptTransports?
     private let maxLagMs: Int
     private let participants: Int
+    private let judgeKeys: APIKeyProvider?
+    private let judgeProvider: (@Sendable () -> JudgeProviderKind?)?
     private var config: ListenMoreConfig?
     private var pipeline: CoachPipeline?
     private var aligner: FrameAligner?
@@ -71,17 +73,37 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     private let clock = AudioClock()
 
     /// `transports` nil = local layer only (no network at all). `participants`: people on the call
-    /// (2 = a 1:1), for talk share and group questions.
-    public init(transports: GptTransports? = nil, maxLagMs: Int = 200, participants: Int = 2) {
+    /// (2 = a 1:1), for talk share and group questions. `judgeProvider`, read at each start, replaces
+    /// the config's `judge.provider` when it returns a value (a host setting; the next call uses it).
+    /// `judgeKeys` supplies the TypeSafe key, read at start only while that provider is selected.
+    public init(transports: GptTransports? = nil, maxLagMs: Int = 200, participants: Int = 2,
+                judgeKeys: APIKeyProvider? = nil, judgeProvider: (@Sendable () -> JudgeProviderKind?)? = nil) {
         self.transports = transports
         self.maxLagMs = maxLagMs
         self.participants = participants
+        self.judgeKeys = judgeKeys
+        self.judgeProvider = judgeProvider
+    }
+
+    /// The config a session runs with: `config` with the host's provider pick applied.
+    func sessionConfig(_ config: ListenMoreConfig) -> ListenMoreConfig {
+        var c = config
+        if let pick = judgeProvider?() { c.judge.provider = pick }
+        return c
+    }
+
+    private func judgeKey(for config: ListenMoreConfig) -> APIKey? {
+        switch config.judge.provider {
+        case .gpt: return nil
+        case .typesafe: return (try? judgeKeys?.readKey()) ?? nil
+        }
     }
 
     public var hasGptLayer: Bool { gpt != nil }
 
     public func start(config: ListenMoreConfig, apiKey: APIKey?) {
         stop()
+        let config = sessionConfig(config)
         self.config = config
         let hop = config.audio.sampleRate * config.audio.frameMs / 1000
         aligner = FrameAligner(hop: hop, maxLagSamples: config.audio.sampleRate * maxLagMs / 1000)
@@ -91,12 +113,16 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
         if let apiKey, let transports {
             let clock = clock
             let box = AsyncGptBridge()
-            let layer = GptLayer(config: config, key: apiKey, transports: transports, now: { clock.get() },
+            let layer = GptLayer(config: config, key: apiKey, judgeKey: judgeKey(for: config), transports: transports, now: { clock.get() },
                                  offer: { label, t, refT, conf in box.land(.offer(label: label, t: t, refT: refT, confidence: conf)) },
                                  onSegment: { speaker, text, refT, now in box.land(.segment(speaker, text, refT: refT, now: now)) },
                                  onStopped: { [weak self] reason in
                                      guard let self else { return }
                                      self.delegate?.engine(self, gptStopped: reason)
+                                 },
+                                 onJudgeStopped: { [weak self] failure in
+                                     guard let self else { return }
+                                     self.delegate?.engine(self, judgeStopped: failure)
                                  })
             box.layer = layer
             layer.start()

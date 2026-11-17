@@ -5,8 +5,9 @@ import MeetingCardCore
 
 /// The call coach inside MeetingCard. Off by default: until the user turns it on (Settings or the
 /// coach status menu) there is no service, no Core Audio polling, no capture and no network. It
-/// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores five
-/// settings in UserDefaults (never call data); the API key lives only in the Keychain.
+/// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores six
+/// settings in UserDefaults (never call data); the API keys live only in the Keychain. The cue judge
+/// (`coach.judgeProvider`, gpt unless set) applies from the next call.
 /// "Use Zoom/Meet controls" (off by default) lets Zoom's meeting controls and an open Meet tab stop
 /// the coach within seconds of a call ending and hold it while Zoom is muted; its Accessibility and
 /// Automation prompts appear only when the user turns it on (or asks again from Settings).
@@ -18,6 +19,7 @@ final class CoachController: NSObject {
         static let allowlist = "coach.allowlist"
         static let onboarded = "coach.onboarded"
         static let callControls = "coach.callControls"
+        static let judgeProvider = "coach.judgeProvider"
     }
 
     /// MeetingCard's Keychain item for the OpenAI key, `<bundle id>.openai` (the Kit's default service is not ours).
@@ -26,6 +28,8 @@ final class CoachController: NSObject {
     let defaults: UserDefaults
     let config: ListenMoreConfig
     let keychain: KeychainStore
+    /// The TypeSafe key: whatever service the OpenAI key uses, in its own account.
+    let typeSafeKeychain: KeychainStore
     /// What the service reads the key through: nil while the stored key is known to be rejected.
     let keyGate: CoachKeyGate
     /// App-level call state for the service; reads nothing while the setting is off.
@@ -66,6 +70,7 @@ final class CoachController: NSObject {
          showsStatusItem: Bool = true) throws {
         self.defaults = defaults
         self.keychain = keychain
+        typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
         self.showsStatusItem = showsStatusItem
         config = try ListenMoreConfig.builtIn()
@@ -73,6 +78,7 @@ final class CoachController: NSObject {
         super.init()
         callControls.isEnabled = callControlsOn
         keyStored = keychain.hasKey
+        typeSafeKeyStored = typeSafeKeychain.hasKey
         if enabled {
             makeService()
             checkStoredKey()
@@ -89,6 +95,24 @@ final class CoachController: NSObject {
     var gptAvailable: Bool { keyStored && !keyGate.rejected }
     /// Whether a key is in the Keychain, kept current by key actions (refresh runs every second).
     var keyStored = false
+    var typeSafeKeyStored = false
+
+    /// The cue judge the next call uses: the user's pick, else the config's (gpt).
+    var judgeProvider: JudgeProviderKind { Self.storedJudgeProvider(defaults) ?? config.judge.provider }
+
+    nonisolated static func storedJudgeProvider(_ defaults: UserDefaults) -> JudgeProviderKind? {
+        defaults.string(forKey: Keys.judgeProvider).flatMap(JudgeProviderKind.init(rawValue:))
+    }
+
+    /// Why judging stopped on the latest call after repeated provider failures (nil while it runs).
+    var judgeStopped: JudgeFailure? { previewJudgeStop ?? service?.judgeStopped }
+    /// CI screenshots only: a stop reason to show without a call.
+    var previewJudgeStop: JudgeFailure?
+
+    func setJudgeProvider(_ kind: JudgeProviderKind) {
+        defaults.set(kind.rawValue, forKey: Keys.judgeProvider)
+        refresh()
+    }
 
     /// The user's allowlist, or nil for the shipped call apps.
     var allowlist: [String]? { defaults.stringArray(forKey: Keys.allowlist) }
@@ -193,8 +217,11 @@ final class CoachController: NSObject {
     // MARK: service
 
     private func makeService() {
+        let defaults = defaults
+        let engine = LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,
+                                      judgeProvider: { Self.storedJudgeProvider(defaults) })
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
-                             allowlist: allowlist, keys: keyGate, callState: callControls)
+                             allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine)
         s.fallbackScreen = { [weak self] in self?.cardScreen() }
         s.hostWindowNumber = { [weak self] in self?.visibleCards().last?.panel.windowNumber }
         s.onChange = { [weak self] in self?.refresh() }

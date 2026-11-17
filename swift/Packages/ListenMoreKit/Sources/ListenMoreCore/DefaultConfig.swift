@@ -3,7 +3,7 @@ import Foundation
 /// The built-in coach config: generic defaults only. It lives in source (not a bundle resource) so a
 /// host app, `swift test` and xcodebuild all read the same bytes without resource-bundle plumbing.
 /// Hosts tune it by passing overrides (`ListenMoreConfig.load(overrides:)`, deep-merged). No secrets:
-/// the OpenAI key is only ever read from the Keychain.
+/// the OpenAI and TypeSafe keys are only ever read from the Keychain.
 public enum DefaultConfig {
     public static let json = #"""
 {
@@ -123,6 +123,37 @@ public enum DefaultConfig {
       "judge_output_per_mtok": 0.50
     },
     "budget_usd_per_call": 1.00
+  },
+  "judge": {
+    "provider": "gpt",
+    "typesafe": {
+      "url": "https://api.typesafe.ai/v1/systemone",
+      "model": "jev-latest",
+      "min_confidence": 0.7,
+      "timeout_s": 6,
+      "window_s": 30,
+      "max_lines": 8,
+      "max_consecutive_errors": 3,
+      "cost_usd_per_call": null,
+      "context": "`transcript` holds the last few lines of a live work call, oldest first. ME is the user; OTHERS is everyone else on the call. `seconds_ago` is how long ago each line was heard. Some words are redacted as [link], [email], [number] or [name]. Judge only ME's latest line.",
+      "questions": {
+        "aggressive": {
+          "instructions": "Is ME's latest line heated or aggressive toward OTHERS?",
+          "fire": "ME's latest line attacks OTHERS or their idea: hostile, contemptuous or sarcastic at someone's expense, blaming, or sweeping absolutes aimed at people (for example \"you never\", \"that's absurd\").",
+          "no_fire": "Anything else: firm or direct disagreement stated calmly, frustration about a situation rather than a person, jokes OTHERS share, apologies, small talk. Prefer no_fire when unsure."
+        },
+        "not_listening": {
+          "instructions": "Does ME's latest line brush past the point OTHERS just made?",
+          "fire": "OTHERS made a concrete point, request or concern in their last turn, and ME's latest line does not engage with it at all: it dismisses it, talks over it with an earlier point, or restates a position as if they had not spoken.",
+          "no_fire": "Agreeing or acknowledging; answering or building on their point; asking a follow-up; disagreeing while addressing what they said; small talk, greetings or wrap-ups; a new topic after OTHERS finished theirs; a last OTHERS turn that was only a backchannel. Prefer no_fire when unsure."
+        },
+        "missed_question": {
+          "instructions": "Did OTHERS ask ME a question that ME's latest line leaves unanswered?",
+          "fire": "OTHERS' last turn asked ME a direct question, and ME's latest line neither answers it, nor says ME doesn't know, nor asks to come back to it.",
+          "no_fire": "No question was put to ME; ME answers it, even briefly (a number, yes or no, \"I don't know\"); ME asks a clarifying question; the question was rhetorical or someone else answered it. Prefer no_fire when unsure."
+        }
+      }
+    }
   },
   "trigger": {
     "poll_s": 0.5,

@@ -201,6 +201,22 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertNil(s.gptStopped)
     }
 
+    func testJudgeStopReasonIsReportedAndClearedOnNextSession() async {
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        _ = await eventually { self.engine.isRunning }
+        engine.stopJudge(.http(401))
+        let stopped = await eventually { s.judgeStopped == .http(401) }
+        XCTAssertTrue(stopped)
+        XCTAssertEqual(s.judgeStopped?.kind, .auth)
+        XCTAssertNil(s.gptStopped, "only judging stopped; transcription is on")
+        s.stopManual()
+        XCTAssertEqual(s.judgeStopped, .http(401), "kept after the call so Settings can still say why")
+        s.startManual()
+        XCTAssertNil(s.judgeStopped)
+    }
+
     func testCueWhileIdleIsDropped() async {
         let s = makeSession()
         s.deliverForTesting(CueSuggestion(type: .interrupt, t: 1, onset: 1, source: .local))

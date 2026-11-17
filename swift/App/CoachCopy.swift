@@ -1,4 +1,5 @@
 import Foundation
+import ListenMoreCore
 
 /// User-facing call coach strings (approved copy; edits only where the build differs, see the PR).
 enum CoachCopy {
@@ -50,6 +51,33 @@ enum CoachCopy {
     static let privacy = "When the coach is on with an API key, call audio is sent to OpenAI for analysis. Without a key, only the on-device cues run."
     static let pausedPrivacy = "No audio is sent while paused."
     static let permissionDenied = "Call coach needs mic and system audio access. You can turn these on in System Settings > Privacy & Security."
+    static let judgeLabel = "Cue judge"
+    static let judgeGpt = "OpenAI GPT"
+    static let judgeTypeSafe = "TypeSafe System One"
+    static let judgeHelpGpt = "OpenAI decides when your reply brushes past someone's point. This is the default."
+    static let judgeHelpTypeSafe = "TypeSafe decides heated replies, missed questions and brushed-past points. A short, redacted transcript window around your reply goes to TypeSafe on your TypeSafe key. Transcription stays with OpenAI."
+    static let typeSafeKeyLabel = "TypeSafe API key"
+    static let typeSafeKeyPlaceholder = "TypeSafe API key"
+    static let typeSafeKeySavedPlaceholder = "TypeSafe key saved in your Keychain"
+    static let typeSafeKeyMissing = "Nothing is judged until you add a TypeSafe API key. The transcript rules and on-device cues still run."
+
+    /// Why judging stopped: the failure's kind and status code only, never key text.
+    static func judgeStopped(_ failure: JudgeFailure) -> String {
+        let why: String, advice: String
+        switch failure.kind {
+        case .auth: (why, advice) = ("TypeSafe didn't accept the key", " Check the key and save it again.")
+        case .balance: (why, advice) = ("TypeSafe reports no balance left on the account", "")
+        case .rateLimited: (why, advice) = ("TypeSafe is limiting requests right now", "")
+        case .server: (why, advice) = ("TypeSafe had a server problem", "")
+        case .rejected: (why, advice) = ("TypeSafe turned the request down", "")
+        case .timeout: (why, advice) = ("TypeSafe didn't answer in time", "")
+        case .unreachable: (why, advice) = ("Couldn't reach TypeSafe", "")
+        case .badReply: (why, advice) = ("TypeSafe's reply couldn't be read", "")
+        }
+        var code = ""
+        if case .http(let status) = failure { code = " (HTTP \(status))" }
+        return "Judging stopped for this call: \(why)\(code).\(advice) The transcript rules and on-device cues still run."
+    }
 
     struct Screen {
         let title: String

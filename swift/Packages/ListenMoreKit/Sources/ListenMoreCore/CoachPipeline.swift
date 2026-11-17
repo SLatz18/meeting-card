@@ -26,6 +26,8 @@ public final class CoachPipeline {
     public let text: TextRules?
     public let policy: CuePolicy
     public let gpt: PipelineGpt?
+    /// Whose labels the GPT layer's verdicts carry.
+    public let judgeProvider: JudgeProviderKind
     private let frameS: Double
     private let cutWait: Double
     private var cutIns: [LocalEvent] = []
@@ -37,6 +39,7 @@ public final class CoachPipeline {
         local = LocalLayer(config: config, participants: participants, context: text)
         policy = CuePolicy(config: config.cues)
         self.gpt = gpt
+        judgeProvider = config.judge.provider
         frameS = config.frameS
         cutWait = config.local.cutInTextWaitMs / 1000
     }
@@ -61,7 +64,7 @@ public final class CoachPipeline {
                 case let .segment(speaker, said, refT, now):
                     if let text { inbox += text.onSegment(speaker, text: said, refT: refT, now: now) }
                 case let .offer(label, ct, refT, confidence):
-                    if let type = CueType(gptLabel: label) {
+                    if let type = CueType(judgeLabel: label, provider: judgeProvider) {
                         inbox.append(CueSuggestion(type: type, t: ct, onset: refT, source: .gpt, confidence: confidence))
                     }
                 }

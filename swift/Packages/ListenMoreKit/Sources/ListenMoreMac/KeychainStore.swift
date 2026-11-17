@@ -10,10 +10,12 @@ import Security
 /// ignores accessibility classes (see docs/SIGNING_PLAN.md). Values never appear in errors,
 /// descriptions or logs; errors carry the OSStatus or an attribute name, never the key.
 ///
-/// The service name is the host's: the Kit default is generic, and each app passes its own.
+/// The service name is the host's: the Kit default is generic, and each app passes its own. A
+/// TypeSafe System One key is a second item under the same service, in its own account.
 public struct KeychainStore: APIKeyProvider {
     public static let defaultService = "com.listenmore.mac.openai"
     public static let defaultAccount = "OPENAI_API_KEY"
+    public static let typeSafeAccount = "TYPESAFE_API_KEY"
     public static let accessibility = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
     public enum KeychainError: Error, Equatable {
@@ -91,6 +93,12 @@ public struct KeychainStore: APIKeyProvider {
     }
 
     public var hasKey: Bool { (try? readKey()) != nil }
+
+    /// Another item under this store's service (and access group), in `account`: e.g. the TypeSafe key
+    /// beside the OpenAI key, whatever service the host derives for that.
+    public func sibling(account: String) -> KeychainStore {
+        KeychainStore(service: service, account: account, accessGroup: accessGroup)
+    }
 
     /// Replaces any existing item in either keychain.
     public func save(_ key: APIKey) throws {
