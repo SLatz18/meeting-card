@@ -104,7 +104,7 @@ Reopen MeetingCard (double-click it in Finder, or `open ~/Applications/MeetingCa
 - Permissions (TCC): Microphone, System Audio Recording (Core Audio process taps), and Screen Recording (ScreenCaptureKit's audio-only call capture). Reset with `tccutil reset Microphone|AudioCapture|ScreenCapture com.slatz.meetingcard.swift`.
 
 **Screen sharing**
-The glow, and the meeting card while the coach chip shows, ask macOS to be left out of screen captures (`NSWindow.sharingType = .none`). Whether a sharing app honors that depends on how it captures; see the note below.
+The glow and the coach chip's card ask macOS to leave them out of screen captures (`NSWindow.sharingType = .none`). A CI probe (`ScreenShareProbeTests`) captures the display with ScreenCaptureKit, which current Zoom, Teams, Meet and Webex builds use to share a screen. On macOS 26.7.2 (25G332) it found our windows absent from the captured pixels while an ordinary window was present, so people you share your screen with don't see the glow. Our windows still appear in ScreenCaptureKit's window list, so an app could offer them as a pick in a "share a window" menu; picking one shares nothing visible. Sharing tools that use older capture paths are untested. If one shows the glow, pause the coach from the chip while you share.
 
 ## Project layout
 
