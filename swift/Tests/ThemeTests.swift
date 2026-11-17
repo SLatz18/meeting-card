@@ -267,6 +267,7 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(c.lineGap, CardStyle.Spacing.control / 2)
         XCTAssertEqual(c.trailingReserve, Theme.Metrics.cardWidth + Theme.Metrics.cardMargin)
         XCTAssertEqual(c.ownSpeaker, .accent)
+        XCTAssertEqual(c.dotColor, CardStyle.criticalColor)
         let n = Theme.Notice.self
         XCTAssertEqual(n.width, Theme.Metrics.cardWidth)
         XCTAssertEqual(n.titleFont, Theme.Fonts.title)

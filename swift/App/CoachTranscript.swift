@@ -174,7 +174,7 @@ final class CoachTranscript {
             indicatorHeight: Theme.cg(c.indicatorHeight), indicatorRadius: Theme.cg(c.indicatorRadius),
             indicatorPadding: Theme.cg(c.indicatorPadding), indicatorFont: Theme.font(c.indicatorFont),
             hairline: color(c.hairline(style:)), hairlineWidth: Theme.cg(c.hairlineWidth),
-            dot: color(c.dot(style:)), dotDiameter: Theme.cg(c.dotDiameter),
+            dot: CardStyle.dynamic(c.dotColor) { base, _ in base }, dotDiameter: Theme.cg(c.dotDiameter),
             stackGap: Theme.cg(c.stackGap), margin: Theme.cg(c.margin), trailingReserve: Theme.cg(c.trailingReserve))
     }
 

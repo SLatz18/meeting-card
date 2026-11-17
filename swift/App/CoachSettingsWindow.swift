@@ -55,6 +55,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let themField = NSTextField()
     private let costLabel = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
     private var notice: CoachNotice?
+    /// Snapshots: the Captions and transcript group on its own.
+    private(set) var transcriptGroupView: NSView?
 
     /// `onboardingScreen` forces that onboarding screen (CI screenshots).
     init(coach: CoachController, onboardingScreen: Int? = nil, visibleHeightOverride: Double? = nil) {
@@ -502,6 +504,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
                                statusRow, Self.text(CoachCopy.speakerNames, font: Theme.Settings.itemFont), names, namesHelp, costLabel]
         let g = Self.group(views)
         for v in views where v !== heading && v !== savingHolder { pin(v, in: g) }
+        transcriptGroupView = g
         return g
     }
 

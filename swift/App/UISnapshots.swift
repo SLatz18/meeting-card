@@ -94,7 +94,7 @@ enum UISnapshots {
             w.window.orderFrontRegardless()
             controller.schedule(0.5, repeats: false) {
                 MainActor.assumeIsolated {
-                    let img = windowImage(w.window)
+                    let img = w.transcriptGroupView.flatMap { viewImage($0, in: w.window) }
                     let ok = img.map { Card.writePNG($0, "\(dir)/transcript-settings-\(tag).png") } ?? false
                     controller.log("coach shot transcript-settings-\(tag) ok=\(ok)")
                     packet("transcript-settings", img)

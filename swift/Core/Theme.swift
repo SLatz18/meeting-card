@@ -549,6 +549,8 @@ public enum Theme {
         public static func surface(style: CardStyle) -> RGBA { style.surface }
         public static func hairline(style: CardStyle) -> RGBA { style.hairline }
         public static func dot(style: CardStyle) -> RGBA { style.critical }
+        /// The dot's live system color (the App draws it dynamically, like the glow).
+        public static let dotColor = CardStyle.criticalColor
         public static let text = CardStyle.Text.primary
         public static let speaker = CardStyle.Text.secondary
         /// The user's own label: the card's accent (Next up blue).
