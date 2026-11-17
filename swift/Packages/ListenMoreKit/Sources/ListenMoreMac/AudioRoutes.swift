@@ -87,6 +87,40 @@ public final class CoreAudioRoutes: AudioRouteSource {
         watchedOutput = AudioObjectID(kAudioObjectUnknown)
     }
 
+    /// What the call-mode hint reads about the default output: its transport, whether any of its
+    /// input streams is doing IO, and its nominal sample rate.
+    public struct OutputCallState: Equatable, Sendable {
+        public var device: UInt32?
+        public var transport: AudioDeviceInfo.Transport?
+        public var inputStreamActive: Bool
+        public var sampleRate: Double?
+    }
+
+    public static func outputCallState() -> OutputCallState {
+        guard let output = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) else {
+            return OutputCallState(device: nil, transport: nil, inputStreamActive: false, sampleRate: nil)
+        }
+        return OutputCallState(device: output, transport: info(output).transport,
+                               inputStreamActive: inputStreams(of: output).contains { (uint32($0, kAudioStreamPropertyIsActive) ?? 0) != 0 },
+                               sampleRate: float64(output, kAudioDevicePropertyNominalSampleRate))
+    }
+
+    static func inputStreams(of device: AudioObjectID) -> [AudioStreamID] {
+        var address = Self.address(kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioStreamID](repeating: 0, count: Int(size) / MemoryLayout<AudioStreamID>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids
+    }
+
+    static func float64(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> Double? {
+        var address = Self.address(selector)
+        var out: Float64 = 0
+        var size = UInt32(MemoryLayout<Float64>.size)
+        return AudioObjectGetPropertyData(id, &address, 0, nil, &size, &out) == noErr ? out : nil
+    }
+
     // MARK: reads
 
     static func address(_ selector: AudioObjectPropertySelector,

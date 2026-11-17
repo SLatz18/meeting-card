@@ -40,6 +40,15 @@ public final class MicCapture: MicSource {
     public var restartCount: Int { mic.restartCount }
     public func currentPlan() -> MicPlan { mic.currentPlan() }
 
+    /// The default output is a Bluetooth headset in its hands-free (call) mode, and not because of
+    /// the coach's mic. Core Audio properties only.
+    public func headphonesInCallMode() -> Bool {
+        let s = CoreAudioRoutes.outputCallState()
+        return CallModeHint.isCallMode(outputTransport: s.transport, outputInputStreamActive: s.inputStreamActive,
+                                       outputSampleRate: s.sampleRate, outputDevice: s.device,
+                                       ourMicDevice: mic.deviceID ?? mic.plan?.device)
+    }
+
     @available(macOS 14.0, *)
     public static func duckingConfiguration(_ ducking: MicProcessing.Ducking) -> AVAudioVoiceProcessingOtherAudioDuckingConfiguration {
         AVAudioVoiceProcessingOtherAudioDuckingConfiguration(

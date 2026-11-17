@@ -113,6 +113,15 @@ final class MicCaptureTests: XCTestCase {
         XCTAssertEqual(CoreAudioRoutes.fourCC("ispk"), 0x6973_706B)
     }
 
+    func testCallModeReadsCoreAudioStateAndOurOwnMicOnly() throws {
+        let state = CoreAudioRoutes.outputCallState()
+        if state.device == nil { XCTAssertFalse(state.inputStreamActive) }
+        XCTAssertFalse(MicCapture(routes: StaticRoutes(Self.desktopBluetooth)).headphonesInCallMode() && state.transport != .bluetooth)
+        let body = try block(after: "public func headphonesInCallMode() -> Bool {", in: try text())
+        XCTAssertTrue(body.contains("CoreAudioRoutes.outputCallState()"))
+        XCTAssertTrue(body.contains("ourMicDevice: mic.deviceID ?? mic.plan?.device"))
+    }
+
     func testRoutesSnapshotAndObservationRunOnThisMac() {
         let routes = CoreAudioRoutes()
         let snap = routes.snapshot()
