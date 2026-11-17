@@ -41,7 +41,8 @@ macOS asks. If a call app's bundle ID differs from `capture_targets` in
 
 The coach starts from Core Audio state only: the call app producing output and the microphone running, for about 3 s.
 With **Use Zoom/Meet controls** on (checks ZC*, MC*, MD*), Zoom's meeting controls and an open Meet tab also end it
-about 3 s after the call ends and hold it while Zoom is muted.
+about 3 s after the call ends and hold it while Zoom is muted. **Meet mute is not detected** (in Chrome or Dia): it
+isn't readable without page content, so muting in Meet never pauses the coach (MC4). Only Zoom's mute does.
 The indicator is the chip on a visible card (On → Listening → Paused) and the top line of the coach menu bar menu, which is
 always there (Turn On Call Coach while off).
 
@@ -73,11 +74,12 @@ always there (Turn On Call Coach while off).
 | ZC3 | Zoom desktop | Mute pauses | In the meeting, mute (⇧⌘A or the toolbar), wait, unmute | Chip shows **Muted** and the menu says Coach paused while you're muted; no cues and no traffic to api.openai.com while muted; Listening again within about 1 s of unmute |
 | ZC4 | Zoom desktop | Pause beats unmute | While muted, click Pause on the chip, then unmute | Chip stays **Paused** until Resume |
 | ZC5 | Zoom desktop | Denied / revoked | Deny Accessibility (or remove MeetingCard from it mid-call) | No dialog or error; the coach falls back to the 30 s audio stop |
-| MC1 | Meet in Chrome | Prompt in context | Open Chrome, turn the toggle on (or click Request access) | macOS asks "MeetingCard wants to control Google Chrome" only now; Chrome is never launched by MeetingCard |
+| MC1 | Meet in Chrome | Prompt in context | Open Chrome, turn the toggle on (or click Request access) | macOS asks only now, naming the app correctly: "MeetingCardSwift" wants access to control "Google Chrome", with MeetingCard's usage text; Chrome is never launched by MeetingCard |
 | MC2 | Meet in Chrome | Fast stop | With Automation granted, join a test Meet (`meet.google.com/xxx-xxxx-xxx`) with other tabs open, then close the Meet tab or click Leave | Listening within about 3 s; chip hides about 3 s after the meeting URL goes away |
 | MC3 | Meet in Chrome | Denied | Deny Automation for Chrome (System Settings > Privacy & Security > Automation) | No dialog; Chrome calls fall back to the 30 s audio stop |
-| MD1 | Meet in Dia | Scripting check | `osascript -e 'tell application "Dia" to get version'` and `osascript -e 'tell application "Dia" to count (tabs of window 1 whose URL starts with "https://meet.google.com/")'` | Note Dia's version and whether the count works. If it errors, Dia isn't supported: Settings says so and Dia uses the 30 s audio stop |
-| MD2 | Meet in Dia | Prompt + fast stop | Open Dia, turn the toggle on, join a test Meet, switch to another Dia space for a minute, then close the Meet tab | One Automation prompt for Dia; the coach keeps listening while the Meet tab is in another space; hides about 3 s after the tab closes |
+| MC4 | Meet in Chrome | Meet mute is not detected | In the Meet call, mute in Meet for 30 s, then unmute | Expected: the chip stays **Listening** (never **Muted**) and cues can still fire; Meet mute is not detected, by design |
+| MD1 | Meet in Dia | Scripting check and prompt | (a) In Terminal: `osascript -e 'tell application "Dia" to get version'` and `osascript -e 'tell application "Dia" to count (tabs of window 1 whose URL starts with "https://meet.google.com/")'`. (b) With Dia open and MeetingCard not yet allowed for Dia (`tccutil reset AppleEvents com.slatz.meetingcard.swift` first if needed), turn on **Use Zoom/Meet controls** in MeetingCard Settings (or click Request access) | (a) Note Dia's version and whether the count works; if it errors, Dia isn't supported: Settings says so and Dia uses the 30 s audio stop. (b) The Automation prompt names MeetingCard correctly: it says "MeetingCardSwift" wants access to control "Dia" (the app's Finder name, not Terminal, osascript or a helper), shows MeetingCard's text ("With Use Zoom/Meet controls on, MeetingCard asks your browser only whether a Google Meet call tab is open…"), and MeetingCardSwift then appears under Dia in System Settings > Privacy & Security > Automation. Note any other name |
+| MD2 | Meet in Dia | Fast stop | With Dia allowed in MD1, join a test Meet, switch to another Dia space for a minute, then close the Meet tab | No further prompt; the coach keeps listening while the Meet tab is in another space (muting in Meet doesn't pause it: Meet mute is not detected); hides about 3 s after the tab closes |
 | MD3 | Meet in Dia | Unsupported or denied | On a Dia where MD1's count errors, or with Automation denied | No dialog; Dia calls fall back to the 30 s audio stop |
 | K3 | All | Nothing read is kept | During ZC2–MD2, `log show --predicate 'subsystem == "com.listenmore.kit"' --last 10m` and the MeetingCard log | No meeting or page titles, names, chat, URLs or menu labels anywhere |
 | K1 | All | Keychain and logs | Inspect the Keychain and `log show --predicate 'subsystem == "com.listenmore.kit"'` | Key only in the Keychain; no transcript text or key in logs; no files written |
