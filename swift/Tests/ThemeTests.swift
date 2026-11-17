@@ -249,26 +249,22 @@ final class ThemeTests: XCTestCase {
         XCTAssertTrue(controller.contains("note(CoachCopy.coachMuted, Theme.CallControls.mutedSymbol)"))
     }
 
-    /// The caption strip reads as a sibling of the card: same surface, radius, width, insets and type
-    /// scale; the saving indicator is the card's secondary control shape; the notice is card-shaped.
+    /// Captions sit inside the card on its tokens: the card's text inset and type scale, the
+    /// saving indicator as the card's secondary control; the notice is card-shaped.
     func testCaptionsAndNoticeDeriveFromCardStyle() {
         let c = Theme.Captions.self
-        XCTAssertEqual(c.width, Theme.Metrics.cardWidth)
-        XCTAssertEqual(c.radius, Theme.Metrics.cardRadius)
-        XCTAssertEqual(c.padding.h, Theme.Metrics.leadingInset)
-        XCTAssertEqual(c.padding.v, Theme.Metrics.buttonBottom)
+        XCTAssertEqual(c.cardWidth, Theme.Metrics.cardWidth)
+        XCTAssertEqual(c.inset, Theme.Metrics.textInset)
         XCTAssertEqual(c.textFont, Theme.Fonts.body)
         XCTAssertEqual(c.speakerFont, Theme.Fonts.button)
         XCTAssertEqual(c.noteFont, Theme.Fonts.caption)
-        XCTAssertEqual(c.margin, Theme.Metrics.cardMargin)
         XCTAssertEqual(c.indicatorHeight, Theme.Coach.height)
         XCTAssertEqual(c.indicatorRadius, Theme.Coach.radius)
+        XCTAssertEqual(c.indicatorGap, Theme.Coach.glyphGap, "dot to label, like the chip's glyph to label")
         XCTAssertEqual(c.hairlineWidth, Theme.Metrics.buttonHairline)
         XCTAssertEqual(c.lineGap, CardStyle.Spacing.control / 2)
-        XCTAssertEqual(c.trailingReserve, Theme.Metrics.cardWidth + Theme.Metrics.cardMargin)
         XCTAssertEqual(c.ownSpeaker, .accent)
         XCTAssertEqual(c.dotColor, CardStyle.criticalColor)
-        XCTAssertEqual(c.indicatorGap, Theme.Coach.glyphGap, "dot to label, like the chip's glyph to label")
         XCTAssertEqual(c.costFont, CardStyle.Typography.caption)
         XCTAssertEqual(c.cost, .secondary)
         let n = Theme.Notice.self
@@ -280,7 +276,7 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(n.buttonRadius, Theme.Metrics.buttonRadius)
         for dark in [false, true] {
             let t = CardStyle.for(dark: dark)
-            XCTAssertEqual(c.surface(style: t), Theme.palette(dark: dark).cardFill, "the card's own fill")
+            XCTAssertEqual(c.indicatorFill(style: t), Theme.Coach.fill(style: t), "the chip's fill")
             XCTAssertEqual(c.hairline(style: t), t.hairline)
             XCTAssertEqual(c.dot(style: t), t.critical)
             XCTAssertEqual(n.surface(style: t), t.surface)

@@ -518,21 +518,22 @@ public enum Theme {
         }
     }
 
-    /// Live captions: a sibling of the reminder card. The strip is the card surface (opaque, card
-    /// width and radius, no shadow, no outline, like a card without a link) with the card's text
-    /// insets and type scale: speaker labels in the button font, words in the body font. The saving
-    /// indicator above it is shaped like the card's secondary control (control height, radius and
-    /// hairline) on the same surface, with a critical-red dot one control gap wide.
+    /// Live captions, drawn inside the reminder card by `CaptionFeedView` (no surface or window of
+    /// their own; the card supplies both). Lines use the card's text inset and type scale: speaker
+    /// labels in the button font (the user's own in the accent), words in the body font. The saving
+    /// indicator is the card's secondary control (control height, radius, Ignore fill and hairline)
+    /// with a critical-red dot one control gap wide.
     public enum Captions {
-        public static let width = CardLayout.W
-        public static let radius = CardStyle.Radius.card
-        public static let padding = (h: CardStyle.Spacing.leading, v: CardStyle.Spacing.controlBottom)
+        /// The width a card gives its content (snapshots render the feed at this width).
+        public static let cardWidth = CardLayout.W
+        /// Leading and trailing inset, like the card's Ends and Next up lines.
+        public static let inset = CardStyle.Spacing.text
         public static let lineGap = CardStyle.Spacing.control / 2
         public static let speakerGap = CardStyle.Spacing.control
         public static let speakerFont = CardStyle.Typography.button
         public static let textFont = CardStyle.Typography.body
         public static let noteFont = CardStyle.Typography.caption
-        /// Caption lines on screen at once (the in-memory buffer holds no more).
+        /// Caption lines shown at once (the in-memory buffer holds no more).
         public static let visibleLines = 3
         public static let indicatorHeight = CardStyle.Size.control
         public static let indicatorRadius = CardStyle.Radius.control
@@ -541,26 +542,23 @@ public enum Theme {
         /// Dot to label, like the chip's glyph gap.
         public static let indicatorGap = CardStyle.Spacing.control / 2
         public static let dotDiameter = CardStyle.Spacing.control
+        public static let hairlineWidth = CardStyle.Stroke.hairline
+        /// Indicator to the first caption line.
+        public static let stackGap = CardStyle.Spacing.control
         /// The cost meter's line in Settings: caption type in the secondary text role.
         public static let costFont = CardStyle.Typography.caption
         public static let cost = CardStyle.Text.secondary
-        public static let hairlineWidth = CardStyle.Stroke.hairline
-        /// Indicator to strip.
-        public static let stackGap = CardStyle.Spacing.control
-        /// From the display's bottom edge, like the card.
-        public static let margin = CardStyle.Spacing.margin
-        /// Kept clear at the display's right: the card's slot.
-        public static let trailingReserve = CardLayout.W + CardStyle.Spacing.margin
-        public static func surface(style: CardStyle) -> RGBA { style.surface }
+        public static func indicatorFill(style: CardStyle) -> RGBA { style.controlFill(.normal) }
         public static func hairline(style: CardStyle) -> RGBA { style.hairline }
         public static func dot(style: CardStyle) -> RGBA { style.critical }
-        /// The dot's live system color (the App draws it dynamically, like the glow).
+        /// The dot's live system color (AppKit surfaces draw it dynamically, like the glow).
         public static let dotColor = CardStyle.criticalColor
         public static let text = CardStyle.Text.primary
         public static let speaker = CardStyle.Text.secondary
         /// The user's own label: the card's accent (Next up blue).
         public static let ownSpeaker = CardStyle.Text.accent
         public static let note = CardStyle.Text.secondary
+        public static let savingLabel = CardStyle.Text.primary
         /// Status menu entries for the saved transcript.
         public static let menuSymbols = (saving: "record.circle", delete: "trash")
     }
