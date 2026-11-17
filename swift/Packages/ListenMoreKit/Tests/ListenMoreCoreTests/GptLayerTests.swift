@@ -194,8 +194,10 @@ final class EventBox: @unchecked Sendable {
     private var _texts: [(Speaker, String, TimeInterval)] = []
     private var _errors: [String] = []
     private var _usage: [(Speaker, Double)] = []
+    private var _deltas: [(Speaker, String, String)] = []
 
     var texts: [(Speaker, String, TimeInterval)] { lock.withLock { _texts } }
+    var deltas: [(Speaker, String, String)] { lock.withLock { _deltas } }
     var errors: [String] { lock.withLock { _errors } }
     var usage: [(Speaker, Double)] { lock.withLock { _usage } }
 
@@ -203,6 +205,7 @@ final class EventBox: @unchecked Sendable {
         lock.withLock {
             switch e {
             case let .text(s, t, ref): _texts.append((s, t, ref))
+            case let .delta(s, t, item): _deltas.append((s, t, item))
             case let .usage(s, sec): _usage.append((s, sec))
             case let .error(m): _errors.append(m)
             }

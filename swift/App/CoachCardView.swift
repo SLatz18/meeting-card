@@ -207,6 +207,12 @@ final class CoachFullCardView: CoachSurfaceView {
     private let glyph = NSImageView()
     private let line = CoachSurfaceView.label()
     private let captionsBox = NSView()
+    /// The saving badge on the status line (Save transcripts on): dot and label in a chip-shaped pill.
+    private let badge = CoachSurfaceView.layerView()
+    private let badgeDot = CoachSurfaceView.layerView()
+    /// A plain label (not the truncating status label): sized to its text, it never cuts it.
+    private let badgeLabel = NSTextField(labelWithString: "")
+    private var lineWidth: CGFloat = 0
     private(set) var minimize: CardButton!
     private(set) var stop: CardButton!
     private(set) var mute: CardButton!
@@ -241,7 +247,17 @@ final class CoachFullCardView: CoachSurfaceView {
         band.addSubview(glyph)
         line.frame = NSRect(x: k.bandInset + k.glyphSize + k.glyphGap, y: 0,
                             width: row.width - k.bandInset - k.glyphSize - k.glyphGap - CardStyle.Spacing.control, height: row.height)
+        lineWidth = line.frame.width
         band.addSubview(line)
+        badge.layer?.cornerRadius = Theme.cg(k.savingBadgeRadius)
+        badge.layer?.cornerCurve = .continuous
+        badge.layer?.borderWidth = Theme.cg(Theme.Captions.hairlineWidth)
+        badgeDot.layer?.cornerRadius = Theme.cg(Theme.Captions.dotDiameter / 2)
+        badge.addSubview(badgeDot)
+        badgeLabel.setAccessibilityElement(false)
+        badge.addSubview(badgeLabel)
+        badge.isHidden = true
+        band.addSubview(badge)
 
         minimize = button(radius: k.iconButtonRadius, action: #selector(resizePressed(_:)))
         minimize.frame = rect(k.minimizeButton)
@@ -286,8 +302,9 @@ final class CoachFullCardView: CoachSurfaceView {
         line.frame.size.height = h
         glyph.image = Self.glyphImage(text)
         glyph.contentTintColor = glyphTint(fg)
-        band.setAccessibilityLabel(text)
+        band.setAccessibilityLabel([text, s.savingBadge].compactMap { $0 }.joined(separator: ", "))
         applyNudge(s.nudge, box: band, bar: bar)
+        applyBadge(s.savingBadge)
 
         let icon = k.iconGlyph
         set(minimize, s.sizeControl, glyph: icon)
@@ -299,6 +316,34 @@ final class CoachFullCardView: CoachSurfaceView {
         stop.toolTip = stopControl.tooltip
         stop.setAccessibilityLabel(stopControl.accessibilityLabel)
         stop.applyFill()
+    }
+
+    /// The saving badge at the band's right end, sized to its label (measured as a plain label, so
+    /// it never clips); the status text ends before it and truncates if it must.
+    private func applyBadge(_ label: String?) {
+        guard let label else {
+            badge.isHidden = true
+            line.frame.size.width = lineWidth
+            return
+        }
+        let c = Theme.Captions.self
+        let measure = NSTextField(labelWithString: label)
+        measure.font = Theme.font(c.indicatorFont)
+        let textW = measure.intrinsicContentSize.width.rounded(.up)
+        let f = Theme.CoachCard.savingBadge(labelWidth: Double(textW))
+        badge.frame = NSRect(x: Theme.cg(f.x), y: Theme.cg(f.y), width: Theme.cg(f.width), height: Theme.cg(f.height))
+        badge.layer?.backgroundColor = Theme.ns(c.indicatorFill(style: style).over(style.surface)).cgColor
+        badge.layer?.borderColor = Theme.ns(c.hairline(style: style)).cgColor
+        let pad = Theme.cg(c.indicatorPadding), dot = Theme.cg(c.dotDiameter), gap = Theme.cg(c.indicatorGap), bh = Theme.cg(f.height)
+        badgeDot.frame = NSRect(x: pad, y: (bh - dot) / 2, width: dot, height: dot)
+        badgeDot.layer?.backgroundColor = cg(CardStyle.dynamic(c.dotColor) { base, _ in base })
+        badgeLabel.font = Theme.font(c.indicatorFont)
+        badgeLabel.textColor = Theme.text(c.savingLabel, style)
+        badgeLabel.stringValue = label
+        let h = badgeLabel.intrinsicContentSize.height
+        badgeLabel.frame = NSRect(x: pad + dot + gap, y: (bh - h) / 2, width: textW, height: h)
+        badge.isHidden = false
+        line.frame.size.width = max(0, min(lineWidth, Theme.cg(f.x) - line.frame.minX - Theme.cg(CardStyle.Spacing.control)))
     }
 }
 

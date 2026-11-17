@@ -35,6 +35,13 @@ public final class CoachService: CoachSessionDelegate {
     /// fallback display when it found none. nil until a cue and after the session ends. Reading it
     /// reads nothing; only the glow's own placement does.
     public private(set) var glowScreen: NSRect?
+    /// A coach session (one call) started or ended.
+    public var onCallStart: (() -> Void)?
+    public var onCallEnd: (() -> Void)?
+    /// Live transcription text and the per-call cost meter (content: RAM only, never logged).
+    public var onCaption: ((CaptionEvent) -> Void)?
+    public var onMeter: ((CostReading) -> Void)?
+    private var seenSessionStart: Double?
 
     /// - Parameters:
     ///   - keys: where the OpenAI key comes from, e.g. `KeychainStore(service: "<host's service>")`.
@@ -135,10 +142,20 @@ public final class CoachService: CoachSessionDelegate {
 
     public func coachSessionDidChange(_ session: CoachSession) {
         if session.session == nil { glowScreen = nil }
+        let start = session.session?.startedAt
+        if start != seenSessionStart {
+            if seenSessionStart != nil { onCallEnd?() }
+            seenSessionStart = start
+            if start != nil { onCallStart?() }
+        }
         onChange?()
     }
 
     public func coachSession(_ session: CoachSession, didShow cue: Cue) { onCue?(cue) }
+
+    public func coachSession(_ session: CoachSession, didCaption event: CaptionEvent) { onCaption?(event) }
+
+    public func coachSession(_ session: CoachSession, didMeter reading: CostReading) { onMeter?(reading) }
 
     public func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) {
         switch problem {

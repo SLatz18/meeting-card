@@ -38,6 +38,23 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private var rootWidth: NSLayoutConstraint!
     /// CI screenshots only: a shorter visible frame, to show the groups scrolling.
     private let visibleHeightOverride: Double?
+    private let captionsToggle = NSSwitch()
+    private let savingToggle = NSSwitch()
+    private let transcriptNote = CoachSettingsWindow.text(CoachCopy.transcriptNeedsKey, font: Theme.Settings.helperFont,
+                                                          color: CoachSettingsWindow.color(.secondary))
+    private let folderPath = NSTextField(labelWithString: "")
+    private let chooseFolderButton = NSButton(title: CoachCopy.chooseFolder, target: nil, action: nil)
+    /// The same saving indicator as on screen during the call (the Kit's caption view).
+    /// The saving indicator, as the card shows it (Theme.Captions; the card's secondary control).
+    private let savingHolder = SavingPill(label: CoachCopy.savingNow)
+    private let transcriptStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let deleteButton = NSButton(title: CoachCopy.deleteTranscript, target: nil, action: nil)
+    private let youField = NSTextField()
+    private let themField = NSTextField()
+    private let costLabel = CoachSettingsWindow.text("", font: Theme.Captions.costFont, color: CoachSettingsWindow.color(Theme.Captions.cost))
+    private var notice: CoachNotice?
+    /// Snapshots: the Captions and transcript group on its own.
+    private(set) var transcriptGroupView: NSView?
 
     /// `onboardingScreen` forces that onboarding screen (CI screenshots).
     init(coach: CoachController, onboardingScreen: Int? = nil, visibleHeightOverride: Double? = nil) {
@@ -177,6 +194,63 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             layer?.cornerCurve = .continuous
             let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             layer?.backgroundColor = Theme.ns(Theme.Settings.groupFill(style: Theme.style(dark: dark))).cgColor
+        }
+    }
+
+    /// The saving indicator in AppKit: Ignore fill, hairline and control radius and height, a
+    /// critical-red dot and the label, all from Theme.Captions (the card's CaptionSavingIndicator).
+    final class SavingPill: NSView {
+        private let dot = NSView()
+        init(label: String) {
+            super.init(frame: .zero)
+            let c = Theme.Captions.self
+            wantsLayer = true
+            dot.wantsLayer = true
+            let text = NSTextField(labelWithString: label)
+            text.font = Theme.font(c.indicatorFont)
+            text.textColor = CoachTranscript.color(c.savingLabel)
+            let stack = NSStackView(views: [dot, text])
+            stack.orientation = .horizontal
+            stack.alignment = .centerY
+            stack.spacing = Theme.cg(c.indicatorGap)
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(stack)
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: Theme.cg(c.dotDiameter)),
+                dot.heightAnchor.constraint(equalToConstant: Theme.cg(c.dotDiameter)),
+                heightAnchor.constraint(equalToConstant: Theme.cg(c.indicatorHeight)),
+                stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.cg(c.indicatorPadding)),
+                stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.cg(c.indicatorPadding)),
+                stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            setAccessibilityElement(true)
+            setAccessibilityRole(.staticText)
+            setAccessibilityLabel(label)
+            applyChrome()
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyChrome()
+        }
+
+        private func applyChrome() {
+            let c = Theme.Captions.self
+            let style = Theme.style(dark: CoachTranscript.isDark(effectiveAppearance))
+            layer?.cornerRadius = Theme.cg(c.indicatorRadius)
+            layer?.cornerCurve = .continuous
+            layer?.backgroundColor = Theme.ns(c.indicatorFill(style: style).over(style.surface)).cgColor
+            layer?.borderWidth = Theme.cg(c.hairlineWidth)
+            layer?.borderColor = Theme.ns(c.hairline(style: style)).cgColor
+            dot.layer?.cornerRadius = Theme.cg(c.dotDiameter / 2)
+            var red = Theme.ns(c.dot(style: style)).cgColor
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                red = CardStyle.dynamic(c.dotColor) { base, _ in base }.cgColor
+            }
+            dot.layer?.backgroundColor = red
         }
     }
 
@@ -359,7 +433,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
                                 color: Self.color(.secondary), maxWidth: Self.outerWidth)
-        return [section, g1, gControls, g2, gJudge, g3, privacy, feedbackGroup()]
+        return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), privacy, feedbackGroup()]
     }
 
     /// Last, so everything above it lays out exactly as before.
@@ -427,6 +501,61 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         judgeStoppedNote.isHidden = stopped == nil
     }
 
+    /// Captions and saved transcripts: two opt-in switches, the folder, the saving indicator and
+    /// delete action, this call's speaker names and the cost meter's line.
+    private func transcriptGroup() -> Group {
+        captionsToggle.target = self
+        captionsToggle.action = #selector(captionsToggled(_:))
+        captionsToggle.setAccessibilityLabel(CoachCopy.captionsToggle)
+        savingToggle.target = self
+        savingToggle.action = #selector(savingToggled(_:))
+        savingToggle.setAccessibilityLabel(CoachCopy.saveToggle)
+        chooseFolderButton.target = self
+        chooseFolderButton.action = #selector(chooseFolder(_:))
+        chooseFolderButton.bezelStyle = .rounded
+        chooseFolderButton.controlSize = .small
+        deleteButton.target = self
+        deleteButton.action = #selector(deleteTranscript(_:))
+        deleteButton.bezelStyle = .rounded
+        deleteButton.controlSize = .small
+        // The path is one line, cut in the middle; the buttons beside it and the status keep their size.
+        folderPath.font = Theme.font(Theme.Settings.helperFont)
+        folderPath.textColor = Self.color(.secondary)
+        folderPath.lineBreakMode = .byTruncatingMiddle
+        folderPath.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        transcriptStatus.preferredMaxLayoutWidth = Self.innerWidth / 2
+        for (field, speaker) in [(youField, Speaker.me), (themField, Speaker.others)] {
+            field.placeholderString = CoachTranscript.speakerLabels.label(speaker)
+            field.font = Theme.font(Theme.Settings.itemFont)
+            field.target = self
+            field.action = #selector(speakerNamed(_:))
+            field.setAccessibilityLabel("\(CoachCopy.speakerNames): \(CoachTranscript.speakerLabels.label(speaker))")
+        }
+
+        let heading = Self.text(CoachCopy.transcriptSection, font: Theme.Settings.rowFont)
+        let captionsRow = Self.row(Self.text(CoachCopy.captionsToggle, font: Theme.Settings.itemFont), captionsToggle)
+        let captionsHelp = Self.text(CoachCopy.captionsHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
+        let savingRow = Self.row(Self.text(CoachCopy.saveToggle, font: Theme.Settings.itemFont), savingToggle)
+        let savingHelp = Self.text(CoachCopy.saveHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
+        let folderLabels = NSStackView(views: [Self.text(CoachCopy.folderLabel, font: Theme.Settings.itemFont), folderPath])
+        folderLabels.orientation = .vertical
+        folderLabels.alignment = .leading
+        folderLabels.spacing = 0
+        let folderRow = Self.row(folderLabels, chooseFolderButton)
+        let statusRow = Self.row(transcriptStatus, deleteButton)
+        let names = NSStackView(views: [youField, themField])
+        names.orientation = .horizontal
+        names.distribution = .fillEqually
+        names.spacing = CGFloat(Theme.Settings.groupSpacing)
+        let namesHelp = Self.text(CoachCopy.speakerNamesHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
+        let views: [NSView] = [heading, transcriptNote, captionsRow, captionsHelp, savingRow, savingHelp, folderRow, savingHolder,
+                               statusRow, Self.text(CoachCopy.speakerNames, font: Theme.Settings.itemFont), names, namesHelp, costLabel]
+        let g = Self.group(views)
+        for v in views where v !== heading && v !== savingHolder { pin(v, in: g) }
+        transcriptGroupView = g
+        return g
+    }
+
     private func appName(_ bundleId: String) -> String {
         if let t = coach.config.captureTargets.first(where: { $0.bundleId == bundleId }) { return t.name }
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
@@ -470,6 +599,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         keyStatus.isHidden = keyStatus.stringValue.isEmpty
         updateCallControls()
         updateJudge()
+        updateTranscript()
     }
 
     /// The toggle, and while it's on, what it still needs (checked, never asked; the Request access
@@ -482,6 +612,36 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         callControlsNote.stringValue = note
         callControlsNote.isHidden = note.isEmpty
         requestAccessButton.isHidden = !(needs.accessibility || !needs.automation.isEmpty)
+    }
+
+    private func updateTranscript() {
+        let t = coach.transcript
+        let usable = coach.transcriptKeyUsable
+        captionsToggle.state = t.captionsOn ? .on : .off
+        savingToggle.state = t.savingOn ? .on : .off
+        captionsToggle.isEnabled = usable
+        savingToggle.isEnabled = usable
+        transcriptNote.isHidden = usable
+        folderPath.stringValue = (t.folder.path as NSString).abbreviatingWithTildeInPath
+        let rec = t.live.recorder
+        savingHolder.isHidden = !rec.isSaving
+        switch rec.state {
+        case .saving: transcriptStatus.stringValue = ""
+        case .saved: transcriptStatus.stringValue = rec.lastURL == nil ? "" : CoachCopy.savedLast
+        case .deleted: transcriptStatus.stringValue = CoachCopy.transcriptDeleted
+        case .failed: transcriptStatus.stringValue = CoachCopy.saveFailed
+        case .off: transcriptStatus.stringValue = rec.lastURL == nil ? "" : CoachCopy.savedLast
+        }
+        transcriptStatus.isHidden = transcriptStatus.stringValue.isEmpty
+        deleteButton.isHidden = !t.canDelete
+        let inCall = t.live.inCall
+        for (field, speaker) in [(youField, Speaker.me), (themField, Speaker.others)] {
+            field.isEnabled = inCall
+            if !inCall { field.stringValue = "" }
+            field.placeholderString = t.live.labels.label(speaker)
+        }
+        costLabel.stringValue = t.costLine()
+        costLabel.isHidden = !usable
     }
 
     /// Under the toggle: problems with the stored key. A missing key is the GPT note, not an error.
@@ -544,6 +704,66 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let text = sender.stringValue
         sender.stringValue = ""
         coach.saveTypeSafeKey(text)
+        update()
+    }
+
+    @objc private func captionsToggled(_ sender: NSSwitch) {
+        withNotice(turningOn: sender.state == .on) { [weak self] on in
+            guard let self else { return }
+            self.coach.transcript.setCaptions(on, keyUsable: self.coach.transcriptKeyUsable)
+            self.update()
+        }
+    }
+
+    @objc private func savingToggled(_ sender: NSSwitch) {
+        withNotice(turningOn: sender.state == .on) { [weak self] on in
+            guard let self else { return }
+            self.coach.transcript.setSaving(on, keyUsable: self.coach.transcriptKeyUsable)
+            self.update()
+        }
+    }
+
+    /// The first time captions or saving turn on, the notice sheet asks first; "Not Now" leaves it off.
+    private func withNotice(turningOn: Bool, apply: @escaping (Bool) -> Void) {
+        guard turningOn, !coach.transcript.noticeSeen else { return apply(turningOn) }
+        let sheet = CoachNotice { [weak self] ok in
+            if ok { self?.coach.transcript.markNoticeSeen() }
+            self?.notice = nil
+            apply(ok)
+        }
+        notice = sheet
+        sheet.present(on: window)
+    }
+
+    @objc private func chooseFolder(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = coach.transcript.folder
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            self.coach.transcript.setFolder(url, keyUsable: self.coach.transcriptKeyUsable)
+            self.update()
+        }
+    }
+
+    @objc private func deleteTranscript(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = CoachCopy.deleteConfirmTitle
+        alert.informativeText = CoachCopy.deleteConfirmBody
+        alert.addButton(withTitle: CoachCopy.delete).hasDestructiveAction = true
+        alert.addButton(withTitle: CoachCopy.cancel)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.coach.transcript.deleteTranscript()
+            self?.update()
+        }
+    }
+
+    @objc private func speakerNamed(_ sender: NSTextField) {
+        coach.transcript.rename(sender === youField ? .me : .others, to: sender.stringValue)
         update()
     }
 

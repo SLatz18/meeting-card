@@ -98,12 +98,16 @@ final class RecordingDelegate: CoachSessionDelegate {
     var indicators: [CoachIndicator] = []
     var cues: [Cue] = []
     var problems: [CoachSession.Problem] = []
+    var captions: [CaptionEvent] = []
+    var meters: [CostReading] = []
 
     func coachSessionDidChange(_ session: CoachSession) {
         if indicators.last != session.indicator { indicators.append(session.indicator) }
     }
     func coachSession(_ session: CoachSession, didShow cue: Cue) { cues.append(cue) }
     func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) { problems.append(problem) }
+    func coachSession(_ session: CoachSession, didCaption event: CaptionEvent) { captions.append(event) }
+    func coachSession(_ session: CoachSession, didMeter reading: CostReading) { meters.append(reading) }
 }
 
 /// Engine double that records calls and lets tests emit suggestions.
@@ -153,6 +157,14 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
 
     func stopJudge(_ failure: JudgeFailure) {
         delegate?.engine(self, judgeStopped: failure)
+    }
+
+    func emitCaption(_ e: CaptionEvent) {
+        delegate?.engine(self, caption: e)
+    }
+
+    func emitMeter(_ r: CostReading) {
+        delegate?.engine(self, meter: r)
     }
 }
 
@@ -312,6 +324,8 @@ final class FakeTranscriber: TranscriptionSession, @unchecked Sendable {
     var failSend = false
     /// Billed seconds reported (as a usage event) for each commit; nil = the API reports none.
     var billedPerCommit: Double?
+    /// Emit each scripted line word by word as realtime deltas before its final text.
+    var deltas = false
     private(set) var closed = false
 
     init(speaker: Speaker, script: [String], onEvent: @escaping @Sendable (TranscriptEvent) -> Void) {
@@ -331,9 +345,12 @@ final class FakeTranscriber: TranscriptionSession, @unchecked Sendable {
     }
 
     func commit(refT: TimeInterval) async throws {
-        let text = lock.withLock { () -> String? in
+        let (text, n) = lock.withLock { () -> (String?, Int) in
             _commits.append(refT)
-            return script.isEmpty ? nil : script.removeFirst()
+            return (script.isEmpty ? nil : script.removeFirst(), _commits.count)
+        }
+        if deltas, let text {
+            for word in text.split(separator: " ") { onEvent(.delta(speaker, word + " ", item: "item\(n)")) }
         }
         if let billedPerCommit { onEvent(.usage(speaker, billedPerCommit)) }
         if let text { onEvent(.text(speaker, text, refT: refT)) }

@@ -15,8 +15,128 @@ import MeetingCardCore
 ///                                                 end states, then quit
 /// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
 /// surface (chip, the Muted chip, glow, Settings, Settings with Use Zoom/Meet controls on, onboarding,
-/// status menu off / listening / muted, feedback notice) for a side-by-side design review.
+/// status menu off / listening / muted, feedback notice, the caption feed as it sits in a card, the
+/// saving indicator, the transcript notice and transcript settings) for a side-by-side design review.
+/// Caption text is synthetic and nothing is saved (an in-memory transcript store).
 enum UISnapshots {
+    /// Synthetic caption lines for the screenshots.
+    static let demoCaptions: [CaptionEvent] = [
+        .final(.others, text: "Shall we start with the timeline for the next release?"),
+        .final(.me, text: "Yes, the first draft is ready for review."),
+        .partial(.others, item: "demo", text: "Great, let's go through it section by"),
+    ]
+
+    /// Holds transcript text in memory for the screenshots; never touches disk.
+    final class MemoryTranscriptStore: TranscriptStore {
+        var files: [URL: String] = [:]
+        func prepare(folder: URL) throws {}
+        func exists(_ url: URL) -> Bool { files[url] != nil }
+        func write(_ text: String, to url: URL) throws { files[url] = text }
+        func remove(_ url: URL) throws { files[url] = nil }
+    }
+
+    /// The caption feed (CaptionFeedView at the card's width on the card surface: lines, lines while
+    /// saving, before anyone talks, the cost-cap note, the indicator alone), then the one-time notice and
+    /// the Settings group with captions and saving on during a call. The feed has no window and
+    /// renders directly; the notice and Settings are shown briefly so AppKit draws them.
+    @MainActor
+    static func transcriptShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
+                                done: @escaping () -> Void) {
+        let suite = AppIdentity.current.scoped("transcript-snapshots")
+        guard let defaults = UserDefaults(suiteName: suite) else { return done() }
+        defaults.removePersistentDomain(forName: suite)
+        let live = LiveTranscript(settings: .init(captions: true, saving: true, folder: CoachTranscript.defaultFolder, keyUsable: true),
+                                  store: MemoryTranscriptStore(), captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines),
+                                  labels: CoachTranscript.speakerLabels)
+        live.callStarted()
+        demoCaptions.forEach { live.receive($0) }
+        let feed = CaptionFeedModel()
+        CoachTranscript.update(feed, from: live)
+        live.callEnded()
+        let header = CoachCopy.captionsHeader
+        let feeds: [(String, CaptionFeedModel)] = [
+            ("caption-feed", CaptionFeedModel(header: header, lines: feed.lines, footnote: CoachCopy.captionsNote)),
+            ("caption-feed-saving", CaptionFeedModel(header: header, lines: feed.lines, footnote: feed.footnote,
+                                                     savingLabel: feed.savingLabel)),
+            ("caption-feed-empty", CaptionFeedModel(header: header, placeholder: CoachCopy.captionsEmpty,
+                                                    footnote: CoachCopy.captionsNote)),
+            ("caption-feed-stopped", CaptionFeedModel(header: header, note: CoachCopy.captionsStopped,
+                                                      footnote: CoachCopy.captionsNote)),
+            ("saving-indicator", CaptionFeedModel(savingLabel: CoachCopy.savingNow)),
+        ]
+        // The card layout, at the coach card's captions-area size (what the coach card hosts).
+        let cardFeeds: [(String, CaptionFeedModel)] = [
+            ("caption-feed-card", CaptionFeedModel(lines: feed.lines)),
+            ("caption-feed-card-empty", CaptionFeedModel(placeholder: CoachCopy.captionsEmpty)),
+        ]
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        for (name, model) in cardFeeds {
+            let img = CaptionFeedSnapshot.cardImage(model, dark: tag == "dark", scale: scale)
+            let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
+            controller.log("coach shot \(name)-\(tag) ok=\(ok)")
+            packet(name, img)
+        }
+        for (name, model) in feeds {
+            let img = CaptionFeedSnapshot.image(model, dark: tag == "dark", scale: scale)
+            let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
+            controller.log("coach shot \(name)-\(tag) ok=\(ok)")
+            packet(name, img)
+        }
+        func finish() {
+            defaults.removePersistentDomain(forName: suite)
+            done()
+        }
+        func settingsShot() {
+            for key in [CoachController.Keys.onboarded, CoachController.Keys.enabled, CoachTranscript.Keys.captions,
+                        CoachTranscript.Keys.saveTranscripts, CoachTranscript.Keys.noticeSeen] { defaults.set(true, forKey: key) }
+            // Shot with the other opt-ins at their defaults: Use Zoom/Meet controls off, GPT as the cue judge.
+            defaults.set(false, forKey: CoachController.Keys.callControls)
+            defaults.set(JudgeProviderKind.gpt.rawValue, forKey: CoachController.Keys.judgeProvider)
+            let keychain = KeychainStore(service: suite, account: "none")
+            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false,
+                                                   transcriptStore: MemoryTranscriptStore()) else { return finish() }
+            coach.service?.setEnabled(false)
+            coach.keyStored = true
+            coach.transcript.sync(keyUsable: coach.transcriptKeyUsable)
+            coach.transcript.callStarted()
+            demoCaptions.forEach { coach.transcript.receive($0) }
+            coach.transcript.record(CostReading(transcribeUsd: 0.0085, judgeUsd: 0.0012, budgetUsd: 1, billedAudioS: 30))
+            let w = CoachSettingsWindow(coach: coach)
+            w.update()
+            w.window.appearance = NSApp.effectiveAppearance
+            w.window.center()
+            w.window.orderFrontRegardless()
+            controller.schedule(0.5, repeats: false) {
+                MainActor.assumeIsolated {
+                    let img = w.transcriptGroupView.flatMap { viewImage($0, in: w.window) }
+                    let ok = img.map { Card.writePNG($0, "\(dir)/transcript-settings-\(tag).png") } ?? false
+                    controller.log("coach shot transcript-settings-\(tag) ok=\(ok)")
+                    packet("transcript-settings", img)
+                    w.window.orderOut(nil)
+                    coach.transcript.callEnded()
+                    finish()
+                }
+            }
+        }
+        func noticeShot() {
+            let notice = CoachNotice { _ in }
+            notice.window.appearance = NSApp.effectiveAppearance
+            notice.window.center()
+            notice.window.orderFrontRegardless()
+            controller.schedule(0.5, repeats: false) {
+                MainActor.assumeIsolated {
+                    let img = notice.window.contentView.flatMap { layerImage($0, scale: notice.window.backingScaleFactor > 0 ? notice.window.backingScaleFactor : 2) }
+                    let ok = img.map { Card.writePNG($0, "\(dir)/notice-\(tag).png") } ?? false
+                    controller.log("coach shot notice-\(tag) ok=\(ok)")
+                    packet("notice", img)
+                    notice.window.orderOut(nil)
+                    settingsShot()
+                }
+            }
+        }
+        noticeShot()
+    }
+
     static func demoChip(_ env: [String: String]) -> CoachChip? {
         let label = env["MEETING_CARD_COACH_CHIP_LABEL"]
         switch env["MEETING_CARD_COACH_CHIP"] {
@@ -85,8 +205,10 @@ enum UISnapshots {
                             packet("glow-\(name)", img)
                         }
                         settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
-                            menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
-                            noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
+                            transcriptShots(dir: dir, tag: tag, controller: controller, packet: packet) {
+                                menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
+                                noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
+                            }
                         }
                     }
                 }
@@ -121,8 +243,9 @@ enum UISnapshots {
     static let roseNudge = CoachNudge(kind: .interrupt, tone: .rose)
 
     static func shotState(_ st: CoachCardState.Status, _ m: MuteControlPresentation, _ n: CoachNudge?, _ mode: CoachCardState.Mode,
-                          ic: Bool = false) -> CoachCardState {
-        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, nudge: n, mode: mode, increasedContrast: ic)
+                          ic: Bool = false, saving: Bool = false) -> CoachCardState {
+        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, nudge: n, mode: mode, increasedContrast: ic,
+                       savingBadge: saving ? CoachCopy.savingNow : nil)
     }
 
     static func disabledMute(_ r: MuteDisabledReason) -> MuteControlPresentation { CoachMuteCopy.presentation(reason: r, isMuted: false) }
@@ -137,6 +260,9 @@ enum UISnapshots {
         ("card-nudge-amber", shotState(.listening, liveMute, amberNudge, .card), false),
         ("card-nudge-rose", shotState(.listening, liveMute, roseNudge, .card), false),
         ("card-increased-contrast", shotState(.listening, liveMute, amberNudge, .card, ic: true), false),
+        // Save transcripts on (#13c): the saving badge on the status line, and still there under a nudge.
+        ("card-saving", shotState(.listening, liveMute, nil, .card, saving: true), false),
+        ("card-saving-nudge", shotState(.listening, liveMute, amberNudge, .card, saving: true), false),
         ("pill-idle", shotState(.idle, liveMute, nil, .pill), false),
         ("pill-muted", shotState(.muted, mutedMute, nil, .pill), false),
         ("pill-paused", shotState(.paused, liveMute, nil, .pill), false),

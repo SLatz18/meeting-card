@@ -459,6 +459,17 @@ public enum Theme {
         public static var minimizeButton: Frame {
             Frame(x: width - trailing - iconButton, y: height - vertical - rowHeight, width: iconButton, height: iconButton)
         }
+        /// The saving badge (#13c) at the right end of the status band, in band coordinates: the
+        /// chip's inner control height and radius, inset like it; the caption indicator's padding,
+        /// dot and gap around the label's own width, so the label never clips (the status text
+        /// gives way instead).
+        public static func savingBadge(labelWidth: Double) -> Frame {
+            let c = Captions.self
+            let h = Coach.pauseButtonSize
+            let w = c.indicatorPadding + c.dotDiameter + c.indicatorGap + labelWidth + c.indicatorPadding
+            return Frame(x: statusRow.width - Coach.controlInset - w, y: (rowHeight - h) / 2, width: w, height: h)
+        }
+        public static var savingBadgeRadius: Double { Coach.pauseButtonRadius }
         public static var captions: Frame {
             Frame(x: leading, y: vertical + rowHeight + rowGap, width: width - leading - trailing, height: captionsHeight)
         }
@@ -516,5 +527,86 @@ public enum Theme {
             let first = pillWidth - padding - buttonsWidth(n)
             return (0..<n).map { first + Double($0) * (button + buttonGap) }
         }
+    }
+
+    /// Live captions, drawn inside the reminder card by `CaptionFeedView` (no surface or window of
+    /// their own; the card supplies both). Lines use the card's text inset and type scale: speaker
+    /// labels in the button font (the user's own in the accent), words in the body font. The saving
+    /// indicator is the card's secondary control (control height, radius, Ignore fill and hairline)
+    /// with a critical-red dot one control gap wide.
+    public enum Captions {
+        /// The width a card gives its content (snapshots render the feed at this width).
+        public static let cardWidth = CardLayout.W
+        /// Leading and trailing inset, like the card's Ends and Next up lines.
+        public static let inset = CardStyle.Spacing.text
+        public static let lineGap = CardStyle.Spacing.control / 2
+        public static let speakerGap = CardStyle.Spacing.control
+        public static let speakerFont = CardStyle.Typography.button
+        public static let textFont = CardStyle.Typography.body
+        public static let noteFont = CardStyle.Typography.caption
+        /// "Live captions": the card's button type in the primary role.
+        public static let headerFont = CardStyle.Typography.button
+        public static let header = CardStyle.Text.primary
+        /// The memory-only / saving line under the captions: caption type, tertiary role.
+        public static let footnoteFont = CardStyle.Typography.caption
+        public static let footnote = CardStyle.Text.tertiary
+        /// Caption lines shown at once (the in-memory buffer holds no more).
+        public static let visibleLines = 3
+        public static let indicatorHeight = CardStyle.Size.control
+        public static let indicatorRadius = CardStyle.Radius.control
+        public static let indicatorPadding = CardStyle.Spacing.control
+        public static let indicatorFont = CardStyle.Typography.caption
+        /// Dot to label, like the chip's glyph gap.
+        public static let indicatorGap = CardStyle.Spacing.control / 2
+        public static let dotDiameter = CardStyle.Spacing.control
+        public static let hairlineWidth = CardStyle.Stroke.hairline
+        /// Indicator to the first caption line.
+        public static let stackGap = CardStyle.Spacing.control
+        /// The cost meter's line in Settings: caption type in the secondary text role.
+        public static let costFont = CardStyle.Typography.caption
+        public static let cost = CardStyle.Text.secondary
+        public static func indicatorFill(style: CardStyle) -> RGBA { style.controlFill(.normal) }
+        public static func hairline(style: CardStyle) -> RGBA { style.hairline }
+        public static func dot(style: CardStyle) -> RGBA { style.critical }
+        /// The dot's live system color (AppKit surfaces draw it dynamically, like the glow).
+        public static let dotColor = CardStyle.criticalColor
+        public static let text = CardStyle.Text.primary
+        public static let speaker = CardStyle.Text.secondary
+        /// The user's own label: the card's accent (Next up blue).
+        public static let ownSpeaker = CardStyle.Text.accent
+        public static let note = CardStyle.Text.secondary
+        public static let savingLabel = CardStyle.Text.primary
+        /// Status menu entries for the saved transcript.
+        public static let menuSymbols = (saving: "record.circle", delete: "trash")
+
+        /// In the coach card's captions area (`CoachCard.captions`): one row per caption line of the
+        /// reminder card, caption type, no header or indicator (the card has its own status row); the
+        /// footnote takes the last row when set.
+        public static var cardArea: CoachCard.Frame { CoachCard.captions }
+        public static let cardRowHeight = Metrics.captionHeight
+        public static let cardRows = Int(CoachCard.captionsHeight / Metrics.captionHeight)
+        /// Rows are spaced by their height (the card's caption line), not by a gap.
+        public static let cardLineGap: Double = 0
+        public static let cardTextFont = CoachCard.captionsFont
+        public static let cardSpeakerFont = Theme.FontSpec(CardStyle.Typography.caption.size, CardStyle.Typography.button.weight)
+    }
+
+    /// The one-time transcription notice: a card-shaped sheet (card width, surface, text insets) with
+    /// the card's title and body type and its two buttons (secondary = Ignore, primary = Join).
+    public enum Notice {
+        public static let width = CardLayout.W
+        public static let padding = (h: CardStyle.Spacing.leading, v: CardStyle.Spacing.stack)
+        public static let spacing = CardStyle.Spacing.control
+        public static let titleFont = CardStyle.Typography.title
+        public static let bodyFont = CardStyle.Typography.body
+        public static let draftFont = CardStyle.Typography.caption
+        public static let buttonFont = CardStyle.Typography.button
+        public static let buttonHeight = CardStyle.Size.control
+        public static let buttonRadius = CardStyle.Radius.control
+        public static let buttonGap = CardStyle.Spacing.control
+        public static let buttonPadding = CardStyle.Spacing.leading
+        public static func surface(style: CardStyle) -> RGBA { style.surface }
+        public static let body = CardStyle.Text.secondary
+        public static let draft = CardStyle.Text.warning
     }
 }

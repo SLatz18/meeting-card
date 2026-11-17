@@ -78,6 +78,53 @@ enum CoachCopy {
         return "Judging stopped for this call: \(why)\(code).\(advice) The transcript rules and on-device cues still run."
     }
 
+    // MARK: Final copy (VP Comms): onboarding privacy and the caption feed
+
+    static let onboardingPrivacyBody = "While the coach is on, call audio goes to OpenAI on your own API key. Nothing is saved unless you choose to. Live captions are optional and stay in memory only. Saving a transcript is a separate choice. Your key stays in the Keychain."
+    static let captionsYou = "You"
+    static let captionsThem = "Them"
+    static let captionsHeader = "Live captions"
+    static let captionsEmpty = "Captions will show here once someone talks."
+    static let captionsNote = "Kept in memory only. Not saved."
+    /// Only while the Save transcripts switch is on.
+    static let captionsNoteSaving = "Saving a transcript for this call."
+
+    // MARK: DRAFT: captions and saved transcripts (not yet copy-reviewed; edit before release)
+
+    /// Set while any string below is still a draft; the notice sheet shows a draft marker while true.
+    static let transcriptCopyIsDraft = true
+    static let transcriptSection = "Captions and transcript"
+    static let captionsToggle = "Live captions"
+    static let captionsHelp = "Shows what's being said on the meeting card during your call. Captions stay in memory and are gone when the call ends."
+    static let saveToggle = "Save transcripts"
+    static let saveHelp = "Saves one text file per call, with times and speaker labels. Audio is never saved."
+    static let transcriptNeedsKey = "Needs an OpenAI API key: captions and transcripts use the same transcription as the GPT cues."
+    static let folderLabel = "Folder"
+    static let chooseFolder = "Choose\u{2026}"
+    static let savingNow = "Saving transcript"
+    static let savedLast = "Last transcript saved"
+    static let saveFailed = "Couldn't save the transcript. Saving is off for this call."
+    static let transcriptDeleted = "Transcript deleted. Nothing more is saved for this call."
+    static let deleteTranscript = "Delete Transcript"
+    static let deleteConfirmTitle = "Delete this transcript?"
+    static let deleteConfirmBody = "The file is removed from your Mac. This can't be undone."
+    static let delete = "Delete"
+    static let cancel = "Cancel"
+    static let speakerNames = "Speaker names for this call"
+    static let speakerNamesHelp = "Rename \u{201C}You\u{201D} or \u{201C}Them\u{201D} for this call only. Names are kept only in a saved transcript."
+    static let captionsStopped = "Captions stopped: this call reached its cost limit. On-device cues continue."
+    static let captionsStoppedError = "Captions stopped: OpenAI transcription is unavailable. On-device cues continue."
+    static let costLine = "This call: %@ of %@ (transcription %@, GPT cues %@). Captions and transcript add %@."
+    static let costNone = "This call: no OpenAI usage yet."
+    static let menuSaving = "Saving transcript"
+    static let menuDeleteTranscript = "Delete Transcript\u{2026}"
+
+    static let noticeDraftMarker = "Draft wording"
+    static let noticeTitle = "Others on this call will be transcribed"
+    static let noticeBody = "Captions and saved transcripts include what everyone on the call says, not just you. The audio is sent to OpenAI for transcription using your API key. You are responsible for telling the other people on the call and for following the laws where you and they are, and any policies that apply to you, such as your employer's."
+    static let noticeConfirm = "I Understand, Turn On"
+    static let noticeCancel = "Not Now"
+
     struct Screen {
         let title: String
         let body: String
@@ -90,7 +137,7 @@ enum CoachCopy {
                body: "A quiet nudge on your calls. A small card shows a short tip. It turns red if you interrupt or talk over someone, and amber if you miss a question. Only you see it.",
                primary: "Next", secondary: nil),
         Screen(title: "Your audio stays yours",
-               body: "While the coach is on, call audio goes to OpenAI on your own API key. Nothing is saved: no transcripts, no stats, no recaps. Your key stays in the Keychain.",
+               body: CoachCopy.onboardingPrivacyBody,
                primary: "Next", secondary: nil),
         Screen(title: "Turn it on",
                body: "Turn it on and allow mic and system audio access. Add your OpenAI API key for GPT cues; without one, the on-device cues still run. The coach starts by itself when a call starts, and you can pause it anytime from the coach chip on the meeting card or the coach menu in the menu bar.",

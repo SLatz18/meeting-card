@@ -1,9 +1,11 @@
 import AppKit
 import MeetingCardCore
+import SwiftUI
 
-/// The coach card's captions area. #13c's `CaptionFeedView(model:)` drops in by providing a slot
-/// whose `makeView()` returns it; until then the placeholder shows the empty-state line. The card
-/// asks once per presentation and keeps the view (it moves between card layouts, never rebuilt).
+/// The coach card's captions area. The app's card uses `CaptionFeedSlot` (#13c's caption feed);
+/// the placeholder shows the empty-state line where no feed is wired (the card's own snapshots).
+/// The card asks once per presentation and keeps the view (it moves between card layouts, never
+/// rebuilt).
 @MainActor
 protocol CoachCaptionsSlot: AnyObject {
     func makeView() -> NSView
@@ -18,5 +20,22 @@ final class CoachCaptionsPlaceholder: CoachCaptionsSlot {
         f.isSelectable = false
         f.setAccessibilityLabel(CoachCardCopy.Captions.empty)
         return f
+    }
+}
+
+/// #13c's live captions in the card: `CaptionFeedView`'s card layout over `CoachTranscript.feed`,
+/// which the transcript keeps current (empty while captions are off).
+@MainActor
+final class CaptionFeedSlot: CoachCaptionsSlot {
+    let model: CaptionFeedModel
+
+    init(model: CaptionFeedModel) {
+        self.model = model
+    }
+
+    func makeView() -> NSView {
+        let v = NSHostingView(rootView: CaptionFeedView(model: model, layout: .card))
+        v.sizingOptions = []
+        return v
     }
 }

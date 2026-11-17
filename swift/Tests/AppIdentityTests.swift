@@ -46,6 +46,7 @@ final class AppIdentityTests: XCTestCase {
         let home = NSHomeDirectory()
         func files(_ id: AppIdentity) -> [String] {
             let paths = [AppPaths.production(for: id), AppPaths.fixture(for: id)].flatMap { [$0.logFile.path, $0.stateDir.path] }
+                + [AppPaths.transcripts(for: id).path]
             let loginItem = id.loginItemAppName.map { [home + "/Applications/" + $0] } ?? []
             return (paths + loginItem).map { $0.lowercased() }
         }
@@ -60,7 +61,8 @@ final class AppIdentityTests: XCTestCase {
 
         // Defaults domains (the standard domain is the bundle id; suites are scoped) and Keychain services.
         func names(_ id: AppIdentity) -> Set<String> {
-            Set([id.bundleId, id.scoped("snapshots"), id.keychainService, id.scoped("gws")].map { $0.lowercased() })
+            Set([id.bundleId, id.scoped("snapshots"), id.scoped("transcript-snapshots"), id.keychainService, id.scoped("gws")]
+                .map { $0.lowercased() })
         }
         XCTAssertTrue(names(.release).isDisjoint(with: names(.test)), "\(names(.release).intersection(names(.test)))")
 
@@ -68,6 +70,20 @@ final class AppIdentityTests: XCTestCase {
         for p in [home + "/Applications/MeetingCardSwift.app", home + "/Applications/MeetingCardSwift-Test.app"] {
             XCTAssertFalse(LoginItem.shouldRegister(bundlePath: p, fixture: false, home: home, identity: .test), p)
         }
+    }
+
+    /// Saved transcripts (opt-in) default to a folder named by the identity; the user's choice and
+    /// the Save transcripts flag live in the identity's defaults domain (CoachController's `.standard`).
+    func testTranscriptsFolderFollowsIdentity() throws {
+        let home = NSHomeDirectory()
+        XCTAssertEqual(AppPaths.transcripts(for: .release).path, home + "/Library/Application Support/MeetingCard/Transcripts")
+        XCTAssertEqual(AppPaths.transcripts(for: .test).path, home + "/Library/Application Support/MeetingCard-Test/Transcripts")
+        XCTAssertEqual(AppIdentity(bundleId: "com.example.other").transcriptsDirName, "MeetingCard-com.example.other")
+        let transcript = try read("App/CoachTranscript.swift")
+        XCTAssertTrue(transcript.contains("static var defaultFolder: URL { AppPaths.transcripts(for: .current) }"))
+        XCTAssertTrue(transcript.contains("init(defaults: UserDefaults, store:"), "settings in the controller's defaults")
+        XCTAssertTrue(try read("App/CoachController.swift").contains("transcript = CoachTranscript(defaults: defaults"))
+        XCTAssertTrue(try read("App/UISnapshots.swift").contains("AppIdentity.current.scoped(\"transcript-snapshots\")"))
     }
 
     func testAppUsesTheCurrentIdentity() throws {

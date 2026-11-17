@@ -18,6 +18,7 @@ The test build has its own identity, and nothing else changes:
 | Keychain service (account `OPENAI_API_KEY`) | `com.slatz.meetingcard.swift.openai` | `com.slatz.meetingcard.swift.test.openai` |
 | Log | `~/Library/Logs/MeetingCardSwift.log` | `~/Library/Logs/MeetingCardSwift-Test.log` |
 | State | `~/Library/Application Support/MeetingCardSwift/` | `~/Library/Application Support/MeetingCardSwift-Test/` |
+| Saved transcripts (Save transcripts on, default folder) | `~/Library/Application Support/MeetingCard/Transcripts/` | `~/Library/Application Support/MeetingCard-Test/Transcripts/` |
 | Login item | `~/Applications/MeetingCardSwift.app` only | never |
 
 macOS asks for Microphone and Screen & System Audio Recording again for "MeetingCard (Test)"; grant them there.
@@ -92,8 +93,16 @@ Call Coach while off).
 | CC4 | All | Pill and nudges | Minimize the card, then trigger an amber and a red cue, with VoiceOver on | The pill tints amber, then rose, and widens to show the nudge words for about 4.5 s; VoiceOver reads the nudge line; Expand brings the card back |
 | CC5 | Zoom desktop | Hidden in share | Share the full screen in Zoom while the card, the pill, a nudge and a morph (Join) show | The far side never sees the coach card in any state |
 | K3 | All | Nothing read is kept | During ZC2–MD2, `log show --predicate 'subsystem == "com.listenmore.kit"' --last 10m` and the MeetingCard log | No meeting or page titles, names, chat, URLs or menu labels anywhere |
-| K1 | All | Keychain and logs | Inspect the Keychain and `log show --predicate 'subsystem == "com.listenmore.kit"'` | Key only in the Keychain; no transcript text or key in logs; no files written |
+| K1 | All | Keychain and logs | Inspect the Keychain and `log show --predicate 'subsystem == "com.listenmore.kit"'` | Key only in the Keychain; no transcript text or key in logs; no files written (saving off) |
 | K2 | All | Keychain caveat | Keychain Access → login → the `com.slatz.meetingcard.swift.test.openai` item | Item is in the **login** keychain. Expected until the app is properly signed (see below), not a failure |
+| N1 | All | Notice, once | Settings → Captions and transcript: turn on Live captions, choose Not Now; turn it on again, choose I Understand; then turn on Save transcripts | Notice sheet shows on the first two attempts (Not Now leaves the switch off), not after it was accepted |
+| X1 | Zoom desktop | Captions in the coach card | Captions on, join a call, both sides talk; then turn on Save transcripts and repeat | The coach card's captions area shows up to three lines labelled You and Them, newest last; gone when the call ends; no separate caption window appears. With Save transcripts on, a **Saving transcript** badge sits at the right of the status line for the whole call (also during a nudge), unclipped in light and dark; with it off, no badge |
+| X3 | All | Captions need a key | Remove the key | Both switches are disabled with the needs-a-key note; no captions appear in a call |
+| X4 | All | Speaker names | During a call, type a name for Them in Settings and press Return | Caption lines and the saved file use the name; next call is back to Them |
+| T2 | All | Saving off writes nothing | Captions on, saving off, run a call; then `ls ~/Library/Application\ Support/MeetingCard-Test/Transcripts` | Folder absent or unchanged; no other new files from the app |
+| T3 | All | Saving on | Saving on (default folder `MeetingCard-Test/Transcripts`, then a chosen folder), run a call | Saving indicator shows during the call; exactly one `Call <date> <time>.md` per call in the folder, mode `-rw-------`, with times and speaker labels; no audio files anywhere |
+| T4 | All | Delete | Settings → Delete Transcript (during a call, then after one) | File removed; during a call, saving stops for that call |
+| T5 | All | Cost cap | Set a tiny `budget_usd_per_call` in a dev build, run a call | Captions show they stopped, the indicator goes away, local cues still fire |
 
 ### Keychain caveat (read before K1/K2)
 The app asks for the key to be kept "on this device only, while unlocked" (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`).

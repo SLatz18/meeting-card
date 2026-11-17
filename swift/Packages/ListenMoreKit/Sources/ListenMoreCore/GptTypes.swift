@@ -226,4 +226,29 @@ public struct CostTracker: Equatable {
         guard let budget else { return false }
         return totalUsd >= budget
     }
+
+    public var reading: CostReading {
+        CostReading(transcribeUsd: transcribeUsd, judgeUsd: judgeUsd, budgetUsd: budget, billedAudioS: billedAudioS)
+    }
+}
+
+/// The per-call cost meter's lines, for a host to show. Numbers only.
+public struct CostReading: Equatable, Sendable {
+    public var transcribeUsd: Double
+    public var judgeUsd: Double
+    public var budgetUsd: Double?
+    public var billedAudioS: Double
+
+    public init(transcribeUsd: Double = 0, judgeUsd: Double = 0, budgetUsd: Double? = nil, billedAudioS: Double = 0) {
+        self.transcribeUsd = transcribeUsd
+        self.judgeUsd = judgeUsd
+        self.budgetUsd = budgetUsd
+        self.billedAudioS = billedAudioS
+    }
+
+    public var totalUsd: Double { transcribeUsd + judgeUsd }
+
+    /// Captions and the saved transcript reuse the cue transcription: no extra API calls, so they add
+    /// nothing to the bill. Kept as its own line so the meter says so.
+    public var transcriptUsd: Double { 0 }
 }

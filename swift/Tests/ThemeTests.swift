@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import MeetingCardCore
 
@@ -249,11 +250,68 @@ final class ThemeTests: XCTestCase {
         XCTAssertTrue(controller.contains("note(CoachCopy.coachMuted, Theme.CallControls.mutedSymbol)"))
     }
 
+    /// Captions sit inside the card on its tokens: the card's text inset and type scale, the
+    /// saving indicator as the card's secondary control; the notice is card-shaped.
+    func testCaptionsAndNoticeDeriveFromCardStyle() {
+        let c = Theme.Captions.self
+        XCTAssertEqual(c.cardWidth, Theme.Metrics.cardWidth)
+        XCTAssertEqual(c.inset, Theme.Metrics.textInset)
+        XCTAssertEqual(c.textFont, Theme.Fonts.body)
+        XCTAssertEqual(c.speakerFont, Theme.Fonts.button)
+        XCTAssertEqual(c.noteFont, Theme.Fonts.caption)
+        XCTAssertEqual(c.indicatorHeight, Theme.Coach.height)
+        XCTAssertEqual(c.indicatorRadius, Theme.Coach.radius)
+        XCTAssertEqual(c.indicatorGap, Theme.Coach.glyphGap, "dot to label, like the chip's glyph to label")
+        XCTAssertEqual(c.hairlineWidth, Theme.Metrics.buttonHairline)
+        XCTAssertEqual(c.lineGap, CardStyle.Spacing.control / 2)
+        XCTAssertEqual(c.ownSpeaker, .accent)
+        XCTAssertEqual(c.dotColor, CardStyle.criticalColor)
+        XCTAssertEqual(c.costFont, CardStyle.Typography.caption)
+        XCTAssertEqual(c.cost, .secondary)
+        XCTAssertEqual(c.cardArea, Theme.CoachCard.captions, "the coach card's captions area")
+        XCTAssertEqual(Double(c.cardRows) * c.cardRowHeight, Theme.CoachCard.captionsHeight)
+        XCTAssertEqual(c.cardRowHeight, Theme.Metrics.captionHeight)
+        XCTAssertEqual(c.cardTextFont, Theme.CoachCard.captionsFont)
+        XCTAssertEqual(c.cardSpeakerFont, Theme.FontSpec(CardStyle.Typography.caption.size, CardStyle.Typography.button.weight))
+        let n = Theme.Notice.self
+        XCTAssertEqual(n.width, Theme.Metrics.cardWidth)
+        XCTAssertEqual(n.titleFont, Theme.Fonts.title)
+        XCTAssertEqual(n.bodyFont, Theme.Fonts.body)
+        XCTAssertEqual(n.buttonFont, Theme.Fonts.button)
+        XCTAssertEqual(n.buttonHeight, Theme.Metrics.buttonHeight)
+        XCTAssertEqual(n.buttonRadius, Theme.Metrics.buttonRadius)
+        for dark in [false, true] {
+            let t = CardStyle.for(dark: dark)
+            XCTAssertEqual(c.indicatorFill(style: t), Theme.Coach.fill(style: t), "the chip's fill")
+            XCTAssertEqual(c.hairline(style: t), t.hairline)
+            XCTAssertEqual(c.dot(style: t), t.critical)
+            XCTAssertEqual(n.surface(style: t), t.surface)
+        }
+    }
+
+    /// The saving badge sits inside the coach card's status row at the card's width, sized to its
+    /// label so it never clips, and leaves the status text its start (glyph and gap first).
+    func testSavingBadgeFitsTheStatusRow() {
+        let k = Theme.CoachCard.self
+        let field = NSTextField(labelWithString: "Saving transcript")
+        field.font = .systemFont(ofSize: CGFloat(Theme.Captions.indicatorFont.size))
+        let label = Double(field.intrinsicContentSize.width.rounded(.up))
+        let b = k.savingBadge(labelWidth: label)
+        XCTAssertEqual(b.width, Theme.Captions.indicatorPadding * 2 + Theme.Captions.dotDiameter + Theme.Captions.indicatorGap + label,
+                       accuracy: 1e-9, "the label's whole width")
+        XCTAssertEqual(b.maxX, k.statusRow.width - Theme.Coach.controlInset, accuracy: 1e-9)
+        XCTAssertEqual(b.height, Theme.Coach.pauseButtonSize)
+        XCTAssertEqual(b.y * 2 + b.height, k.rowHeight, accuracy: 1e-9, "centred in the row")
+        XCTAssertGreaterThan(b.x, k.bandInset + k.glyphSize + k.glyphGap + CardStyle.Spacing.control, "room for the status text")
+        XCTAssertEqual(k.savingBadgeRadius, Theme.Coach.pauseButtonRadius)
+        XCTAssertLessThanOrEqual(k.statusRow.maxX + k.rowGap, k.minimizeButton.x + 1e-9, "inside the card, clear of Minimize")
+    }
+
     /// The coach UI files carry no literal sizes, radii or colors of their own.
     func testCoachUIHasNoOneOffValues() throws {
         let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
         for file in ["CoachChip.swift", "CoachSettingsWindow.swift", "CoachController.swift", "CoachCardView.swift",
-                     "CoachCardPanel.swift", "CoachCaptions.swift"] {
+                     "CoachCardPanel.swift", "CoachCaptions.swift", "CoachTranscript.swift", "CoachNotice.swift"] {
             let src = try String(contentsOf: app.appendingPathComponent(file), encoding: .utf8)
             for bad in ["pointSize: 1", "pointSize: 2", "cornerRadius = 1", "spacing = 1", "spacing = 8", "constant: 1",
                         "srgbRed:", "white: 0.", ".systemRed", ".secondaryLabelColor", ".tertiaryLabelColor",

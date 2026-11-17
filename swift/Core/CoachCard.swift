@@ -174,15 +174,19 @@ public struct CoachCardState: Equatable, Sendable {
     public var nudge: CoachNudge?
     public var mode: Mode
     public var increasedContrast: Bool
+    /// The saving badge's label on the card's status line while a transcript is being written
+    /// (Save transcripts on, #13c); nil shows nothing.
+    public var savingBadge: String?
 
     public init(status: Status, mute: MuteControlPresentation, micMuted: Bool = false, nudge: CoachNudge? = nil, mode: Mode = .card,
-                increasedContrast: Bool = false) {
+                increasedContrast: Bool = false, savingBadge: String? = nil) {
         self.status = status
         self.mute = mute
         self.micMuted = micMuted
         self.nudge = nudge
         self.mode = mode
         self.increasedContrast = increasedContrast
+        self.savingBadge = savingBadge
     }
 
     /// The coach glyph takes the live tint only while listening.

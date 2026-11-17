@@ -78,9 +78,10 @@ targets:
         LSUIElement: true
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: ""
-        # Call coach (opt-in, off by default): mic, and system audio of the call app.
-        NSMicrophoneUsageDescription: "MeetingCard uses your mic during calls so Call coach can notice interruptions and missed questions. Nothing is recorded or saved."
-        NSAudioCaptureUsageDescription: "MeetingCard needs system audio so Call coach can hear the other people on your call. Nothing is recorded or saved."
+        # Call coach (opt-in, off by default): mic, and system audio of the call app. These two strings live
+        # here only: xcodegen writes App/Info.plist from these properties (CoachWiringTests checks they match).
+        NSMicrophoneUsageDescription: "MeetingCard uses your mic during calls so Call coach can notice interruptions and missed questions. Call audio goes to OpenAI for transcription only if you add an OpenAI key. Nothing is saved unless you turn on Save transcripts."
+        NSAudioCaptureUsageDescription: "MeetingCard needs system audio so Call coach can hear the other people on your call. Call audio goes to OpenAI for transcription only if you add an OpenAI key. Nothing is saved unless you turn on Save transcripts."
         # "Use Zoom/Meet controls" (opt-in, off by default): asks Chrome and Dia whether a Meet tab is open.
         NSAppleEventsUsageDescription: "With Use Zoom/Meet controls on, MeetingCard asks your browser only whether a Google Meet call tab is open, so Call coach can stop when you leave. It never reads page titles or other tabs."
   # Hostless: an app-hosted bundle fought the app's run loop in the phase-1 probe.

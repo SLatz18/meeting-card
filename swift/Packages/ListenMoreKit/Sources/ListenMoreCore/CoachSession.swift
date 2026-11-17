@@ -41,12 +41,17 @@ public protocol CoachSessionDelegate: AnyObject {
     func coachSession(_ session: CoachSession, didShow cue: Cue)
     /// Counters and error classes only, never content.
     func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem)
+    /// Live transcription text while capturing (content: RAM only, never logged).
+    func coachSession(_ session: CoachSession, didCaption event: CaptionEvent)
+    func coachSession(_ session: CoachSession, didMeter reading: CostReading)
 }
 
 public extension CoachSessionDelegate {
     func coachSessionDidChange(_ session: CoachSession) {}
     func coachSession(_ session: CoachSession, didShow cue: Cue) {}
     func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) {}
+    func coachSession(_ session: CoachSession, didCaption event: CaptionEvent) {}
+    func coachSession(_ session: CoachSession, didMeter reading: CostReading) {}
 }
 
 // MARK: session
@@ -379,6 +384,21 @@ public final class CoachSession {
         changed()
     }
 
+    fileprivate func caption(_ event: CaptionEvent) {
+        guard isCapturing else { return }
+        delegate?.coachSession(self, didCaption: event)
+    }
+
+    fileprivate func meter(_ reading: CostReading) {
+        guard isCapturing else { return }
+        delegate?.coachSession(self, didMeter: reading)
+    }
+
+    /// Test hook: deliver caption text as if the engine produced it.
+    func deliverCaptionForTesting(_ event: CaptionEvent) {
+        caption(event)
+    }
+
     private func changed() {
         delegate?.coachSessionDidChange(self)
     }
@@ -442,6 +462,18 @@ final class EngineDelegateBridge: CoachEngineDelegate, @unchecked Sendable {
     func engine(_ engine: CoachEngine, judgeStopped failure: JudgeFailure) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated { self.session?.judgeDidStop(failure) }
+        }
+    }
+
+    func engine(_ engine: CoachEngine, caption: CaptionEvent) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self.session?.caption(caption) }
+        }
+    }
+
+    func engine(_ engine: CoachEngine, meter: CostReading) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self.session?.meter(meter) }
         }
     }
 }

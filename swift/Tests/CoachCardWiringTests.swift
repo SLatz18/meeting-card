@@ -115,13 +115,19 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(controller.contains("config = try ListenMoreConfig.load(overrides: Self.configOverrides)"))
     }
 
-    /// #13c's caption feed drops into a slot; until then the placeholder shows the empty-state line.
+    /// #13c's caption feed drops into the slot; the placeholder stays for hosts without a feed.
     func testCaptionsAreHostedThroughASlot() throws {
         let captions = try read("App/CoachCaptions.swift")
         XCTAssertTrue(captions.contains("protocol CoachCaptionsSlot: AnyObject {\n    func makeView() -> NSView\n}"))
         XCTAssertTrue(captions.contains("NSTextField(wrappingLabelWithString: CoachCardCopy.Captions.empty)"))
         XCTAssertTrue(try read("App/CoachCardPanel.swift").contains("let c = captionsView ?? captions.makeView()"))
-        XCTAssertTrue(try read("App/CoachController.swift").contains("captions: CoachCaptionsPlaceholder()"))
+        XCTAssertTrue(try read("App/CoachController.swift").contains("captions: CaptionFeedSlot(model: transcript.feed)"))
+        XCTAssertTrue(captions.contains("NSHostingView(rootView: CaptionFeedView(model: model, layout: .card))"))
+        // The saving badge rides the status line while (and only while) a transcript is being written.
+        XCTAssertTrue(try read("App/CoachController.swift").contains("savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)"))
+        let view = try read("App/CoachCardView.swift")
+        XCTAssertTrue(view.contains("applyBadge(s.savingBadge)"))
+        XCTAssertTrue(view.contains("private let badgeLabel = NSTextField(labelWithString: \"\")"), "a plain label, never truncated")
     }
 
     /// The motion the App runs is CoachMotion's (Reduce Motion included); windows still appear without AppKit animation.
@@ -139,7 +145,7 @@ final class CoachCardWiringTests: XCTestCase {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
         let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
-        XCTAssertEqual(found.count, 15)
+        XCTAssertEqual(found.count, 17, "#19's 15 states plus #13c's card-saving and card-saving-nudge")
         for n in found + ["morph-end", "collapse-end"] {
             XCTAssertNotNil(script.range(of: #"(\s|\\\n)\#(n)(\s|;)"#, options: .regularExpression), "snapshots.sh doesn't check \(n)")
         }

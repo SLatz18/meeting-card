@@ -158,6 +158,69 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertFalse(try read("App/Controller.swift").contains("showsStatusItem"), "the app keeps the default")
     }
 
+    /// Saved transcripts are an opt-in, so no shipped string may still promise "no transcripts" or
+    /// "nothing recorded or saved": the app's copy and sources, the permission prompts and the README.
+    /// Where those lines were, the wording names the transcript-saving switch exactly.
+    func testNoShippedStringSaysNoTranscripts() throws {
+        let appDir = Self.swiftDir.appendingPathComponent("App")
+        let swiftFiles = try FileManager.default.contentsOfDirectory(atPath: appDir.path).filter { $0.hasSuffix(".swift") }
+        XCTAssertGreaterThan(swiftFiles.count, 5)
+        let shipped = swiftFiles.map { "App/\($0)" } + ["App/Info.plist", "project.yml", "../README.md"]
+        for f in shipped {
+            let text = try read(f).lowercased()
+            for banned in ["no transcripts", "nothing is recorded or saved", "nothing recorded or saved"] {
+                XCTAssertFalse(text.contains(banned), "\(f) still says \"\(banned)\"")
+            }
+        }
+        let copy = try read("App/CoachCopy.swift")
+        let toggle = try XCTUnwrap(copy.range(of: #"static let saveToggle = "([^"]+)""#, options: .regularExpression)
+            .map { String(copy[$0]).components(separatedBy: "\"")[1] })
+        XCTAssertEqual(toggle, "Save transcripts")
+        let line = "Nothing is saved unless you turn on \(toggle)."
+        for f in ["App/Info.plist", "project.yml"] {
+            let text = try read(f)
+            XCTAssertEqual(text.components(separatedBy: line).count - 1, 2, "\(f): both permission prompts")
+            XCTAssertFalse(text.contains("Nothing is recorded"), f)
+        }
+        XCTAssertTrue(try read("../README.md").contains("- \(line)"), "README privacy bullet")
+    }
+
+    /// The mic and system audio prompts disclose OpenAI and name the Save transcripts switch, and
+    /// project.yml (where they're edited) and Info.plist (xcodegen's output) say exactly the same.
+    func testPermissionStringsDiscloseOpenAIAndMatch() throws {
+        let plistData = Data(try read("App/Info.plist").utf8)
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any])
+        let specLines = try read("project.yml").components(separatedBy: "\n")
+        for key in ["NSMicrophoneUsageDescription", "NSAudioCaptureUsageDescription"] {
+            let inPlist = try XCTUnwrap(plist[key] as? String, key)
+            let line = try XCTUnwrap(specLines.first { $0.trimmingCharacters(in: .whitespaces).hasPrefix(key + ": ") }, key)
+            let value = String(line.drop { $0 != ":" }.dropFirst()).trimmingCharacters(in: .whitespaces)
+            XCTAssertTrue(value.hasPrefix("\"") && value.hasSuffix("\""), "\(key) is one quoted line in project.yml")
+            let inSpec = String(value.dropFirst().dropLast())
+            XCTAssertEqual(inSpec, inPlist, "\(key): project.yml and Info.plist differ")
+            XCTAssertTrue(inPlist.contains("OpenAI"), "\(key) discloses OpenAI")
+            XCTAssertTrue(inPlist.contains("Save transcripts"), "\(key) names the Save transcripts switch")
+        }
+    }
+
+    /// VP Comms' final strings, verbatim; the saving footnote shows only while the switch is on.
+    func testFinalCaptionAndOnboardingCopy() throws {
+        let copy = try read("App/CoachCopy.swift")
+        for s in ["static let onboardingPrivacyBody = \"While the coach is on, call audio goes to OpenAI on your own API key. Nothing is saved unless you choose to. Live captions are optional and stay in memory only. Saving a transcript is a separate choice. Your key stays in the Keychain.\"",
+                  "static let captionsYou = \"You\"", "static let captionsThem = \"Them\"",
+                  "static let captionsHeader = \"Live captions\"",
+                  "static let captionsEmpty = \"Captions will show here once someone talks.\"",
+                  "static let captionsNote = \"Kept in memory only. Not saved.\"",
+                  "static let captionsNoteSaving = \"Saving a transcript for this call.\"",
+                  "body: CoachCopy.onboardingPrivacyBody"] {
+            XCTAssertTrue(copy.contains(s), s)
+        }
+        let transcript = try read("App/CoachTranscript.swift")
+        XCTAssertTrue(transcript.contains("live.settings.saving ? CoachCopy.captionsNoteSaving : CoachCopy.captionsNote"),
+                      "the saving footnote follows the Save transcripts switch")
+        XCTAssertTrue(transcript.contains("SpeakerLabels(defaults: [.me: CoachCopy.captionsYou, .others: CoachCopy.captionsThem])"))
+    }
+
     func testCoachRunsInProcess() throws {
         let kit = Self.swiftDir.appendingPathComponent("Packages/ListenMoreKit/Sources")
         let e = try XCTUnwrap(FileManager.default.enumerator(at: kit, includingPropertiesForKeys: nil))

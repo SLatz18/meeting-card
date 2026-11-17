@@ -412,9 +412,13 @@ public final class GptCore {
 /// Realtime transcription + judge around `GptCore`, on one serial event loop (`inbox`), so frames,
 /// local events, transcripts and judge results are handled in order, like the Python asyncio loop.
 /// Transcripts go to `onSegment` (the transcript rules) and verdicts to `offer`, both from the loop.
+/// `onCaption` gets partial and final text while the layer is on (nothing once it stops), and
+/// `onMeter` the cost reading after each billed segment, judge call and stop.
 public final class GptLayer: @unchecked Sendable {
     public typealias Offer = @Sendable (_ label: String, _ t: TimeInterval, _ refT: TimeInterval, _ confidence: Double) -> Void
     public typealias SegmentSink = @Sendable (_ speaker: Speaker, _ text: String, _ refT: TimeInterval, _ now: TimeInterval) -> Void
+    public typealias CaptionSink = @Sendable (CaptionEvent) -> Void
+    public typealias MeterSink = @Sendable (CostReading) -> Void
     public typealias Snapshot = GptCore.Snapshot
 
     enum Command {
@@ -434,6 +438,8 @@ public final class GptLayer: @unchecked Sendable {
     private let onSegment: SegmentSink?
     private let onStopped: (@Sendable (GptStopReason) -> Void)?
     private let onJudgeStopped: (@Sendable (JudgeFailure) -> Void)?
+    private let onCaption: CaptionSink?
+    private let onMeter: MeterSink?
     private let scheduler: GptScheduler
     private let judge: JudgeProvider?
     private var transcribers: [Speaker: TranscriptionSession] = [:]
@@ -451,6 +457,7 @@ public final class GptLayer: @unchecked Sendable {
     public init(config: ListenMoreConfig, now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
                 onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
                 onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil,
+                onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil,
                 provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
@@ -460,6 +467,8 @@ public final class GptLayer: @unchecked Sendable {
         self.onSegment = onSegment
         self.onStopped = onStopped
         self.onJudgeStopped = onJudgeStopped
+        self.onCaption = onCaption
+        self.onMeter = onMeter
         self.judge = provider
         self.scheduler = scheduler
         var continuation: AsyncStream<Command>.Continuation!
@@ -479,9 +488,11 @@ public final class GptLayer: @unchecked Sendable {
     /// The GPT judge (any `CueJudge`) as the provider.
     public convenience init(config: ListenMoreConfig, now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
                             onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
+                            onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil,
                             judge: CueJudge, scheduler: GptScheduler,
                             transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped,
+                  onCaption: onCaption, onMeter: onMeter,
                   provider: GptJudgeProvider(judge), scheduler: scheduler, transcriberFactory: transcriberFactory)
     }
 
@@ -490,8 +501,10 @@ public final class GptLayer: @unchecked Sendable {
     public convenience init(config: ListenMoreConfig, key: APIKey, judgeKey: APIKey? = nil, transports: GptTransports,
                             now: @escaping @Sendable () -> TimeInterval, offer: @escaping Offer,
                             onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
-                            onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil) {
+                            onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil,
+                            onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil) {
         self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped, onJudgeStopped: onJudgeStopped,
+                  onCaption: onCaption, onMeter: onMeter,
                   provider: JudgeProviders.make(config: config, openAIKey: key, judgeKey: judgeKey, http: transports.http,
                                                 scheduler: transports.scheduler),
                   scheduler: transports.scheduler) { speaker, onEvent in
@@ -541,9 +554,13 @@ public final class GptLayer: @unchecked Sendable {
             let t = now()
             let r = core.onText(speaker, text: text, refT: refT, now: t)
             onSegment?(speaker, text, r.refT, t)
+            if core.enabled { onCaption?(.final(speaker, text: text)) }
             if let req = r.start { schedule(req) }
+        case .transcript(.delta(let speaker, let text, let item)):
+            if core.enabled { onCaption?(.partial(speaker, item: item, text: text)) }
         case .transcript(.usage(let speaker, let seconds)):
             core.addApiAudio(seconds: seconds, speaker: speaker)
+            onMeter?(core.cost.reading)
         case .transcript(.error(let msg)):
             core.fail(msg)
         case .runJudge(let req):
@@ -551,6 +568,7 @@ public final class GptLayer: @unchecked Sendable {
         case let .judgeDone(req, result, latencyMs):
             core.recordJudgeLatency(ms: latencyMs)
             for o in core.finishJudge(req, reply: result, now: now()) { offer(o.label, o.t, o.refT, o.confidence) }
+            onMeter?(core.cost.reading)
             if let next = core.judgeEnded() { schedule(next) }
         case .snapshot(let c):
             c.resume(returning: core.snapshot)
@@ -568,6 +586,7 @@ public final class GptLayer: @unchecked Sendable {
         }
         if let reason = core.stopReason, !stopReported {
             stopReported = true
+            onMeter?(core.cost.reading)
             onStopped?(reason)
         }
         if let failure = core.judgeStopReason, !judgeStopReported {
