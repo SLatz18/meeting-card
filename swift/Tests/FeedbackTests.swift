@@ -172,4 +172,30 @@ final class FeedbackTests: XCTestCase {
         XCTAssertTrue(test.shouldShow)
         XCTAssertFalse(release.shouldShow)
     }
+
+    // MARK: app wiring
+
+    /// The app only opens the URL: no network API, token, log, Keychain or file access in the
+    /// feedback code, and both entry points go through the same action.
+    func testAppOnlyOpensTheURL() throws {
+        let action = try read("App/FeedbackAction.swift")
+        XCTAssertTrue(action.contains("NSWorkspace.shared.open(Feedback.url(.current(identity: identity)))"))
+        XCTAssertTrue(action.contains("FeedbackNotice(defaults: defaults, identity: identity)"))
+        for path in ["App/FeedbackAction.swift", "Core/Feedback.swift", "Core/FeedbackCopy.swift"] {
+            let code = try read(path)
+            for api in ["URLSession", "URLRequest", "NSURLConnection", "import Network", "dataTask", "Keychain", "Logger",
+                        "log(", "FileManager", "contentsOf", "AppPaths", "NSUserName", "NSFullUserName", "hostName",
+                        "Authorization", "Bearer", "Transcript", "Caption"] {
+                XCTAssertFalse(code.contains(api), "\(path) uses \(api)")
+            }
+        }
+        let controller = try read("App/CoachController.swift")
+        XCTAssertTrue(controller.contains("@objc func feedbackClicked(_ sender: Any?) { FeedbackAction.send(defaults: defaults) }"))
+        XCTAssertTrue(controller.contains("menu.addItem(feedbackMenuItem())"))
+        XCTAssertTrue(controller.contains("let title = FeedbackCopy.menuItem"))
+        let settings = try read("App/CoachSettingsWindow.swift")
+        XCTAssertTrue(settings.contains("coach.feedbackClicked(sender)"))
+        XCTAssertTrue(settings.contains("FeedbackCopy.settingsButton"))
+        XCTAssertTrue(settings.contains("return [section, g1, gControls, g2, gJudge, g3, privacy, feedbackGroup()]"), "the row is last")
+    }
 }

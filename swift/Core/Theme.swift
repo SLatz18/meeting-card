@@ -283,7 +283,7 @@ public enum Theme {
         public static let menuSymbols = (enable: "power", start: resumeSymbol, stop: CoachCard.Symbols.stop,
                                          pause: pauseSymbol, resume: resumeSymbol, turnOff: "power",
                                          gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
-                                         settings: "gearshape")
+                                         settings: "gearshape", feedback: "bubble.left")
         public static let menuSymbolSize = CardStyle.Typography.body.size
         /// The status bar glyph, at the button font size and weight.
         public static let statusSymbolFont = CardStyle.Typography.button

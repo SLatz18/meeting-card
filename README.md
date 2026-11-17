@@ -15,6 +15,7 @@ A small native macOS app that pops a card in the corner of your screen when a me
 - Shows a "Next up" line for back-to-back meetings, follows light/dark mode, and draws a thin outline in the provider's color.
 - Return joins and Esc ignores, but only after you click or hover the card. A card never steals keyboard focus from the app you are typing in.
 - No Dock icon and no window. One small menu bar icon for the optional [call coach](#call-coach), with **Turn On Call Coach** while it's off. Registers itself as a login item the first time the installed copy runs.
+- **Send Feedback…** (in the menu bar menu and in Settings) opens a new GitHub issue in your browser, pre-filled with the app version, build number, macOS version and whether it's the test build. Issues here are public, and the app says so first. The app itself sends nothing.
 
 Only timed events with a video link get a card, plus invites from someone else that have neither a link nor a location (probably a missing link). All-day events, focus time, out-of-office, working location and declined events are skipped.
 

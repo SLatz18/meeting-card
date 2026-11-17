@@ -306,6 +306,7 @@ final class CoachController: NSObject {
     }
     @objc func turnOffClicked(_ sender: Any?) { setEnabled(false) { _ in } }
     @objc func settingsClicked(_ sender: Any?) { showSettings() }
+    @objc func feedbackClicked(_ sender: Any?) { FeedbackAction.send(defaults: defaults) }
 
     /// Stop: the coach is off for the rest of this call (replaces Skip this call).
     func stopForThisCall() {
@@ -414,12 +415,21 @@ final class CoachController: NSObject {
         item.menu = menu(for: items)
     }
 
-    /// A native menu for these entries, each with its SF Symbol at the body size.
+    /// A native menu for these entries, each with its SF Symbol at the body size, then Send Feedback.
     func menu(for items: [CoachMenuItem]) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         for entry in items { menu.addItem(menuItem(entry)) }
+        menu.addItem(feedbackMenuItem())
         return menu
+    }
+
+    private func feedbackMenuItem() -> NSMenuItem {
+        let title = FeedbackCopy.menuItem
+        let m = NSMenuItem(title: title, action: #selector(feedbackClicked(_:)), keyEquivalent: "")
+        m.image = Theme.symbol(Theme.Coach.menuSymbols.feedback, Theme.FontSpec(Theme.Coach.menuSymbolSize), label: title)
+        m.target = self
+        return m
     }
 
     static func statusLabel(enabled: Bool, indicator: CoachIndicator) -> String {

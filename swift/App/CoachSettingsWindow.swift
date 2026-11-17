@@ -359,7 +359,18 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
                                 color: Self.color(.secondary), maxWidth: Self.outerWidth)
-        return [section, g1, gControls, g2, gJudge, g3, privacy]
+        return [section, g1, gControls, g2, gJudge, g3, privacy, feedbackGroup()]
+    }
+
+    /// Last, so everything above it lays out exactly as before.
+    private func feedbackGroup() -> Group {
+        let send = NSButton(title: FeedbackCopy.settingsButton, target: self, action: #selector(sendFeedback(_:)))
+        send.bezelStyle = .rounded
+        let row = Self.row(Self.text(FeedbackCopy.settingsLabel, font: Theme.Settings.rowFont), send)
+        let help = Self.text(FeedbackCopy.settingsHelp, font: Theme.Settings.helperFont, color: Self.color(Theme.Settings.helperText))
+        let g = Self.group([row, help])
+        for v in [row, help] { pin(v, in: g) }
+        return g
     }
 
     static func judgeTitle(_ kind: JudgeProviderKind) -> String {
@@ -506,6 +517,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         coach.requestCallControlsAccess()
         update()
     }
+
+    @objc private func sendFeedback(_ sender: Any?) { coach.feedbackClicked(sender) }
 
     @objc private func keyEntered(_ sender: NSSecureTextField) {
         let text = sender.stringValue
