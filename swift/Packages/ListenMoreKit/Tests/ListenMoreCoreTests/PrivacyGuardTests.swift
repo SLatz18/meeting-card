@@ -99,7 +99,7 @@ final class PrivacyGuardTests: XCTestCase {
 
     /// A host's only defaults are coach settings, never call data.
     func testHostDefaultsAreSettingsOnly() throws {
-        let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded"]
+        let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
         for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -137,6 +137,101 @@ final class PrivacyGuardTests: XCTestCase {
         let text = try XCTUnwrap(service).1
         XCTAssertTrue(text.contains("AudioActivitySignal("), "CoachService must drive the trigger from Core Audio")
         XCTAssertFalse(text.contains("WindowTitleSignal"), "CoachService must not use window titles")
+    }
+
+    // MARK: "Use Zoom/Meet controls" providers
+
+    static let providerFiles = ["CallControls.swift", "CallControlsMac.swift"]
+
+    func providerSources() throws -> [(String, String)] {
+        let found = try librarySources().filter { Self.providerFiles.contains($0.0) }
+        // ListenMoreMac (and so CallControlsMac.swift) is present on every platform's checkout.
+        XCTAssertEqual(Set(found.map(\.0)), Set(Self.providerFiles))
+        return found
+    }
+
+    /// Code only: comments and doc comments may name what is never read.
+    func code(_ text: String) -> String {
+        text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
+    }
+
+    /// The Zoom reader reads menu-item shortcuts and nothing else, except the label of Zoom's one
+    /// ⇧⌘A audio toggle, which goes straight into a Bool. No window, title, description, value or
+    /// name attribute is read anywhere in the coach.
+    func testZoomReaderReadsOnlyShortcutsAndTheAudioToggle() throws {
+        let mac = try XCTUnwrap(try providerSources().first { $0.0 == "CallControlsMac.swift" }).1
+        let re = try NSRegularExpression(pattern: #"\bkAX[A-Za-z]+"#)
+        let used = Set(re.matches(in: code(mac), range: NSRange(code(mac).startIndex..., in: code(mac)))
+            .map { (code(mac) as NSString).substring(with: $0.range) })
+        XCTAssertEqual(used, ["kAXMenuBarAttribute", "kAXChildrenAttribute", "kAXMenuItemCmdCharAttribute",
+                              "kAXMenuItemCmdModifiersAttribute", "kAXTitleAttribute"])
+        let titleLines = code(mac).components(separatedBy: "\n").filter { $0.contains("kAXTitleAttribute") }
+        XCTAssertEqual(titleLines.count, 1, "one label read")
+        XCTAssertTrue(titleLines.first?.contains(".flatMap(ZoomControlsReader.offersUnmute(label:))") == true,
+                      "the label becomes a Bool at once")
+        let callers = code(mac).components(separatedBy: "\n").filter { $0.contains("audioToggleOffersUnmute(") && !$0.contains("func ") }
+        XCTAssertEqual(callers.count, 1)
+        XCTAssertTrue(callers.first?.contains("if s.matches(key: toggle.key, modifiers: toggle.modifiers)") == true,
+                      "only the ⇧⌘A item's label is read")
+
+        let banned = [#"kAX(Windows|MainWindow|FocusedWindow|Description|Value|Document|URL|Help|SelectedText|PlaceholderValue|Identifier|Label)"#,
+                      #""AX(Title|Description|Value|Identifier|Windows|URL|Document|Help|SelectedText)""#]
+        for (name, text) in try allSources() {
+            for b in banned { XCTAssertNil(code(text).range(of: b, options: .regularExpression), "\(name) reads \(b)") }
+            if name != "CallControlsMac.swift" { XCTAssertFalse(code(text).contains("kAXTitleAttribute"), "\(name) reads a title") }
+        }
+    }
+
+    /// The Meet reader's AppleScript asks the browser for Meet-host tab URLs only (filtered in the
+    /// browser) and returns a count; titles and other tab properties are never asked for, and the
+    /// runner reads only the integer result.
+    func testMeetReaderReadsOnlyMeetHostURLs() throws {
+        let sources = try providerSources()
+        let core = try XCTUnwrap(sources.first { $0.0 == "CallControls.swift" }).1
+        let urlReads = core.components(separatedBy: "\n").filter { $0.contains("URL of") }
+        XCTAssertEqual(urlReads.count, 1, "one URL read in the scripts")
+        XCTAssertTrue(urlReads.first?.contains(#"whose URL starts with \"\(meetPrefix)\""#) == true)
+        XCTAssertTrue(core.contains(#"public static let meetPrefix = "https://meet.google.com/""#))
+        for banned in ["title of", "name of", "properties of", "active tab", "execute javascript", "every tab"] {
+            XCTAssertFalse(core.lowercased().contains(banned), "the Meet script asks for \(banned)")
+        }
+        let mac = try XCTUnwrap(sources.first { $0.0 == "CallControlsMac.swift" }).1
+        XCTAssertTrue(mac.contains("result.int32Value"))
+        for banned in ["stringValue", "coerce(", "descriptor(at"] {
+            XCTAssertFalse(code(mac).contains(banned), "the runner reads \(banned) from a script result")
+        }
+    }
+
+    /// Nothing the providers see is logged, printed or kept beyond the call states.
+    func testCallControlsNeverLog() throws {
+        for (name, text) in try providerSources() {
+            for banned in ["Log.", "Logger(", "os_log", "NSLog", "UserDefaults"] {
+                XCTAssertFalse(code(text).contains(banned), "\(name) uses \(banned)")
+            }
+        }
+    }
+
+    /// Accessibility and Automation prompts come only from the request functions, which the host
+    /// calls only from the Settings toggle and its Request access button.
+    func testPermissionPromptsOnlyFromTheToggle() throws {
+        for (name, text) in try allSources() {
+            let c = code(text)
+            if c.contains("AXTrustedCheckOptionPrompt") || c.contains("ask: true") {
+                XCTAssertEqual(name, "CallControlsMac.swift", "\(name) prompts")
+            }
+        }
+        let mac = try XCTUnwrap(try providerSources().first { $0.0 == "CallControlsMac.swift" }).1
+        XCTAssertEqual(code(mac).components(separatedBy: "ask: true").count - 1, 1)
+        XCTAssertEqual(code(mac).components(separatedBy: "ask: false").count - 1, 1, "readers check without asking")
+        guard let controller = try appSources().first(where: { $0.0 == "CoachController.swift" })?.1 else { return }
+        let calls = code(controller).components(separatedBy: "\n").filter { $0.contains("requestCallControlsAccess()") && !$0.contains("func ") }
+        XCTAssertEqual(calls.map { $0.trimmingCharacters(in: .whitespaces) }, ["if on { requestCallControlsAccess() }"])
+        for (name, text) in try appSources() where name != "CoachController.swift" {
+            for c in code(text).components(separatedBy: "\n") where c.contains("requestCallControlsAccess()") {
+                XCTAssertEqual(name, "CoachSettingsWindow.swift", "\(name) asks for call-control permissions")
+            }
+            XCTAssertFalse(code(text).contains("CallControlsPermissions.request"), "\(name) prompts directly")
+        }
     }
 
     /// Library sources and tests are generic: this is a public repository.

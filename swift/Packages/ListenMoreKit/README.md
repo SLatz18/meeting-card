@@ -24,8 +24,17 @@ counters and enums.
 
 A host can pass an optional `CallStateProvider` (to `CoachService`, `CoachSession` or `CoachMonitor`)
 reporting each call app's state as started, ended or muted. An ended call stops the session after
-`ended_stop_after_s` (3 s) instead of waiting for Core Audio's 30 s stop; without a provider, Core
-Audio alone decides. `CoachMenu` lists what a host's coach menu offers in each state.
+`ended_stop_after_s` (3 s) instead of waiting for Core Audio's 30 s stop; a muted app holds the
+session's capture (the pause path) until unmute; without a provider, Core Audio alone decides.
+`CoachMenu` lists what a host's coach menu offers in each state.
+
+`CallControlsProvider` (Core, with fakeable `ZoomAccessibility` / `AppleScriptRunner` backends;
+`CallControlsProvider.live(config:)` in ListenMoreMac) is that provider for Zoom (Accessibility:
+menu-bar shortcuts only, plus the ⇧⌘A audio toggle's label reduced to a Bool) and Google Meet in
+Chrome and Dia (AppleScript: the browser filters tabs to the Meet host and the script returns a
+count). Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
+revoked or unsupported backend reports nothing for its app. `CallControlsPermissions.request...`
+shows the system prompts and is for a host's opt-in toggle only.
 
 ## Rule constants
 
