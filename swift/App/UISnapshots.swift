@@ -6,7 +6,10 @@ import MeetingCardCore
 /// Fixture-run seams for the CI screenshots of the call coach UI (never active on a live run, and
 /// they render UI only: no audio, no service, no network).
 ///   MEETING_CARD_COACH_CHIP=on|listening|paused  put that chip on the fixture card
-///   MEETING_CARD_COACH_SHOTS=<dir>               write glow, Settings and onboarding PNGs, then quit
+///   MEETING_CARD_COACH_SHOTS=<dir>               write glow, Settings, onboarding and menu PNGs,
+///                                                 plus the design packet, then quit
+/// Design packet: `packet-<surface>-<light|dark>.png`, the plain reminder card beside each coach
+/// surface (chip, glow, Settings, onboarding, status menu) for a side-by-side design review.
 enum UISnapshots {
     static func demoChip(_ env: [String: String]) -> CoachChip? {
         switch env["MEETING_CARD_COACH_CHIP"] {
@@ -24,13 +27,54 @@ enum UISnapshots {
             MainActor.assumeIsolated {
                 guard let card else { return }
                 let tag = card.isDark ? "dark" : "light"
-                for (name, color) in [("rose", CueColor.red), ("amber", CueColor.amber)] {
-                    let ok = glowShot(color, card: card, path: "\(dir)/glow-\(name)-\(tag).png")
-                    controller.log("coach shot glow-\(name)-\(tag) ok=\(ok)")
+                let chip = card.coach
+                let withChip = card.snapshotImage()
+                card.setCoach(nil)
+                let plain = card.snapshotImage()
+                card.setCoach(chip)
+                func packet(_ name: String, _ surface: CGImage?) {
+                    guard let plain, let surface, let img = pair(plain, surface, dark: card.isDark) else {
+                        return controller.log("coach packet \(name)-\(tag) ok=false")
+                    }
+                    let ok = Card.writePNG(img, "\(dir)/packet-\(name)-\(tag).png")
+                    controller.log("coach packet \(name)-\(tag) ok=\(ok)")
                 }
-                settingsShots(dir: dir, tag: tag, controller: controller) { NSApp.terminate(nil) }
+                if chip != nil { packet("chip", withChip) }
+                for (name, color) in [("rose", CueColor.red), ("amber", CueColor.amber)] {
+                    let img = glowImage(color, card: card)
+                    let ok = img.map { Card.writePNG($0, "\(dir)/glow-\(name)-\(tag).png") } ?? false
+                    controller.log("coach shot glow-\(name)-\(tag) ok=\(ok)")
+                    packet("glow-\(name)", img)
+                }
+                settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
+                    menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
+                    NSApp.terminate(nil)
+                }
             }
         }
+    }
+
+    /// The reminder card (left) beside a coach surface (right) on the desktop tone, both at their
+    /// own scale; a surface taller than `maxHeight` pixels is scaled down to fit.
+    static func pair(_ card: CGImage, _ surface: CGImage, dark: Bool, maxHeight: CGFloat = 1200) -> CGImage? {
+        let pad = CGFloat(CardStyle.Spacing.stack * 2) * 2
+        let k = min(1, maxHeight / CGFloat(surface.height))
+        let sw = CGFloat(surface.width) * k, sh = CGFloat(surface.height) * k
+        let cw = CGFloat(card.width), ch = CGFloat(card.height)
+        let w = pad + cw + pad + sw + pad, h = pad + max(ch, sh) + pad
+        guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: Int(w), height: Int(h), bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.setFillColor(desktop(dark: dark))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.interpolationQuality = .high
+        ctx.draw(card, in: CGRect(x: pad, y: h - pad - ch, width: cw, height: ch))
+        ctx.draw(surface, in: CGRect(x: pad + cw + pad, y: h - pad - sh, width: sw, height: sh))
+        return ctx.makeImage()
+    }
+
+    static func desktop(dark: Bool) -> CGColor {
+        dark ? CGColor(srgbRed: 0.12, green: 0.12, blue: 0.13, alpha: 1) : CGColor(srgbRed: 0.85, green: 0.85, blue: 0.87, alpha: 1)
     }
 
     static func image(of view: NSView) -> CGImage? {
@@ -42,7 +86,7 @@ enum UISnapshots {
 
     /// 1440x900 neutral desktop with the glow at peak opacity and the live card bottom-right.
     @MainActor
-    static func glowShot(_ color: CueColor, card: Card, path: String) -> Bool {
+    static func glowImage(_ color: CueColor, card: Card) -> CGImage? {
         let size = NSSize(width: 1440, height: 900)
         let scale: CGFloat = 2
         let style = CoachController.glowStyle()
@@ -53,10 +97,9 @@ enum UISnapshots {
         guard let glowImg = image(of: glow), let cardImg = card.snapshotImage(),
               let cs = CGColorSpace(name: CGColorSpace.sRGB),
               let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale), bitsPerComponent: 8,
-                                  bytesPerRow: 0, space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                                  bytesPerRow: 0, space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         let full = CGRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale)
-        ctx.setFillColor(card.isDark ? CGColor(srgbRed: 0.12, green: 0.12, blue: 0.13, alpha: 1)
-                                     : CGColor(srgbRed: 0.85, green: 0.85, blue: 0.87, alpha: 1))
+        ctx.setFillColor(desktop(dark: card.isDark))
         ctx.fill(full)
         ctx.setAlpha(CGFloat(style.profile.peakOpacity))
         ctx.draw(glowImg, in: full)
@@ -64,8 +107,65 @@ enum UISnapshots {
         let cw = CGFloat(cardImg.width), ch = CGFloat(cardImg.height)
         let margin = CGFloat(Theme.Metrics.cardMargin) * scale
         ctx.draw(cardImg, in: CGRect(x: full.width - cw - margin, y: margin, width: cw, height: ch))
-        guard let out = ctx.makeImage() else { return false }
-        return Card.writePNG(out, path)
+        return ctx.makeImage()
+    }
+
+    /// The coach status menu, off and while listening (no key, so the GPT-off note shows), opened
+    /// as a real NSMenu and captured from the screen while it tracks. The capture uses
+    /// `screencapture` on the menu's window; without screen-recording access it falls back to the
+    /// window's layer render.
+    @MainActor
+    static func menuShots(dir: String, tag: String, controller: Controller, packet: (String, CGImage?) -> Void) {
+        let suite = "com.slatz.meetingcard.swift.snapshots"
+        guard let defaults = UserDefaults(suiteName: suite),
+              let coach = try? CoachController(defaults: defaults, keychain: KeychainStore(service: suite, account: "none"),
+                                               showsStatusItem: false) else { return }
+        defaults.removePersistentDomain(forName: suite)
+        let states: [(String, [CoachMenuItem])] = [
+            ("menu-off", CoachMenu.items(enabled: false, indicator: .hidden, gptAvailable: false)),
+            ("menu-listening", CoachMenu.items(enabled: true, indicator: .listening, gptAvailable: false)),
+        ]
+        NSApp.activate()
+        for (name, items) in states {
+            let menu = coach.menu(for: items)
+            menu.appearance = NSApp.effectiveAppearance
+            var shot: CGImage?
+            let t = Timer(timeInterval: 0.6, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    shot = menuWindowImage(log: controller.log)
+                    menu.cancelTracking()
+                }
+            }
+            RunLoop.main.add(t, forMode: .common)
+            let screen = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            menu.popUp(positioning: nil, at: NSPoint(x: screen.midX, y: screen.midY + screen.height / 4), in: nil)
+            let ok = shot.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
+            controller.log("coach shot \(name)-\(tag) ok=\(ok)")
+            packet(name, shot)
+        }
+    }
+
+    @MainActor
+    static func menuWindowImage(log: (String) -> Void) -> CGImage? {
+        let menus = NSApp.windows.filter { $0.isVisible && String(describing: type(of: $0)).contains("Menu") }
+        log("coach menu windows: \(menus.map { String(describing: type(of: $0)) })")
+        guard let w = menus.max(by: { $0.frame.height < $1.frame.height }) else { return nil }
+        let f = w.frame
+        let top = (NSScreen.screens.first?.frame.height ?? f.maxY) - f.maxY
+        let path = NSTemporaryDirectory() + "coach-menu-\(UUID().uuidString).png"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        p.arguments = ["-x", "-o", "-R\(Int(f.minX)),\(Int(top)),\(Int(f.width)),\(Int(f.height))", path]
+        try? p.run()
+        p.waitUntilExit()
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        if p.terminationStatus == 0, let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+           let img = CGImageSourceCreateImageAtIndex(src, 0, nil) {
+            log("coach menu capture: screencapture \(img.width)x\(img.height)")
+            return img
+        }
+        log("coach menu capture: layer render")
+        return windowImage(w)
     }
 
     /// A shown window's content over its resolved background (layer render, like the card snapshot;
@@ -92,7 +192,8 @@ enum UISnapshots {
     /// Settings (toggle off, the default) and the three onboarding screens, from scratch defaults.
     /// Each window is shown briefly so AppKit draws it, captured, then closed.
     @MainActor
-    static func settingsShots(dir: String, tag: String, controller: Controller, done: @escaping () -> Void) {
+    static func settingsShots(dir: String, tag: String, controller: Controller, packet: @escaping (String, CGImage?) -> Void,
+                              done: @escaping () -> Void) {
         let suite = "com.slatz.meetingcard.swift.snapshots"
         guard let defaults = UserDefaults(suiteName: suite) else { return done() }
         defaults.removePersistentDomain(forName: suite)
@@ -129,8 +230,10 @@ enum UISnapshots {
             w.window.orderFrontRegardless()
             controller.schedule(0.5, repeats: false) {
                 MainActor.assumeIsolated {
-                    let ok = windowImage(w.window).map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
+                    let img = windowImage(w.window)
+                    let ok = img.map { Card.writePNG($0, "\(dir)/\(name)-\(tag).png") } ?? false
                     controller.log("coach shot \(name)-\(tag) ok=\(ok)")
+                    packet(name, img)
                     w.window.orderOut(nil)
                     next(i + 1)
                 }
