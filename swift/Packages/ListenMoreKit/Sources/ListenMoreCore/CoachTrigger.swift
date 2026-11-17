@@ -4,7 +4,27 @@ import Foundation
 // AND output running continuously for `startAfterS`, and stops when either stays off for
 // `stopAfterS`. Detection reads only Core Audio "is running" state; no audio is captured to detect a
 // call. Any other per-app "a call is live" signal (e.g. window titles) can drive the same machine
-// through `tick(liveApps:inputRunning:now:)`.
+// through `tick(liveApps:inputRunning:now:)`. An optional app-level call state (`CallStateProvider`)
+// can end a session sooner: when it reports the session's call `ended`, the stop takes
+// `endedStopAfterS` instead of `stopAfterS`. Without a report, Core Audio decides.
+
+/// What an app-level provider (e.g. a call app's accessibility state) knows about a call.
+public enum CallState: String, Equatable, Sendable {
+    case started
+    /// Ended in the app, even if it still holds its audio devices.
+    case ended
+    /// Still in the call with the mic muted in the app.
+    case muted
+}
+
+/// Optional app-level call state per app key (lowercased bundle ID, as `TriggerSettings.appKey`
+/// makes them). Apps without an entry fall back to Core Audio. Only `ended` changes the trigger:
+/// it stops the session after `endedStopAfterS` and keeps that app from auto-starting while it
+/// stays ended. `started` and `muted` never start a session or hold one open, so a stale provider
+/// can't keep the coach listening.
+public protocol CallStateProvider: AnyObject {
+    func callStates() -> [String: CallState]
+}
 
 /// Core Audio process object state (macOS 14.4+: kAudioProcessPropertyIsRunningInput/Output).
 public struct AudioProcessState: Equatable, Sendable {
@@ -50,15 +70,18 @@ public struct TriggerSettings: Equatable, Sendable {
     public var ownPid: Int32
     public var startAfterS: Double
     public var stopAfterS: Double
+    /// Stop delay once a `CallStateProvider` reports the session's call ended.
+    public var endedStopAfterS: Double
 
     public init(allowlist: [String], anyApp: Bool = false, excludedBundleIds: [String], ownPid: Int32,
-                startAfterS: Double = 3, stopAfterS: Double = 30) {
+                startAfterS: Double = 3, stopAfterS: Double = 30, endedStopAfterS: Double = 3) {
         self.allowlist = allowlist
         self.anyApp = anyApp
         self.excludedBundleIds = excludedBundleIds
         self.ownPid = ownPid
         self.startAfterS = startAfterS
         self.stopAfterS = stopAfterS
+        self.endedStopAfterS = endedStopAfterS
     }
 
     /// `allowlist` is the user's edited list; nil means the config's call apps. Self-exclusion is the
@@ -67,7 +90,8 @@ public struct TriggerSettings: Equatable, Sendable {
                 excludedBundleIds: [String] = [], allowlist: [String]? = nil) {
         self.init(allowlist: allowlist ?? config.captureTargets.map(\.bundleId), anyApp: anyApp,
                   excludedBundleIds: config.trigger.excludeBundleIds + excludedBundleIds + [ownBundleId].compactMap { $0 },
-                  ownPid: ownPid, startAfterS: config.trigger.startAfterS, stopAfterS: config.trigger.stopAfterS)
+                  ownPid: ownPid, startAfterS: config.trigger.startAfterS, stopAfterS: config.trigger.stopAfterS,
+                  endedStopAfterS: config.trigger.endedStopAfterS)
     }
 
     /// The app a process belongs to for triggering, or nil if it can never trigger.
@@ -116,6 +140,8 @@ public enum CoachStartReason: Equatable, Sendable {
 public enum CoachStopReason: String, Equatable, Sendable {
     /// The session's app had input or output off for `stopAfterS`.
     case audioEnded
+    /// A `CallStateProvider` reported the session's call ended, `endedStopAfterS` ago.
+    case callEnded
     /// The calendar event the user joined ended.
     case eventEnded
     case manual
@@ -164,6 +190,7 @@ public struct CoachTrigger: Sendable {
     /// event-end stop), so a still-running call does not restart the coach 3 s later.
     public private(set) var suppressed: Set<String> = []
     private var offSince: Double?
+    private var endedSince: Double?
     private var hintEndsAt: Double?
     private var lastLive: Set<String> = []
 
@@ -194,21 +221,27 @@ public struct CoachTrigger: Sendable {
     }
 
     /// Feed one Core Audio poll. Returns at most one start or stop.
-    public mutating func tick(_ snap: AudioStateSnapshot, now: Double) -> [TriggerAction] {
+    public mutating func tick(_ snap: AudioStateSnapshot, now: Double, callStates: [String: CallState] = [:]) -> [TriggerAction] {
         let live = Set(settings.group(snap).filter { $0.value.both }.keys)
-        return tick(liveApps: live, inputRunning: snap.defaultInputRunning, now: now)
+        return tick(liveApps: live, inputRunning: snap.defaultInputRunning, now: now, callStates: callStates)
     }
 
     /// Feed one poll of any call signal: the app keys (lowercased bundle IDs) with a live call, and
-    /// whether the default input device is running. Returns at most one start or stop.
-    public mutating func tick(liveApps live: Set<String>, inputRunning: Bool, now: Double) -> [TriggerAction] {
+    /// whether the default input device is running, plus any app-level call states. Returns at most
+    /// one start or stop.
+    public mutating func tick(liveApps audioLive: Set<String>, inputRunning: Bool, now: Double,
+                              callStates: [String: CallState] = [:]) -> [TriggerAction] {
         guard enabled else { return session == nil ? [] : end(.disabled) }
-        lastLive = live
+        let ended = Set(callStates.filter { $0.value == .ended }.keys.map { $0.lowercased() })
+        // Suppression and event-end bookkeeping follow Core Audio, so an app that still holds its
+        // devices after its call ended doesn't restart the coach when the provider loses track.
+        lastLive = audioLive
+        suppressed = suppressed.filter { audioLive.contains($0) }
+        let live = audioLive.subtracting(ended)
         for key in live where inputRunning {
             if qualifyingSince[key] == nil { qualifyingSince[key] = now }
         }
         qualifyingSince = qualifyingSince.filter { live.contains($0.key) && inputRunning }
-        suppressed = suppressed.filter { live.contains($0) }
         if let h = hintEndsAt, now >= h { hintEndsAt = nil }
 
         if var s = session {
@@ -220,6 +253,13 @@ public struct CoachTrigger: Sendable {
                 session = s
             }
             guard let key = s.appKey else { return [] }
+            if ended.contains(key) {
+                let since = endedSince ?? now
+                endedSince = since
+                if now - since >= settings.endedStopAfterS - 1e-9 { return end(.callEnded, suppress: true) }
+            } else {
+                endedSince = nil
+            }
             if live.contains(key) {
                 offSince = nil
             } else {
@@ -296,6 +336,7 @@ public struct CoachTrigger: Sendable {
         }
         session = nil
         offSince = nil
+        endedSince = nil
         if reason == .eventEnded { hintEndsAt = nil }
         return [.stop(reason)]
     }
@@ -304,14 +345,16 @@ public struct CoachTrigger: Sendable {
 /// Polls an `AudioStateProvider` into a `CoachTrigger`. The shell drives `poll` from a timer.
 public final class CoachMonitor {
     public let provider: AudioStateProvider
+    public let callState: CallStateProvider?
     public var trigger: CoachTrigger
 
-    public init(provider: AudioStateProvider, trigger: CoachTrigger) {
+    public init(provider: AudioStateProvider, trigger: CoachTrigger, callState: CallStateProvider? = nil) {
         self.provider = provider
         self.trigger = trigger
+        self.callState = callState
     }
 
     public func poll(now: Double) -> [TriggerAction] {
-        trigger.tick(provider.snapshot(), now: now)
+        trigger.tick(provider.snapshot(), now: now, callStates: callState?.callStates() ?? [:])
     }
 }

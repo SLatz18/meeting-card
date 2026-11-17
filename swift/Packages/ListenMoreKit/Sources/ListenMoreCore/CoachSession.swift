@@ -81,6 +81,7 @@ public final class CoachSession {
     private let mic: MicSource
     private let call: CallSource
     private let signal: CallSignal
+    private let callState: CallStateProvider?
     private let keys: APIKeyProvider
     private let renderer: CueRenderer
     private let cuePolicy: CuePolicy
@@ -96,12 +97,14 @@ public final class CoachSession {
 
     public init(config: ListenMoreConfig, engine: CoachEngine, mic: MicSource, call: CallSource, signal: CallSignal,
                 keys: APIKeyProvider, renderer: CueRenderer, settings: TriggerSettings, enabled: Bool = true,
+                callState: CallStateProvider? = nil,
                 wallClock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.config = config
         self.engine = EngineQueue(engine)
         self.mic = mic
         self.call = call
         self.signal = signal
+        self.callState = callState
         self.keys = keys
         self.renderer = renderer
         self.wallClock = wallClock
@@ -204,7 +207,8 @@ public final class CoachSession {
     public func tick() {
         let before = indicator
         let reading = signal.poll(trigger.settings)
-        let actions = trigger.tick(liveApps: reading.liveApps, inputRunning: reading.inputRunning, now: wallClock())
+        let actions = trigger.tick(liveApps: reading.liveApps, inputRunning: reading.inputRunning, now: wallClock(),
+                                   callStates: callState?.callStates() ?? [:])
         apply(actions)
         // A manual session adopting the call app changes what to capture without an action.
         if actions.isEmpty && (syncCapture() || indicator != before) { changed() }

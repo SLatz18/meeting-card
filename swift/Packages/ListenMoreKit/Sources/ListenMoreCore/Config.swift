@@ -161,6 +161,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var pollS: Double
         public var startAfterS: Double
         public var stopAfterS: Double
+        /// Stop delay once an app-level call-state provider reports the call ended.
+        public var endedStopAfterS: Double
         /// Never trigger on these, in any mode (the host adds its own bundle ID).
         public var excludeBundleIds: [String]
     }
@@ -222,7 +224,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         }
         guard audio.sampleRate * audio.frameMs % 1000 == 0 else { throw ConfigError.invalid("frame_ms must divide sample_rate") }
         guard gpt.store == false else { throw ConfigError.invalid("gpt.store must be false") }
-        guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0 else { throw ConfigError.invalid("bad trigger timing") }
+        guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,
+              trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS else { throw ConfigError.invalid("bad trigger timing") }
     }
 
     public static func jsonObject(_ data: Data) throws -> [String: Any] {

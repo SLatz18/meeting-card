@@ -32,11 +32,14 @@ public final class CoachService: CoachSessionDelegate {
     /// - Parameters:
     ///   - keys: where the OpenAI key comes from, e.g. `KeychainStore(service: "<host's service>")`.
     ///   - ownBundleId / excludedBundleIds: never trigger on these (plus the config's `trigger.exclude_bundle_ids`).
+    ///   - callState: optional app-level call state; an `ended` report stops in `trigger.ended_stop_after_s`
+    ///     instead of the Core Audio `trigger.stop_after_s`.
     public init(config: ListenMoreConfig, glowStyle: GlowStyle, enabled: Bool, anyApp: Bool,
                 allowlist: [String]? = nil,
                 ownBundleId: String? = Bundle.main.bundleIdentifier, excludedBundleIds: [String] = [],
                 keys: APIKeyProvider = KeychainStore(),
                 provider: AudioStateProvider = CoreAudioStateProvider(),
+                callState: CallStateProvider? = nil,
                 mic: MicSource = MicCapture(), call: CallSource? = nil,
                 engine: CoachEngine = LocalCoachEngine(transports: .urlSession()),
                 glow: GlowOverlayController? = nil) {
@@ -51,7 +54,7 @@ public final class CoachService: CoachSessionDelegate {
                                        excludedBundleIds: excludedBundleIds, allowlist: allowlist)
         session = CoachSession(config: config, engine: engine, mic: mic, call: call ?? CallCapture(config: config),
                                signal: AudioActivitySignal(provider: provider), keys: keys, renderer: glow,
-                               settings: settings, enabled: enabled)
+                               settings: settings, enabled: enabled, callState: callState)
         session.delegate = self
         glow.placement = { [weak self] in
             guard let self else { return .init(screen: nil) }

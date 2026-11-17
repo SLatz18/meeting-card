@@ -280,4 +280,90 @@ final class CoachTriggerTests: XCTestCase {
         audio.set()
         XCTAssertEqual(stops(run(5.5, 40)).first?.1, .audioEnded)
     }
+
+    // MARK: app-level call state
+
+    final class FakeCallState: CallStateProvider {
+        var states: [String: CallState] = [:]
+        func callStates() -> [String: CallState] { states }
+    }
+
+    func makeSignalMonitor(_ calls: FakeCallState) -> CoachMonitor {
+        let s = TriggerSettings(config: config, anyApp: false, ownPid: Self.ownPid, ownBundleId: "com.example.hostapp")
+        return CoachMonitor(provider: audio, trigger: CoachTrigger(settings: s, enabled: true), callState: calls)
+    }
+
+    func testEndedCallStopsInThreeSecondsWhileTheAppStillHoldsItsDevices() throws {
+        let calls = FakeCallState()
+        monitor = makeSignalMonitor(calls)
+        audio.set(Self.proc("us.zoom.xos"))
+        XCTAssertEqual(starts(run(0, 5)).count, 1)
+        calls.states = ["us.zoom.xos": .ended]
+        let stop = try XCTUnwrap(stops(run(5.5, 40)).first)
+        XCTAssertEqual(stop.1, .callEnded)
+        XCTAssertEqual(stop.0, 8.5, accuracy: 1e-9, "3 s after the first ended report, not 30 s")
+    }
+
+    func testEndedAppDoesNotRestartWhileItsAudioKeepsRunning() {
+        let calls = FakeCallState()
+        monitor = makeSignalMonitor(calls)
+        audio.set(Self.proc("us.zoom.xos"))
+        run(0, 5)
+        calls.states = ["us.zoom.xos": .ended]
+        run(5.5, 9)
+        XCTAssertTrue(starts(run(9.5, 60)).isEmpty, "ended: no restart")
+        calls.states = [:]
+        XCTAssertTrue(starts(run(60.5, 90)).isEmpty, "provider lost track, Core Audio unchanged: still suppressed")
+        audio.set()
+        run(90.5, 91)
+        audio.set(Self.proc("us.zoom.xos"))
+        XCTAssertEqual(starts(run(91.5, 96)).count, 1, "the next real call starts normally")
+    }
+
+    func testEndedIsKeyedByAppAndCaseInsensitive() {
+        let calls = FakeCallState()
+        monitor = makeSignalMonitor(calls)
+        audio.set(Self.proc("us.zoom.xos"))
+        run(0, 5)
+        calls.states = ["com.google.Chrome": .ended]
+        XCTAssertTrue(stops(run(5.5, 20)).isEmpty, "another app's call ending changes nothing")
+        calls.states = ["US.ZOOM.XOS": .ended]
+        XCTAssertEqual(stops(run(20.5, 30)).first?.1, .callEnded)
+    }
+
+    func testBriefEndedBlipResetsTheShortStop() {
+        let calls = FakeCallState()
+        monitor = makeSignalMonitor(calls)
+        audio.set(Self.proc("us.zoom.xos"))
+        run(0, 5)
+        calls.states = ["us.zoom.xos": .ended]
+        run(5.5, 7)
+        calls.states = ["us.zoom.xos": .started]
+        XCTAssertTrue(stops(run(7.5, 20)).isEmpty)
+        calls.states = ["us.zoom.xos": .ended]
+        XCTAssertEqual(stops(run(20.5, 30)).first?.0, 23.5)
+    }
+
+    func testStartedAndMutedNeverStartOrHoldASession() throws {
+        let calls = FakeCallState()
+        monitor = makeSignalMonitor(calls)
+        calls.states = ["us.zoom.xos": .started]
+        XCTAssertTrue(starts(run(0, 10)).isEmpty, "no Core Audio call, no session")
+        audio.set(Self.proc("us.zoom.xos"))
+        XCTAssertEqual(starts(run(10.5, 15)).count, 1)
+        calls.states = ["us.zoom.xos": .muted]
+        audio.set()
+        let stop = try XCTUnwrap(stops(run(15.5, 60)).first)
+        XCTAssertEqual(stop.1, .audioEnded, "Core Audio stays the fallback")
+        XCTAssertEqual(stop.0, 45.5, accuracy: 1e-9)
+    }
+
+    func testWithoutAProviderCoreAudioStopsAfterThirtySeconds() throws {
+        audio.set(Self.proc("us.zoom.xos"))
+        run(0, 5)
+        audio.set()
+        let stop = try XCTUnwrap(stops(run(5.5, 60)).first)
+        XCTAssertEqual(stop.1, .audioEnded)
+        XCTAssertEqual(stop.0, 35.5, accuracy: 1e-9)
+    }
 }

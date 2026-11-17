@@ -128,6 +128,7 @@ public enum DefaultConfig {
     "poll_s": 0.5,
     "start_after_s": 3,
     "stop_after_s": 30,
+    "ended_stop_after_s": 3,
     "exclude_bundle_ids": ["com.listenmore.mac"]
   },
   "meet_title_regex": "\\bMeet\\b",

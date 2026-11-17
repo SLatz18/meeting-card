@@ -320,6 +320,46 @@ final class CoachSessionTests: XCTestCase {
         }
     }
 
+    final class FakeCallState: CallStateProvider {
+        var states: [String: CallState] = [:]
+        func callStates() -> [String: CallState] { states }
+    }
+
+    func testEndedCallStateStopsCaptureInThreeSeconds() async {
+        let provider = FakeAudioStateProvider()
+        let calls = FakeCallState()
+        let settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+        let clock = clock
+        let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: AudioActivitySignal(provider: provider),
+                             keys: FakeKeys(key: nil), renderer: renderer, settings: settings, callState: calls,
+                             wallClock: { clock.now() })
+        provider.zoomCall()
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertEqual(s.indicator, .listening)
+        calls.states = ["us.zoom.xos": .ended]
+        poll(s, seconds: 2.5)
+        XCTAssertNotNil(s.session)
+        poll(s, seconds: 1)
+        XCTAssertNil(s.session, "Zoom still holds its devices, but the call ended: stopped after 3 s")
+        XCTAssertTrue(s.capturingBundleIds.isEmpty)
+        XCTAssertEqual(mic.stopped, 1)
+        poll(s, seconds: 10)
+        XCTAssertNil(s.session, "no restart while the app stays ended")
+    }
+
+    /// Local-only: with no key the session still captures and runs local cues; only GPT is off.
+    func testNoKeyStillCoachesLocally() async {
+        let (s, provider) = audioSession()
+        provider.zoomCall()
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertEqual(s.indicator, .listening)
+        XCTAssertEqual(mic.started, 1)
+        let started = await eventually { self.engine.startedWithKey == [false] }
+        XCTAssertTrue(started, "the engine runs without a key (no GPT layer)")
+    }
+
     func testIndicatorOnWhilePrewarmedThenListening() async {
         let (s, provider) = audioSession()
         provider.zoomCall()
