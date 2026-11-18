@@ -72,7 +72,7 @@ public protocol LocalTextContext: AnyObject {
 
 public final class LocalLayer {
     /// "Speaking" = raw speech within this window (VAD hangover excluded from overlap).
-    static let speakingTailS = 0.06
+    public static let speakingTailS = 0.06
     /// The other side must keep talking through a cut-in's opening overlap, bar VAD flicker this short.
     static let overlapGapS = 0.1
     /// A cut-in is dropped when the other side's raw speech stops for longer than this before its
@@ -99,7 +99,8 @@ public final class LocalLayer {
         var onset: TimeInterval
         var overlap = 0.0
         var gap = 0.0
-        /// The other side has spoken since the onset: the pause the onset landed in is over.
+        /// The other side has spoken since the onset: the pause the onset landed in is over. Their
+        /// speaking tail counts, so a last word ending within a frame or two before the onset does too.
         var heard = false
         var othersAfter = 0.0
         var trailing = false
@@ -272,7 +273,7 @@ public final class LocalLayer {
         }
         let both = speaking(me, t) && speaking(others, t)
         if both { overlapFrames.append(t) }
-        cutIn(t, s, o, &ev, both)
+        cutIn(t, s, &ev, both)
         talkOver(t, &ev)
         monologue(t, s, o, &ev)
         talkShare(t, s, o, &ev)
@@ -288,21 +289,22 @@ public final class LocalLayer {
     // cut_in_others_pause_ms), the overlap from their onset lasts >= cut_in_min_overlap_ms, they keep going
     // >= cut_in_others_continue_ms, and the user's utterance runs past the backchannel length. Until they
     // first speak after the onset, the pause the onset landed in may run to cut_in_onset_gap_ms from the
-    // onset (to the start of the frame that brings their next word); after that, any pause of theirs
+    // onset (to the start of the frame their VAD dates their next speech from: a voiced frame it is
+    // still weighing counts, voiced, quiet, voiced included); after that, any pause of theirs
     // gets `cutInMaxOthersGapS`. A shorter overlap that ends with them stopping within
     // cut_in_trailing_window_s of the start is a trailing candidate: it needs them to leave the floor for
     // cut_in_trailing_yield_s, and the engine fires it only if their last words were unfinished.
-    private func cutIn(_ t: TimeInterval, _ s: VadState, _ o: VadState, _ ev: inout [LocalEvent], _ both: Bool) {
+    private func cutIn(_ t: TimeInterval, _ s: VadState, _ ev: inout [LocalEvent], _ both: Bool) {
         guard var c = cut else { return }
         let othersSpeaking = speaking(others, t)
-        if othersSpeaking && Elapsed.span(t - c.onset) > 0 { c.heard = true }
+        if othersSpeaking { c.heard = true }
         if Elapsed.span(c.overlap) < cutOverlap && !c.trailing {
             if othersSpeaking {
                 c.gap = 0
                 c.overlap += both ? frameS : 0
             } else {
                 c.gap += frameS
-                let onsetPause = Elapsed.span((o.raw ? t - frameS : t) - c.onset)
+                let onsetPause = Elapsed.span((others.pendingOnset ?? t) - c.onset)
                 if Elapsed.span(c.gap) > Self.overlapGapS && (c.heard || onsetPause > cutOnsetGap) {
                     let end = others.lastSpeechT
                     if Elapsed.span(c.overlap) >= cutTrailingOverlap && Elapsed.span(abs(end - c.onset)) <= cutTrailingWindow {

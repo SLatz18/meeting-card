@@ -131,22 +131,78 @@ final class LocalLayerTests: XCTestCase {
                                                 call: Synthetic.track(18, breaths, f0: othersF0))), [])
     }
 
+    /// Them end at 4.0 s, You start at 4.1 s (`offset` later on the clock) and Them go on `fromOnset`
+    /// after You's onset.
+    func onsetPauseCut(fromOnset: Double, offset: Double = 0, config: ListenMoreConfig? = nil) -> [LocalEvent.Kind] {
+        kinds(Synthetic.runLocal(config ?? self.config, mic: Synthetic.track(offset + 10, [(offset + 4.1, offset + 7.4)], f0: meF0),
+                                 call: Synthetic.track(offset + 10, [(offset + 1.0, offset + 4.0), (offset + 4.1 + fromOnset, offset + 9.0)],
+                                                       f0: othersF0)))
+    }
+
     /// The pause the user's onset lands in: 0.30 s from the onset to their next word keeps the cut-in
     /// (`cut_in_onset_gap_ms`) and 0.32 s drops it, wherever on the clock; at 200 ms, 0.20 and 0.22 s.
     func testOnsetPauseRunsToTheToleranceFromTheOnset() throws {
-        func cut(fromOnset: Double, offset: Double = 0, config: ListenMoreConfig? = nil) -> [LocalEvent.Kind] {
-            kinds(Synthetic.runLocal(config ?? self.config, mic: Synthetic.track(offset + 10, [(offset + 4.1, offset + 7.4)], f0: meF0),
-                                     call: Synthetic.track(offset + 10, [(offset + 1.0, offset + 4.0), (offset + 4.1 + fromOnset, offset + 9.0)],
-                                                           f0: othersF0)))
-        }
         XCTAssertEqual(config.local.cutInOnsetGapMs, 300)
         for offset in [0.0, 10.0, 100.0] {
-            XCTAssertEqual(cut(fromOnset: 0.30, offset: offset), [.interrupt], "0.30 s from the onset at offset \(offset)")
-            XCTAssertEqual(cut(fromOnset: 0.32, offset: offset), [], "0.32 s from the onset at offset \(offset)")
+            XCTAssertEqual(onsetPauseCut(fromOnset: 0.30, offset: offset), [.interrupt], "0.30 s from the onset at offset \(offset)")
+            XCTAssertEqual(onsetPauseCut(fromOnset: 0.32, offset: offset), [], "0.32 s from the onset at offset \(offset)")
         }
         let tight = try gapConfig(200)
-        XCTAssertEqual(cut(fromOnset: 0.20, config: tight), [.interrupt])
-        XCTAssertEqual(cut(fromOnset: 0.22, config: tight), [])
+        XCTAssertEqual(onsetPauseCut(fromOnset: 0.20, config: tight), [.interrupt])
+        XCTAssertEqual(onsetPauseCut(fromOnset: 0.22, config: tight), [])
+    }
+
+    /// The same boundary with a single-frame VAD (`onset_frames` 1, `onset_window` 1, no onset smoothing):
+    /// Them's restart is voiced the frame it starts, and the pause is measured to the start of that frame
+    /// (0.30 s keeps the cut-in, 0.32 s drops it), not to the frame before it.
+    func testOnsetPauseBoundaryWithASingleFrameVad() throws {
+        let single = try ListenMoreConfig.load(overrides: ["vad": ["onset_frames": 1, "onset_window": 1]])
+        for offset in [0.0, 10.0, 100.0] {
+            XCTAssertEqual(onsetPauseCut(fromOnset: 0.30, offset: offset, config: single), [.interrupt], "0.30 s at offset \(offset)")
+            XCTAssertEqual(onsetPauseCut(fromOnset: 0.32, offset: offset, config: single), [], "0.32 s at offset \(offset)")
+        }
+    }
+
+    /// Them voiced, quiet, then voiced again after You's onset (one speech burst of 0.02 s, 0.02 s of
+    /// silence, then their restart 0.04 s after the burst starts): their VAD dates the speech from the
+    /// burst, and the pause is measured to it, so 0.30 s from the onset to the burst keeps the cut-in
+    /// and 0.32 s drops it. Measured to the frame after the burst, 0.28 and 0.30 s would drop it.
+    func testFlickerBeforeTheirRestartGetsTheFullTolerance() {
+        func cut(burstAt d: Double) -> [LocalEvent.Kind] {
+            let sr = Double(Synthetic.sr)
+            func at(_ t: Double) -> Int { Int((t * sr).rounded()) }
+            var call = Synthetic.track(10, [(1.0, 4.0)], f0: othersF0)
+            let burst = Synthetic.speechish(0.02, seed: 9, f0: othersF0)
+            for j in burst.indices { call[at(4.1 + d) + j] = burst[j] }
+            let restart = Synthetic.speechish(9.0 - (4.1 + d + 0.04), seed: 3, f0: othersF0)
+            for j in restart.indices { call[at(4.1 + d + 0.04) + j] = restart[j] }
+            return kinds(Synthetic.runLocal(config, mic: Synthetic.track(10, [(4.1, 7.4)], f0: meF0), call: call))
+        }
+        XCTAssertEqual(cut(burstAt: 0.28), [.interrupt])
+        XCTAssertEqual(cut(burstAt: 0.30), [.interrupt])
+        XCTAssertEqual(cut(burstAt: 0.32), [])
+        XCTAssertEqual(cut(burstAt: 0.34), [])
+    }
+
+    /// You's onset next to Them's last word: they count as speaking for `LocalLayer.speakingTailS` after
+    /// their last voiced frame, and the cut-in starts when You's VAD has confirmed the onset, so an onset
+    /// that close doesn't land in a pause and Them's next pause gets the 0.16 s of any pause (their
+    /// restart 0.26 s after You's onset drops the cut-in). The distance depends on how many voiced frames
+    /// confirm You: the onset must be 0.02 s past their last voiced frame with the default 2-of-3 VAD,
+    /// 0.04 s with a single-frame VAD and 0.00 s with 3-of-3.
+    func testOnsetNextToTheirLastWordGetsNoTolerance() throws {
+        func cut(_ vad: [String: Any], d: Double) throws -> [LocalEvent.Kind] {
+            let c = try ListenMoreConfig.load(overrides: ["vad": vad])
+            let on = 4.0 + d
+            return kinds(Synthetic.runLocal(c, mic: Synthetic.track(10, [(on, on + 3.3)], f0: meF0),
+                                            call: Synthetic.track(10, [(1.0, 4.0), (on + 0.26, 9.0)], f0: othersF0)))
+        }
+        let cases: [(String, [String: Any], Double)] = [("2 of 3", [:], 0.02), ("1 of 1", ["onset_frames": 1, "onset_window": 1], 0.04),
+                                                         ("3 of 3", ["onset_frames": 3, "onset_window": 3], 0.0)]
+        for (name, vad, nearest) in cases {
+            XCTAssertEqual(try cut(vad, d: nearest), [], "\(name): onset \(nearest) s after their last voiced frame")
+            XCTAssertEqual(try cut(vad, d: nearest + 0.02), [.interrupt], "\(name): one frame later")
+        }
     }
 
     /// Only the pause the onset lands in: once they speak again, their next pause gets
@@ -156,6 +212,16 @@ final class LocalLayerTests: XCTestCase {
         XCTAssertEqual(kinds(run(10, me: [(4.1, 7.4)], others: [(1.0, 4.0), (4.3, 9.0)])), [.interrupt])
         XCTAssertEqual(kinds(run(10, me: [(4.1, 7.4)], others: [(1.0, 4.0), (4.3, 4.6), (4.82, 9.0)])), [])
         XCTAssertEqual(kinds(run(10, me: [(3.2, 6.5)], others: [(1.0, 3.3), (3.52, 7.0)])), [])
+    }
+
+    /// You start at 3.2 s while Them talk, and Them breathe 0.20 s (3.26-3.46 s) with their restart only
+    /// 0.26 s from You's onset: inside the onset tolerance's reach, but the onset didn't land in a pause,
+    /// so the breath gets `cutInMaxOthersGapS` (0.16 s) and the cut-in drops, tolerance or not.
+    func testOnsetTolerancePausesDoNotApplyWhenThemWereTalkingAtTheOnset() throws {
+        let them: [(Double, Double)] = [(1.0, 3.26), (3.46, 9.0)]
+        XCTAssertEqual(kinds(run(10, me: [(3.2, 6.5)], others: them)), [])
+        XCTAssertEqual(kinds(Synthetic.runLocal(try gapConfig(0), mic: Synthetic.track(10, [(3.2, 6.5)], f0: meF0),
+                                                call: Synthetic.track(10, them, f0: othersF0))), [])
     }
 
     /// A lone voiced frame on their side after their VAD has let go (a click) never becomes speech, so it
