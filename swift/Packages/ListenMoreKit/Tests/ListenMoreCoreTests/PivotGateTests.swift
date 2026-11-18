@@ -265,6 +265,15 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(pivot(reply: PivotLines.releaseReply, share: PivotLines.release))
     }
 
+    func testWeatherSmallTalkAndAWorkTripAreNone() {
+        assertNoCandidate(pivot(reply: "Oh it has been lovely here, I went for a long walk this morning and I sat outside with my coffee for an hour.",
+                                share: "We have been stuck inside all week because the weather has been terrible here."))
+        assertNoCandidate(pivot(reply: "Great, I will update my notes, I spent the morning on my part of the rollout and I finished my review of the scripts.",
+                                share: "I just got back from the client trip and we went through the whole migration plan with their team."))
+        XCTAssertEqual(run(pivot(share: "We just got back from a long road trip with the kids and I was so tired by the end."), until: 30)
+            .counters.candidates, 1, "a personal trip is still a share")
+    }
+
     func testTheyAskedAQuestionIsNone() {
         assertNoCandidate(pivot(share: PivotLines.shareThenAsk))
     }

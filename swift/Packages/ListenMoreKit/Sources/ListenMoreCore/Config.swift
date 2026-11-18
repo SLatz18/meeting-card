@@ -110,7 +110,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var closingPhrases: [String]
         public var closingQuietS: Double
         /// Self-pivot gate (`PivotGate`, shadow counters only). Their turn shares something personal: at
-        /// least `pivot_share_min_words`, a share marker, and a share word or a `heat_personal` topic,
+        /// least `pivot_share_min_words`, a share marker, and a share word (a feeling, a life event or a
+        /// personal topic; not `heat_personal`, whose small talk such as the weather isn't a share),
         /// with no invitation for the user to share and no question at its end.
         public var pivotShareMinWords: Int
         public var pivotShareMarkers: [String]
