@@ -6,7 +6,8 @@ import Foundation
 /// for a candidate (`text.pivot_*`):
 /// 1. Their turn has at least `pivot_share_min_words`, a share marker ("i just", "we finally") and a
 ///    share word (a feeling, a life event or a personal topic), no invitation to share (`pivot_invites`,
-///    `question_open_invites`) and no question at its end.
+///    `question_open_invites`) and no question at its end. An invitation the user answered with less
+///    than `pivot_reply_min_words` (a backchannel) still holds for their next turn.
 /// 2. The user starts within `pivot_reply_max_start_s` of their last speech and says at least
 ///    `pivot_reply_min_words` about themselves: first-person words make up `pivot_first_person_share`
 ///    of the person words (`pivot_other_person` counts you, he, she, they and the like against it),
@@ -84,6 +85,9 @@ final class PivotGate {
     private var reply: Reply?
     private var ended: Ended?
     private var muted = false
+    /// They invited the user to share, and the user hasn't answered at length yet (a backchannel such
+    /// as "yeah" split their turn): their next turn is still an invitation.
+    private var invitePending = false
     private var lastCandidateTurnEnd: TimeInterval?
     private(set) var counters = Counters()
     private(set) var candidates: [Candidate] = []
@@ -160,6 +164,7 @@ final class PivotGate {
         boundary = -Double.infinity
         reply = nil
         ended = nil
+        invitePending = false
     }
 
     // MARK: turns
@@ -193,7 +198,9 @@ final class PivotGate {
         guard let e = ended else { return nil }
         let theirs = them.filter { Elapsed.span($0.end - boundary) > 0 && Elapsed.span($0.end - e.reply.themEnd) <= 0 }
         let haveTheirs = theirs.last.map { Elapsed.span($0.end - e.reply.themEnd) >= 0 } ?? false
-        if haveTheirs && !shared(theirs) {
+        let invited = invitePending || theirs.contains(where: { has($0.text, invites) })
+        if haveTheirs && !invited && !shared(theirs) {
+            invitePending = false
             finish(e)
             return nil
         }
@@ -202,12 +209,14 @@ final class PivotGate {
         guard haveTheirs && haveMine else {
             if Elapsed.span(now - e.at) > x.pivotTranscriptWaitS {
                 counters.lateTranscripts += 1
+                if haveTheirs { invitePending = invited }
                 finish(e)
             }
             return nil
         }
+        invitePending = invited && mine.reduce(0, { $0 + TextRules.tokens($1.text).count }) < x.pivotReplyMinWords
         finish(e)
-        guard pivots(mine) else { return nil }
+        guard !invited, shared(theirs), pivots(mine) else { return nil }
         let rearmed = lastCandidateTurnEnd.map { Elapsed.span(e.at - $0) >= x.pivotRearmS } ?? true
         guard rearmed && counters.candidates < x.pivotMaxPerCall else {
             counters.rateLimited += 1
@@ -225,8 +234,7 @@ final class PivotGate {
     private func shared(_ lines: [Line]) -> Bool {
         guard lines.reduce(0, { $0 + TextRules.tokens($1.text).count }) >= x.pivotShareMinWords,
               lines.contains(where: { has($0.text, x.pivotShareMarkers) }),
-              lines.contains(where: { has($0.text, x.pivotShareWords) }),
-              !lines.contains(where: { has($0.text, invites) }) else { return false }
+              lines.contains(where: { has($0.text, x.pivotShareWords) }) else { return false }
         let last = lines.last.map(\.text) ?? ""
         let lastSentence = TextRules.sentences(last).last ?? ""
         return !asks(lastSentence) && !endsWithTag(lastSentence) && !(pieces(last).last.map(asks) ?? false)

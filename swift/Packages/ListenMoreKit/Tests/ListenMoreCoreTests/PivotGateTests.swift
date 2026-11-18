@@ -282,6 +282,26 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(pivot(share: PivotLines.inviteThenShare))
     }
 
+    /// Their invitation, the user's "yeah", then their share: the invitation still holds.
+    func testAnInvitationSplitByABackchannelStillHolds() {
+        var s = PivotScript()
+        s.them("Have you ever run a race? I always wanted to try one.", 0.5, 3.5)
+        s.you("Yeah.", 4.0, 4.4)
+        s.them(PivotLines.share, 5.0, 10.0)
+        s.you(PivotLines.pivot, 10.5, 16.5)
+        assertNoCandidate(s)
+    }
+
+    /// An invitation the user answered at length is spent: a later share and pivot still count.
+    func testAnInvitationAnsweredAtLengthIsSpent() {
+        var s = PivotScript()
+        s.them("Have you ever run a race? I always wanted to try one.", 0.5, 3.5)
+        s.you("No, I never have, I mostly ride my bike on the weekends and I keep meaning to sign up for one.", 4.0, 9.0)
+        s.them(PivotLines.share, 12.0, 17.0)
+        s.you(PivotLines.pivot, 17.5, 23.5)
+        XCTAssertEqual(run(s, until: 40).counters.candidates, 1)
+    }
+
     func testReplyStartingLateIsNone() {
         assertNoCandidate(pivot(replyFrom: 11.0))
     }
