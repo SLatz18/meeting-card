@@ -158,6 +158,14 @@ public extension Theme {
         public static let markGlyphSize = CardStyle.Typography.caption.size
         public static let markRadius = Theme.Coach.pauseButtonRadius
         public static let markGutter = CardStyle.Spacing.leading - Theme.Coach.controlInset
+        /// The lab window's own text, like the Settings window's: its section heading, help lines and
+        /// the closing note.
+        public static let labHeadingFont = Theme.Settings.rowFont
+        public static let labHeadingText = CardStyle.Text.primary
+        public static let labHelpFont = Theme.Settings.helperFont
+        public static let labHelpText = Theme.Settings.helperText
+        public static let labNoteFont = CardStyle.Typography.caption
+        public static let labNoteText = CardStyle.Text.tertiary
     }
 }
 
@@ -245,6 +253,12 @@ public struct CueTimeline: Equatable, Sendable, Identifiable {
 }
 
 // MARK: pacing
+
+/// The lab's playback: its step, and the speeds it offers.
+public enum CueDisplayLabPlayback {
+    public static let tick: TimeInterval = 0.1
+    public static let speeds: [Double] = [1, 2, 4]
+}
 
 public enum CueDisplayPacing {
     /// N: at most one new cue appears per this many seconds, on any option. At least twice the
@@ -426,6 +440,10 @@ public enum CueDisplayCopy {
         public static let pause = "Pause"
         public static let restart = "Restart"
         public static let speed = "Speed"
+        /// VoiceOver: the timeline's scrubber.
+        public static let position = "Playback position"
+        public static func time(_ t: TimeInterval) -> String { String(format: "%.1f s", t) }
+        public static func speedValue(_ x: Double) -> String { "\(Int(x))×" }
         public static let log = "What the display did"
         public static let note = "Placeholder copy. Synthetic and harness timelines only: no call, no audio, nothing saved."
         public static func gap(_ n: TimeInterval) -> String { "At most one new cue every \(Int(n)) s" }

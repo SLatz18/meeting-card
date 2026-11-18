@@ -8,10 +8,6 @@ import SwiftUI
 public struct CueDisplayLabView: View {
     public enum Appearance: String, CaseIterable, Sendable { case system, light, dark }
 
-    /// Playback step, and the speeds offered.
-    static let tick: TimeInterval = 0.1
-    static let speeds: [Double] = [1, 2, 4]
-
     @State private var option = CueDisplayOption.rotatingLine
     @State private var timelineID = CueTimeline.harnessBusy.id
     @State private var mode = CueDisplaySurface.Mode.card
@@ -22,7 +18,7 @@ public struct CueDisplayLabView: View {
     @State private var speed: Double = 1
     @Environment(\.colorScheme) private var systemScheme
 
-    private let timer = Timer.publish(every: CueDisplayLabView.tick, on: .main, in: .common).autoconnect()
+    private let timer = Timer.publish(every: CueDisplayLabPlayback.tick, on: .main, in: .common).autoconnect()
 
     public init() {}
 
@@ -38,6 +34,7 @@ public struct CueDisplayLabView: View {
 
     public var body: some View {
         let copy = CueDisplayCopy.Lab.self
+        let d = Theme.CueDisplay.self
         let style = CardStyle.for(dark: scheme == .dark)
         let display = CueDisplayPacer.frame(at: t, events: timeline.events)
         VStack(alignment: .leading, spacing: Theme.Settings.groupSpacing) {
@@ -77,14 +74,21 @@ public struct CueDisplayLabView: View {
                     playing = false
                 }
                 Slider(value: $t, in: 0...timeline.duration)
-                Text(String(format: "%.1f s", t)).monospacedDigit()
+                    .accessibilityLabel(copy.position)
+                    .accessibilityValue(copy.time(t))
+                Text(copy.time(t)).monospacedDigit()
                 Picker(copy.speed, selection: $speed) {
-                    ForEach(Self.speeds, id: \.self) { Text("\(Int($0))×").tag($0) }
+                    ForEach(CueDisplayLabPlayback.speeds, id: \.self) { Text(copy.speedValue($0)).tag($0) }
                 }
                 .fixedSize()
             }
-            Text(copy.gap(CueDisplayPacing.minNewCueGap)).foregroundStyle(.secondary)
-            Text(copy.log).font(.headline)
+            Text(copy.gap(CueDisplayPacing.minNewCueGap))
+                .font(d.labHelpFont.swiftUI)
+                .foregroundStyle(d.labHelpText.shapeStyle(style))
+            Text(copy.log)
+                .font(d.labHeadingFont.swiftUI)
+                .foregroundStyle(d.labHeadingText.shapeStyle(style))
+                .accessibilityAddTraits(.isHeader)
             ScrollView {
                 VStack(alignment: .leading) {
                     ForEach(Array(display.decisions.enumerated()), id: \.offset) { _, d in
@@ -94,13 +98,15 @@ public struct CueDisplayLabView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(minHeight: Theme.CoachCard.height)
-            Text(copy.note).font(.footnote).foregroundStyle(.tertiary)
+            Text(copy.note)
+                .font(d.labNoteFont.swiftUI)
+                .foregroundStyle(d.labNoteText.shapeStyle(style))
         }
-        .padding()
-        .frame(minWidth: Theme.CoachPill.maxWidth + 2 * Theme.Settings.inset * 2)
+        .frame(minWidth: Theme.CoachCard.width + 2 * d.snapshotPadding)
+        .padding(Theme.Settings.inset)
         .onReceive(timer) { _ in
             guard playing else { return }
-            t = min(timeline.duration, t + Self.tick * speed)
+            t = min(timeline.duration, t + CueDisplayLabPlayback.tick * speed)
             if t >= timeline.duration { playing = false }
         }
         .onChange(of: timelineID) {

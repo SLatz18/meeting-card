@@ -237,22 +237,24 @@ final class CueDisplayTests: XCTestCase {
         }
     }
 
-    /// The surfaces take every size, radius, alpha and color from a token: no number in their code
-    /// but 0, 1 and 2, and no color literal.
-    func testViewsHaveNoLiteralValues() throws {
-        let src = try read("Core/CueDisplayViews.swift")
-        let code = src.components(separatedBy: "\n")
-            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") && !$0.trimmingCharacters(in: .whitespaces).hasPrefix("///") }
-            .map { $0.replacingOccurrences(of: #""(?:[^"\\]|\\.)*""#, with: "\"\"", options: .regularExpression) }
-            .joined(separator: "\n")
+    /// The surfaces and the lab take every size, radius, alpha, font and color from a token: no number
+    /// in their code but 0, 1 and 2, no color literal and no system text style.
+    func testViewsAndLabHaveNoLiteralValues() throws {
         let number = try NSRegularExpression(pattern: #"(?<![A-Za-z0-9_.])\d+(\.\d+)?(?![A-Za-z0-9_])"#)
-        for m in number.matches(in: code, range: NSRange(code.startIndex..., in: code)) {
-            let n = (code as NSString).substring(with: m.range)
-            XCTAssertTrue(["0", "1", "2"].contains(n), "literal \(n)")
-        }
-        for bad in ["Color.red", "Color.orange", "Color.blue", "Color.gray", "Color.black", "Color.white", "Color(red:", "Color(white:",
-                    "Color(.sRGB", "NSColor", "srgbRed", ".system(size:"] {
-            XCTAssertFalse(code.contains(bad), bad)
+        for file in ["Core/CueDisplayViews.swift", "Core/CueDisplayLab.swift"] {
+            let code = try read(file).components(separatedBy: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                .map { $0.replacingOccurrences(of: #""(?:[^"\\]|\\.)*""#, with: "\"\"", options: .regularExpression) }
+                .joined(separator: "\n")
+            for m in number.matches(in: code, range: NSRange(code.startIndex..., in: code)) {
+                let n = (code as NSString).substring(with: m.range)
+                XCTAssertTrue(["0", "1", "2"].contains(n), "\(file): literal \(n)")
+            }
+            for bad in ["Color.red", "Color.orange", "Color.blue", "Color.gray", "Color.black", "Color.white", "Color(red:", "Color(white:",
+                        "Color(.sRGB", "NSColor", "srgbRed", ".system(size:", ".font(.", "foregroundStyle(.", ".padding()", "Text(\"",
+                        "String(format:"] {
+                XCTAssertFalse(code.contains(bad), "\(file): \(bad)")
+            }
         }
     }
 
