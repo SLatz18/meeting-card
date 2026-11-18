@@ -282,6 +282,18 @@ final class PivotGateTests: XCTestCase {
                                 share: PivotLines.worried))
     }
 
+    /// After sympathy, a singular "I" unlocks "we" even with no share marker ("we bought" isn't one).
+    func testASingularIUnlocksWeAfterSympathy() {
+        let house = "We finally bought our first house last week and I am so excited to move in."
+        XCTAssertEqual(run(pivot(reply: "Congrats! We bought a place last spring too and I painted every room in it, our kitchen took me weeks.",
+                                 share: house), until: 30).counters.candidates, 1)
+    }
+
+    /// Each reaction counts on its own, so several in one line outweigh the first-person words.
+    func testSeveralReactionsInOneLineEachCount() {
+        assertNoCandidate(pivot(reply: "My legs would never manage that and I would be so tired after, I love that, so exciting, that sounds like my kind of day."))
+    }
+
     /// Planning a celebration for them is about them, though "I will book us a table" unlocks "we".
     func testPlanningACelebrationForThemIsNone() {
         let house = "We finally bought our first house last week and I am so excited to move in."
