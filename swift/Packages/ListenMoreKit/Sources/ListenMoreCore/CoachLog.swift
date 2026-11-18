@@ -355,14 +355,14 @@ public enum CoachLog {
     /// a status from `GptError.http`, `URLError<code>`, or the error's domain and code.
     public static func describe(_ error: Error) -> (httpStatus: Int?, code: LogToken) {
         if let g = error as? GptError {
-            if case .http(let status) = g { return (status, LogToken.constant("http")) }
-            if case .badResponse = g { return (nil, LogToken.constant("badResponse")) }
-            if case .notConnected = g { return (nil, LogToken.constant("notConnected")) }
-            if case .budgetExhausted = g { return (nil, LogToken.constant("budgetExhausted")) }
+            switch g {
+            case .http(let status): return (status, LogToken.constant("http"))
+            case .badResponse: return (nil, LogToken.constant("badResponse"))
+            case .notConnected: return (nil, LogToken.constant("notConnected"))
+            case .budgetExhausted: return (nil, LogToken.constant("budgetExhausted"))
             // The 401 was the first host's; this error is about the retry on the regional host, so no status is claimed.
-            if case .hostRejected = g { return (nil, LogToken.constant("hostRejected")) }
-            // A GptError case without a code of its own here still logs, with no status and no text.
-            return (nil, LogToken.constant("gptError"))
+            case .hostRejected: return (nil, LogToken.constant("hostRejected"))
+            }
         }
         if let u = error as? URLError { return (nil, LogToken.serverCode("URLError\(u.code.rawValue)")) }
         let ns = error as NSError
