@@ -122,7 +122,9 @@ public enum Checks {
         if !r.judgeOn {
             check("judge off: 0 judge calls", r.judgeCalls == 0, "\(r.judgeCalls) judge calls (not_listening not exercised)")
         }
-        let problems = r.problems.filter { $0 != "transcriberClearRejected" }
+        // A scripted call stream is digital silence wherever nobody on the call speaks, which the coach
+        // log's silent-call report (AudioFlowMeter) rightly reports; here that is the script, not a problem.
+        let problems = r.problems.filter { $0 != "transcriberClearRejected" && !$0.hasPrefix("callAudioSilent(") }
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))
 
         // Scenario-specific. Offline the windows are exact (lockstep). Live, frames already queued when a
