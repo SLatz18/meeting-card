@@ -15,14 +15,12 @@ public struct CueDisplaySurface: View {
     let t: TimeInterval
     let mode: Mode
     let hover: Bool
-    let increasedContrast: Bool
+    /// nil: the system's Increase Contrast setting, like the shipped card (`CoachCardState.increasedContrast`).
+    let increasedContrast: Bool?
     @Environment(\.colorScheme) private var colorScheme
 
-    /// The system's Increase Contrast setting, like the shipped card (`CoachCardState.increasedContrast`).
-    @MainActor public static var systemIncreasedContrast: Bool { NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
-
     public init(option: CueDisplayOption, timeline: CueTimeline, t: TimeInterval, mode: Mode, hover: Bool = false,
-                increasedContrast: Bool = CueDisplaySurface.systemIncreasedContrast) {
+                increasedContrast: Bool? = nil) {
         self.option = option
         self.timeline = timeline
         self.t = t
@@ -34,9 +32,10 @@ public struct CueDisplaySurface: View {
     public var body: some View {
         let display = CueDisplayPacer.frame(at: t, events: timeline.events)
         let style = CardStyle.for(dark: colorScheme == .dark)
+        let ic = increasedContrast ?? NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         switch mode {
-        case .card: CueCardMock(option: option, timeline: timeline, display: display, hover: hover, style: style, ic: increasedContrast)
-        case .pill: CuePillMock(option: option, display: display, hover: hover, style: style, ic: increasedContrast)
+        case .card: CueCardMock(option: option, timeline: timeline, display: display, hover: hover, style: style, ic: ic)
+        case .pill: CuePillMock(option: option, display: display, hover: hover, style: style, ic: ic)
         }
     }
 }
