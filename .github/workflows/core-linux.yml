@@ -13,10 +13,10 @@ permissions:
 jobs:
   core-linux:
     runs-on: ubuntu-24.04
-    container: swift:6.2-noble
+    container: swift:6.2-noble@sha256:3459518b2e723a7c363d0f8cfa44fc796c77ecd8c18e92fd10e6f92dd78c0b12
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: ListenMoreCore tests
         working-directory: swift/Packages/ListenMoreKit
         shell: bash
