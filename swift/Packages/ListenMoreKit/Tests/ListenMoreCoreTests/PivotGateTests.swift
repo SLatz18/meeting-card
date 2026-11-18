@@ -160,12 +160,17 @@ final class PivotGateTests: XCTestCase {
         XCTAssertEqual(run(pivot(reply: PivotLines.mostlyMe), until: 30).counters.candidates, 1)
     }
 
-    func testTheWindowEdgesHoldAnywhereOnTheClock() {
-        for startFrame in [0, 50_015, 180_003, 4_320_001] {
+    /// At these frames the raw differences of frame times land a hair past 5 s (2, 11888) or short of
+    /// 2 s (679, 11888); read through `Elapsed.span` they are exact.
+    func testTheWindowEdgesHoldAnywhereOnTheClock() throws {
+        for startFrame in [0, 2, 679, 11_888, 50_015, 4_320_001] {
             var s = PivotScript()
             s.them(PivotLines.share, 0.5, 5.5)
             s.you(PivotLines.pivot, 10.5, 16.5)
-            XCTAssertEqual(run(s, until: 30, startFrame: startFrame).counters.candidates, 1, "a reply exactly 5 s later, frame \(startFrame)")
+            let gate = run(s, until: 30, startFrame: startFrame)
+            XCTAssertEqual(gate.counters.candidates, 1, "a reply exactly 5 s later, frame \(startFrame)")
+            let c = try XCTUnwrap(gate.candidates.first)
+            XCTAssertEqual(c.turnEnd - c.replyEnd, 2.0, accuracy: 1e-9, "quiet exactly pivot_turn_end_gap_s, frame \(startFrame)")
             var late = PivotScript()
             late.them(PivotLines.share, 0.5, 5.5)
             late.you(PivotLines.pivot, 10.52, 16.5)
@@ -223,15 +228,25 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(s)
     }
 
+    /// They start over the user's reply, after a short pause in it: the reply isn't over, and what was
+    /// said before the pause is not judged alone.
     func testTheirOnsetWhileYouStillTalkIsNone() {
-        var s = pivot()
-        s.them(PivotLines.next, 11.0, 13.0)
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.you(PivotLines.pivotStart, 6.0, 11.0)
+        s.you(PivotLines.next, 12.0, 15.0)
+        s.them(PivotLines.next, 13.5, 15.5)
         assertNoCandidate(s)
     }
 
+    /// `clear()` drops the turn in progress and every line: their earlier share can't make a later
+    /// plain line read as one.
     func testClearDropsTheTurnAndItsText() {
+        var s = pivot()
+        s.them(PivotLines.next, 15.0, 17.0)
+        s.you(PivotLines.pivot, 17.5, 23.5)
         let gate = PivotGate(config: config)
-        pivot().play(into: gate, until: 30) { t in
+        s.play(into: gate, until: 40) { t in
             if abs(t - 13.0) < 1e-9 { gate.clear() }
         }
         XCTAssertEqual(gate.counters, PivotGate.Counters())
