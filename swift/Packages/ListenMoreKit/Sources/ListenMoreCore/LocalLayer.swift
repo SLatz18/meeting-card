@@ -321,7 +321,7 @@ public final class LocalLayer {
             cut = nil
             return
         }
-        if othersSpeaking && Elapsed.span(t - c.onset) > 0 { c.othersAfter += frameS }
+        if othersSpeaking { c.othersAfter += frameS }
         cut = c
         if !s.active {
             if Elapsed.span(t - me.lastSpeechT) > cutPause { cut = nil }

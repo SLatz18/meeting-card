@@ -55,9 +55,9 @@ public final class StreamVAD {
     public private(set) var lastSpeechT: TimeInterval = 0
     public private(set) var activeSince: TimeInterval?
 
-    /// Start of the earliest voiced frame still waiting in the onset window while the VAD hasn't
-    /// confirmed activity: the time its onset is back-dated to if the next voiced frame confirms it.
-    /// nil while active or with no voiced frame in the window.
+    /// While the VAD hasn't confirmed activity (fewer than `onset_frames` voiced frames in the last
+    /// `onset_window`), the start of the earliest voiced frame still in that window: the time the onset
+    /// is back-dated to if enough later voiced frames confirm it. nil while active or with none there.
     public var pendingOnset: TimeInterval? { active ? nil : recent.first(where: { $0.1 })?.0 }
 
     public init(config: ListenMoreConfig) {

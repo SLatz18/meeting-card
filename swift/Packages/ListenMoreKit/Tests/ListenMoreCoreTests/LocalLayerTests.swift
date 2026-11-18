@@ -185,11 +185,11 @@ final class LocalLayerTests: XCTestCase {
     }
 
     /// You's onset next to Them's last word: they count as speaking for `LocalLayer.speakingTailS` after
-    /// their last voiced frame, and the cut-in starts when You's VAD has confirmed the onset, so an onset
-    /// that close doesn't land in a pause and Them's next pause gets the 0.16 s of any pause (their
-    /// restart 0.26 s after You's onset drops the cut-in). The distance depends on how many voiced frames
-    /// confirm You: the onset must be 0.02 s past their last voiced frame with the default 2-of-3 VAD,
-    /// 0.04 s with a single-frame VAD and 0.00 s with 3-of-3.
+    /// their last voiced frame, and the cut-in starts when You's VAD has confirmed the onset. An onset
+    /// within 0.02 s of Them's last voiced frame (default 2-of-3 VAD), 0.04 s (single-frame VAD) or
+    /// 0.00 s (3-of-3) doesn't land in a pause: Them still count as speaking, no tolerance applies and
+    /// Them's next pause gets the 0.16 s of any pause (their restart 0.26 s after You's onset drops the
+    /// cut-in). Only an onset further out than that lands in a pause and gets the onset tolerance.
     func testOnsetNextToTheirLastWordGetsNoTolerance() throws {
         func cut(_ vad: [String: Any], d: Double) throws -> [LocalEvent.Kind] {
             let c = try ListenMoreConfig.load(overrides: ["vad": vad])
@@ -200,9 +200,30 @@ final class LocalLayerTests: XCTestCase {
         let cases: [(String, [String: Any], Double)] = [("2 of 3", [:], 0.02), ("1 of 1", ["onset_frames": 1, "onset_window": 1], 0.04),
                                                          ("3 of 3", ["onset_frames": 3, "onset_window": 3], 0.0)]
         for (name, vad, nearest) in cases {
-            XCTAssertEqual(try cut(vad, d: nearest), [], "\(name): onset \(nearest) s after their last voiced frame")
-            XCTAssertEqual(try cut(vad, d: nearest + 0.02), [.interrupt], "\(name): one frame later")
+            XCTAssertEqual(try cut(vad, d: nearest), [], "\(name): onset \(nearest) s after their last voiced frame, no tolerance")
+            XCTAssertEqual(try cut(vad, d: nearest + 0.02), [.interrupt], "\(name): one frame further out, tolerance applies")
         }
+    }
+
+    /// `pendingOnset` is the earliest voiced frame the VAD is still weighing, not the latest: with
+    /// `onset_frames` 3, voiced, quiet, voiced is two of three, still pending from the first frame; one
+    /// more voiced frame later it is still the first of the two. Three voiced frames in the window
+    /// confirm it, back-dated to the earliest, and nothing is pending any more.
+    func testPendingOnsetIsTheEarliestVoicedFrame() throws {
+        let vad = StreamVAD(config: try ListenMoreConfig.load(overrides: ["vad": ["onset_frames": 3, "onset_window": 4]]))
+        let voiced = Synthetic.speechish(0.02, seed: 5, f0: othersF0)
+        let quiet = [Float](repeating: 0, count: voiced.count)
+        func feed(_ frame: [Float], _ k: Int) -> VadState { vad.process(tEnd: Double(k + 1) * 0.02, frame: frame[...]) }
+        XCTAssertNil(vad.pendingOnset)
+        XCTAssertTrue(feed(voiced, 0).raw)
+        XCTAssertEqual(try XCTUnwrap(vad.pendingOnset), 0.0, accuracy: 1e-9)
+        _ = feed(quiet, 1)
+        XCTAssertEqual(try XCTUnwrap(vad.pendingOnset), 0.0, accuracy: 1e-9)
+        _ = feed(voiced, 2)
+        XCTAssertEqual(try XCTUnwrap(vad.pendingOnset), 0.0, accuracy: 1e-9, "two voiced frames in the window: the first")
+        let st = feed(voiced, 3)
+        XCTAssertEqual(st.onset ?? -1, 0.0, accuracy: 1e-9, "three confirm it, back-dated to the first")
+        XCTAssertNil(vad.pendingOnset)
     }
 
     /// Only the pause the onset lands in: once they speak again, their next pause gets
