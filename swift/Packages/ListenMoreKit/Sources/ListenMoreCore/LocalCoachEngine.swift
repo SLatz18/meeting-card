@@ -72,6 +72,7 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     private let participants: Int
     private let judgeKeys: APIKeyProvider?
     private let judgeProvider: (@Sendable () -> JudgeProviderKind?)?
+    private let selfPivotEnabled: @Sendable () -> Bool
     private var config: ListenMoreConfig?
     private var pipeline: CoachPipeline?
     private var aligner: FrameAligner?
@@ -82,13 +83,17 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     /// (2 = a 1:1), for talk share and group questions. `judgeProvider`, read at each start, replaces
     /// the config's `judge.provider` when it returns a value (a host setting; the next call uses it).
     /// `judgeKeys` supplies the TypeSafe key, read at start only while that provider is selected.
+    /// `selfPivotEnabled` is the host's self-pivot switch, read before every self-pivot judge step (so
+    /// turning it off takes effect at once); self-pivot also needs a key and a provider that can judge it.
     public init(transports: GptTransports? = nil, maxLagMs: Int = 200, participants: Int = 2,
-                judgeKeys: APIKeyProvider? = nil, judgeProvider: (@Sendable () -> JudgeProviderKind?)? = nil) {
+                judgeKeys: APIKeyProvider? = nil, judgeProvider: (@Sendable () -> JudgeProviderKind?)? = nil,
+                selfPivotEnabled: @escaping @Sendable () -> Bool = { true }) {
         self.transports = transports
         self.maxLagMs = maxLagMs
         self.participants = participants
         self.judgeKeys = judgeKeys
         self.judgeProvider = judgeProvider
+        self.selfPivotEnabled = selfPivotEnabled
     }
 
     /// The config a session runs with: `config` with the host's provider pick applied.
@@ -112,6 +117,10 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     public var cueHolds: [CuePolicy.Hold] { pipeline?.policy.held ?? [] }
 
     public func start(config: ListenMoreConfig, apiKey: APIKey?) {
+        start(config: config, apiKey: apiKey, call: CoachCallContext())
+    }
+
+    public func start(config: ListenMoreConfig, apiKey: APIKey?, call: CoachCallContext) {
         stop()
         let config = sessionConfig(config)
         self.config = config
@@ -146,7 +155,8 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
                                  onClearRejected: { [weak self] speaker in
                                      guard let self else { return }
                                      self.delegate?.engine(self, clearRejected: speaker)
-                                 })
+                                 },
+                                 call: call, selfPivotAllowed: selfPivotEnabled)
             box.layer = layer
             layer.start()
             gpt = layer

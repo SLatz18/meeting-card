@@ -173,31 +173,35 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
     private let key: APIKey
     private let http: HTTPTransport
     private let hosts: LearnedHosts
+    public let spec: JudgeSpec
     private let lock = NSLock()
     private var url: String
     private var fallbackTried = false
 
     /// `hosts`: where a regional Responses URL learned by an earlier judge is kept (each engine start
     /// builds a new judge; sharing it means only the first call after launch pays for the fallback).
-    public init(config: ListenMoreConfig, key: APIKey, http: HTTPTransport, hosts: LearnedHosts = .shared) {
+    /// `spec`: the question this judge asks (the cue judge's by default; `JudgeSpec.selfPivot` for the
+    /// self-pivot judge). Every request sends `store: gpt.store`, which config validation keeps false.
+    public init(config: ListenMoreConfig, key: APIKey, http: HTTPTransport, hosts: LearnedHosts = .shared, spec: JudgeSpec = .cue) {
         gpt = config.gpt
         self.key = key
         self.http = http
         self.hosts = hosts
+        self.spec = spec
         url = hosts.url(for: config.gpt.responsesUrl) ?? config.gpt.responsesUrl
     }
 
     /// The Responses URL in use (the regional one after a fallback).
     public var currentURL: String { lock.withLock { url } }
 
-    public static func requestBody(gpt: ListenMoreConfig.Gpt, prompt: String) -> [String: Any] {
+    public static func requestBody(gpt: ListenMoreConfig.Gpt, prompt: String, spec: JudgeSpec = .cue) -> [String: Any] {
         var body: [String: Any] = [
             "model": gpt.judgeModel,
-            "instructions": GptJudgeSpec.instructions,
+            "instructions": spec.instructions,
             "input": prompt,
             "store": gpt.store,
             "max_output_tokens": 200,
-            "text": ["format": ["type": "json_schema", "name": "listen_more_cue", "strict": true, "schema": GptJudgeSpec.schema]],
+            "text": ["format": ["type": "json_schema", "name": spec.name, "strict": true, "schema": spec.schema]],
         ]
         if let effort = gpt.judgeReasoningEffort, !effort.isEmpty {
             body["reasoning"] = ["effort": effort]
@@ -213,7 +217,7 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
     /// host rejects the key (another key), back to the configured host. A failed fallback to the
     /// configured host reports the first error.
     public func judge(prompt: String) async throws -> (JudgeResult, JudgeUsage) {
-        let body = try JSONSerialization.data(withJSONObject: Self.requestBody(gpt: gpt, prompt: prompt))
+        let body = try JSONSerialization.data(withJSONObject: Self.requestBody(gpt: gpt, prompt: prompt, spec: spec))
         let configured = gpt.responsesUrl
         let (first, tried) = lock.withLock { (url, fallbackTried) }
         let (status, data) = try await post(first, body)

@@ -150,7 +150,11 @@ public enum DefaultConfig {
       "judge_cached_input_per_mtok": 0.01,
       "judge_output_per_mtok": 0.50
     },
-    "budget_usd_per_call": 1.00
+    "budget_usd_per_call": 1.00,
+    "self_pivot_min_confidence": 0.85,
+    "self_pivot_max_judge_calls_per_call": 20,
+    "self_pivot_budget_usd_per_call": 0.02,
+    "self_pivot_max_verdict_age_s": 10
   },
   "judge": {
     "provider": "gpt",

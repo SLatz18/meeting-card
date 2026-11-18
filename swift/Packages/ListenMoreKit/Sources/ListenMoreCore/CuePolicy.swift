@@ -16,11 +16,12 @@ public enum CueType: String, CaseIterable, Equatable, Sendable {
     case monologue
     case talkShare = "talk_share"
 
-    /// GPT judge labels -> cue types. The judge only decides not_listening; every other cue is a
-    /// local or transcript rule.
+    /// GPT judge labels -> cue types: the cue judge's not_listening and the self-pivot judge's
+    /// self_pivot (`SelfPivotLane`); every other cue is a local or transcript rule.
     public init?(gptLabel: String) {
         switch gptLabel {
         case "not_listening": self = .notListening
+        case SelfPivotJudgeSpec.label: self = .selfPivot
         default: return nil
         }
     }
@@ -30,7 +31,9 @@ public enum CueType: String, CaseIterable, Equatable, Sendable {
     /// missed_question too; the policy's cooldowns keep it to one glow).
     public static let judged: [CueType] = [.aggressive, .notListening, .missedQuestion]
 
-    /// The cues `provider` can decide.
+    /// The cues `provider` decides on the me_reply trigger: whether the cue judge runs at all. Self-pivot
+    /// is not one of them: it has its own judge and lane (`SelfPivotLane`), so a host that disables
+    /// not_listening makes no cue judge calls whatever self-pivot does.
     public static func decided(by provider: JudgeProviderKind) -> Set<CueType> {
         switch provider {
         case .gpt: [.notListening]

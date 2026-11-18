@@ -175,4 +175,22 @@ public enum JudgeProviders {
             return TypeSafeJudge(config: config.judge.typesafe, key: judgeKey, http: http, clock: scheduler)
         }
     }
+
+    /// Whether `provider` can ask the self-pivot question. The GPT judge can; TypeSafe has no self_pivot
+    /// question yet, so self-pivot is off while it is selected.
+    public static func judgesSelfPivot(_ provider: JudgeProviderKind) -> Bool {
+        switch provider {
+        case .gpt: true
+        case .typesafe: false
+        }
+    }
+
+    /// The self-pivot judge, on the configured provider only: the GPT judge asks it on the OpenAI key. nil
+    /// when that provider can't ask it (`judgesSelfPivot`): then self-pivot is off. Never another provider's.
+    public static func selfPivotJudge(config: ListenMoreConfig, openAIKey: APIKey, http: HTTPTransport) -> CueJudge? {
+        switch config.judge.provider {
+        case .gpt: LiveJudge(config: config, key: openAIKey, http: http, spec: .selfPivot)
+        case .typesafe: nil
+        }
+    }
 }

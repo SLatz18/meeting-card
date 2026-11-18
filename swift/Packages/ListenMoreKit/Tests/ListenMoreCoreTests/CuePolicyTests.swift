@@ -247,16 +247,18 @@ final class CuePolicyTests: XCTestCase {
         XCTAssertNotNil(p.offer(.interrupt, t: 1, onset: 1, source: .local), "other cues are unaffected and no cooldown was used")
     }
 
-    /// self_pivot is a cue type of its own: amber, ranked right after not_listening, off by host choice, and not
-    /// something either judge can decide (nothing raises it yet).
+    /// self_pivot is a cue type of its own: amber, ranked right after not_listening, off by host choice. Only the
+    /// GPT provider's self-pivot judge raises it (`SelfPivotLane`); it is never one of the cues the me_reply judge
+    /// decides, for either provider, so it can't switch the cue judge on.
     func testSelfPivotCueType() {
         XCTAssertEqual(CueType.selfPivot.rawValue, "self_pivot")
         XCTAssertEqual(CueType(rawValue: "self_pivot"), .selfPivot)
         XCTAssertTrue(CueType.allCases.contains(.selfPivot))
         XCTAssertFalse(CueType.judged.contains(.selfPivot))
-        XCTAssertNil(CueType(gptLabel: "self_pivot"))
+        XCTAssertEqual(CueType(gptLabel: "self_pivot"), .selfPivot)
+        XCTAssertEqual(CueType(judgeLabel: "self_pivot", provider: .gpt), .selfPivot)
+        XCTAssertNil(CueType(judgeLabel: "self_pivot", provider: .typesafe))
         for provider in [JudgeProviderKind.gpt, .typesafe] {
-            XCTAssertNil(CueType(judgeLabel: "self_pivot", provider: provider), "\(provider)")
             XCTAssertFalse(CueType.decided(by: provider).contains(.selfPivot), "\(provider)")
         }
         XCTAssertEqual(config.cues.colors["self_pivot"], .amber)
@@ -286,6 +288,46 @@ final class CuePolicyTests: XCTestCase {
                                        CueSuggestion(type: .notListening, t: 5, onset: 4, source: .gpt, confidence: 0.9)]).map(\.type),
                        [.notListening])
         XCTAssertEqual(pair.held.map(\.type), [.selfPivot])
+    }
+
+    /// A judged self_pivot cue goes through the same policy as every other cue: the 20 s global cooldown, its
+    /// own 20 s cooldown, the `on_screen_s` hold, the judge's confidence floor, the closing-phrase quiet and
+    /// Pause. A local interrupt right after it skips the global cooldown (it was judged) but not the hold.
+    func testSelfPivotWorksWithTheCuePolicy() {
+        func p() -> CuePolicy { CuePolicy(config: config.cues) }
+        func sp(_ policy: CuePolicy, _ t: Double, _ confidence: Double = 0.9, quiet: Bool = false) -> Cue? {
+            policy.offer(.selfPivot, t: t, onset: t - 3, source: .gpt, confidence: confidence, quiet: quiet)
+        }
+        let global = p()
+        XCTAssertNotNil(global.offer(.monologue, t: 0, onset: 0, source: .local))
+        XCTAssertNil(sp(global, 19.9))
+        XCTAssertEqual(global.held.last, CuePolicy.Hold(type: .selfPivot, t: 19.9, why: .global))
+        XCTAssertEqual(sp(global, 20)?.color, .amber)
+
+        var cues = config.cues
+        cues.globalCooldownS = 0
+        let own = CuePolicy(config: cues)
+        XCTAssertNotNil(sp(own, 0))
+        XCTAssertNil(sp(own, 10))
+        XCTAssertEqual(own.held.last?.why, .type)
+        XCTAssertNil(own.offer(.monologue, t: 2, onset: 2, source: .local), "inside the 4.5 s on-screen hold")
+        XCTAssertEqual(own.held.last?.why, .onScreen)
+        XCTAssertNotNil(sp(own, 20))
+
+        let floor = p()
+        XCTAssertNil(sp(floor, 0, 0.69), "under gpt_min_confidence")
+        XCTAssertNil(floor.offer(.selfPivot, t: 0, onset: 0, source: .gpt), "a judged cue needs a confidence")
+        XCTAssertNil(sp(p(), 0, quiet: true))
+        let paused = p()
+        paused.paused = true
+        XCTAssertNil(sp(paused, 0))
+
+        let cut = p()
+        XCTAssertNotNil(sp(cut, 10))
+        XCTAssertNil(cut.offer(.interrupt, t: 14, onset: 13.5, source: .local))
+        XCTAssertEqual(cut.held.last?.why, .onScreen)
+        XCTAssertNotNil(cut.offer(.interrupt, t: 14.6, onset: 14, source: .local), "past the hold, inside the global cooldown")
+        XCTAssertNil(sp(cut, 25), "the self-pivot cue is still a global cooldown after the interrupt")
     }
 
     func testJudgeOnlyDecidesNotListening() {

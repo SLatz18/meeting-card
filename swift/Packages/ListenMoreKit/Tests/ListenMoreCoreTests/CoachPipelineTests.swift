@@ -138,6 +138,26 @@ final class CoachPipelineTests: XCTestCase {
         XCTAssertEqual(gpt.frames, 1)
     }
 
+    /// The self-pivot judge's verdict becomes a judged self_pivot cue whose onset is the end of the reply.
+    /// Under TypeSafe no self-pivot judge exists; a stray label from it would map to nothing.
+    func testSelfPivotVerdictBecomesAGptCue() throws {
+        let gpt = StubPipelineGpt()
+        let p = CoachPipeline(config: config, gpt: gpt)
+        gpt.queued = [.offer(label: "self_pivot", t: 15.1, refT: 12, confidence: 0.9)]
+        let cue = try XCTUnwrap(step(p, 15.2).first)
+        XCTAssertEqual(cue.type, .selfPivot)
+        XCTAssertEqual(cue.source, .gpt)
+        XCTAssertEqual(cue.onset, 12)
+        XCTAssertEqual(cue.color, .amber)
+
+        var ts = config!
+        ts.judge.provider = .typesafe
+        let tsGpt = StubPipelineGpt()
+        let q = CoachPipeline(config: ts, gpt: tsGpt)
+        tsGpt.queued = [.offer(label: "self_pivot", t: 15.1, refT: 12, confidence: 0.9)]
+        XCTAssertEqual(step(q, 15.2), [])
+    }
+
     func testSegmentsFeedTheTranscriptRulesAndTheirCuesGoThroughThePolicy() throws {
         let gpt = StubPipelineGpt()
         let p = CoachPipeline(config: config, gpt: gpt)

@@ -91,6 +91,24 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.captureTargets.first?.meetingTitlePatterns, ["Zoom Meeting", "Zoom Webinar"])
     }
 
+    /// The self-pivot judge's shipped limits.
+    func testSelfPivotDefaults() throws {
+        let c = try ListenMoreConfig.builtIn()
+        XCTAssertEqual(c.gpt.selfPivotMinConfidence, 0.85)
+        XCTAssertEqual(c.gpt.selfPivotMaxJudgeCallsPerCall, 20)
+        XCTAssertEqual(c.gpt.selfPivotBudgetUsdPerCall, 0.02)
+        XCTAssertEqual(c.gpt.selfPivotMaxVerdictAgeS, 10)
+        XCTAssertEqual(c.text.pivotRearmS, 180)
+        XCTAssertEqual(c.text.pivotMaxPerCall, 20)
+        XCTAssertFalse(c.cues.disabledTypes.contains(.selfPivot), "on in the generic config")
+        for bad: [String: Any] in [["self_pivot_min_confidence": 1.5], ["self_pivot_max_judge_calls_per_call": -1],
+                                   ["self_pivot_budget_usd_per_call": -0.01], ["self_pivot_max_verdict_age_s": 0]] {
+            XCTAssertThrowsError(try ListenMoreConfig.load(overrides: ["gpt": bad])) { error in
+                XCTAssertEqual(error as? ConfigError, .invalid("bad gpt.self_pivot limits"), "\(bad)")
+            }
+        }
+    }
+
     func testOverrideDeepMerges() throws {
         let over = try tempFile(#"{"cues": {"cooldown_s": 5, "colors": {"monologue": "red"}}, "meet_title_regex": "\\bHuddle\\b"}"#)
         let c = try TestConfig.load(overrideURL: over)

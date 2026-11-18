@@ -105,6 +105,24 @@ final class URLSessionTransportTests: XCTestCase {
         XCTAssertEqual(body["model"] as? String, "gpt-6-luna")
     }
 
+    /// The self-pivot judge over the real URLSession transport: store false and its own schema.
+    func testSelfPivotJudgeThroughURLSession() async throws {
+        let inner = #"{"cue":"self_pivot","confidence":0.9,"short_reason":"own story"}"#
+        let reply: [String: Any] = ["output": [["type": "message", "content": [["type": "output_text", "text": inner]]]],
+                                    "usage": ["input_tokens": 10, "output_tokens": 5]]
+        StubURLProtocol.reply = try JSONSerialization.data(withJSONObject: reply)
+        StubURLProtocol.status = 200
+        let config = try ListenMoreConfig.builtIn()
+        let judge = LiveJudge(config: config, key: APIKey("sk-test-urlsession")!, http: URLSessionHTTPTransport(configuration: stubbedConfiguration()),
+                              hosts: LearnedHosts(), spec: .selfPivot)
+        let (res, _) = try await judge.judge(prompt: "p")
+        XCTAssertEqual(res.cue, "self_pivot")
+        let body = try XCTUnwrap(StubURLProtocol.lastBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(body["store"] as? Bool, false)
+        let format = (body["text"] as? [String: Any])?["format"] as? [String: Any]
+        XCTAssertEqual(format?["name"] as? String, "listen_more_self_pivot")
+    }
+
     func testHttpErrorStatusSurfacesAsCodeOnly() async throws {
         StubURLProtocol.status = 429
         StubURLProtocol.reply = Data("rate limited for key sk-test".utf8)
