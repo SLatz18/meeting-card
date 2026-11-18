@@ -206,8 +206,12 @@ Recovery trusts nothing in a spool, which may have come from another Mac through
 - it leaves a spool that MeetingCard is still writing: on this Mac, only if the same process (the same boot,
   PID and process start time) is still running, so a crash before a reboot or a reused PID is recovered; on
   another Mac sharing the folder, until the spool has been untouched for six hours. Each spool names its
-  machine by a hash of the hardware UUID (`/etc/machine-id` on Linux), never the Mac's name or the UUID itself;
+  machine by a hash of the hardware UUID (`/etc/machine-id` on Linux), never the Mac's name or the UUID itself.
+  If either the spool or this Mac has no such ID, a spool from another boot could be another Mac's, so it
+  also waits until it has been untouched for six hours;
 - it never writes over a file it didn't write: a note changed after the crash gets the recovered note beside it.
+  The one exception is an empty note a crash left while claiming its name on a FAT or exFAT volume, which it
+  fills in.
 
 So a note can stay `in-progress` for a while: another Mac's call still under six hours old, or one another
 MeetingCard on this Mac is writing. Settings then says how many transcripts are unfinished, under the folder,
