@@ -29,7 +29,7 @@ final class OpenAILiveTests: XCTestCase {
     }
 
     func testJudgeReturnsSchemaConformingCue() async throws {
-        let judge = LiveJudge(config: config, key: key, http: URLSessionHTTPTransport())
+        let judge = LiveJudge(config: config, key: key, http: URLSessionHTTPTransport(), hosts: LearnedHosts())
         let prompt = """
         TRANSCRIPT (oldest first):
         [-12.0s] OTHERS: one two three?

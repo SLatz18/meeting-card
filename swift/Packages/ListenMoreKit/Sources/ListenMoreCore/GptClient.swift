@@ -205,8 +205,13 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
         return body
     }
 
+    /// Statuses that say a learned host doesn't take this key (another key's region), as opposed to
+    /// a rate limit or an outage, which a fallback wouldn't fix.
+    static let learnedHostRejections: Set<Int> = [401, 403]
+
     /// One fallback per judge: to the regional host a `401 incorrect_hostname` names, or, when a learned
-    /// host stops working (another key), back to the configured host.
+    /// host rejects the key (another key), back to the configured host. A failed fallback to the
+    /// configured host reports the first error.
     public func judge(prompt: String) async throws -> (JudgeResult, JudgeUsage) {
         let body = try JSONSerialization.data(withJSONObject: Self.requestBody(gpt: gpt, prompt: prompt))
         let configured = gpt.responsesUrl
@@ -215,7 +220,8 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
         if status == 200 { return try Self.parse(data) }
         guard !tried else { throw GptError.http(status) }
         let regional = Self.regionalHost(status: status, body: data)
-        guard let alt = regional.flatMap({ Self.withHost(first, $0) }) ?? (first != configured ? configured : nil) else {
+        let backToConfigured = first != configured && Self.learnedHostRejections.contains(status)
+        guard let alt = regional.flatMap({ Self.withHost(first, $0) }) ?? (backToConfigured ? configured : nil) else {
             throw GptError.http(status)
         }
         lock.withLock { fallbackTried = true }
@@ -225,7 +231,7 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
             guard s2 == 200 else { throw GptError.http(s2) }
             result = try Self.parse(d2)
         } catch {
-            guard let regional else { throw error }
+            guard let regional else { throw GptError.http(status) }
             throw GptError.hostRejected(first: URLComponents(string: first)?.host ?? "?", regional: regional, inner: GptError.safe(error))
         }
         lock.withLock { url = alt }

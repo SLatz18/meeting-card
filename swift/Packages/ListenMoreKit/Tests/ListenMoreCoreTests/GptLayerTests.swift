@@ -12,7 +12,7 @@ final class GptClientTests: XCTestCase {
     func testJudgeRequestUsesAliasStoreFalseAndStrictSchema() async throws {
         let http = FakeHTTP()
         http.reply = ("aggressive", 0.92)
-        let judge = LiveJudge(config: config, key: APIKey("sk-test-judge")!, http: http)
+        let judge = LiveJudge(config: config, key: APIKey("sk-test-judge")!, http: http, hosts: LearnedHosts())
         let (res, usage) = try await judge.judge(prompt: "TRANSCRIPT")
         XCTAssertEqual(res, JudgeResult(cue: "aggressive", confidence: 0.92, shortReason: "test reason"))
         XCTAssertEqual(usage, JudgeUsage(inputTokens: 1000, cachedTokens: 200, outputTokens: 30))
@@ -38,7 +38,7 @@ final class GptClientTests: XCTestCase {
         c.gpt.judgeModel = "gpt-7-terra"
         c.gpt.judgeReasoningEffort = nil
         let http = FakeHTTP()
-        _ = try await LiveJudge(config: c, key: APIKey("k")!, http: http).judge(prompt: "x")
+        _ = try await LiveJudge(config: c, key: APIKey("k")!, http: http, hosts: LearnedHosts()).judge(prompt: "x")
         XCTAssertEqual(http.requests.first?.body["model"] as? String, "gpt-7-terra")
         XCTAssertNil(http.requests.first?.body["reasoning"])
     }
@@ -47,7 +47,7 @@ final class GptClientTests: XCTestCase {
         let http = FakeHTTP()
         http.status = 401
         do {
-            _ = try await LiveJudge(config: config, key: APIKey("sk-secret-value")!, http: http).judge(prompt: "x")
+            _ = try await LiveJudge(config: config, key: APIKey("sk-secret-value")!, http: http, hosts: LearnedHosts()).judge(prompt: "x")
             XCTFail("expected error")
         } catch {
             XCTAssertEqual(GptError.safe(error), "HTTP 401")
@@ -85,7 +85,7 @@ final class GptClientTests: XCTestCase {
             let http = FakeHTTP()
             http.queued = [(401, body)]
             do {
-                _ = try await LiveJudge(config: config, key: APIKey("k")!, http: http).judge(prompt: "x")
+                _ = try await LiveJudge(config: config, key: APIKey("k")!, http: http, hosts: LearnedHosts()).judge(prompt: "x")
                 XCTFail("expected error")
             } catch {
                 XCTAssertEqual(error as? GptError, .http(401))
@@ -121,6 +121,37 @@ final class GptClientTests: XCTestCase {
         XCTAssertEqual(http.requests.map { $0.url.host }, ["eu.api.openai.com", "api.openai.com"])
         XCTAssertEqual(judge.currentURL, config.gpt.responsesUrl)
         XCTAssertNil(hosts.url(for: config.gpt.responsesUrl))
+    }
+
+    /// A learned host answering with a rate limit or an outage is not a key problem: no fallback, and
+    /// the host is kept. A failed fallback to the configured host reports the first error.
+    func testLearnedHostFallsBackOnlyOnAuthAndKeepsTheFirstError() async {
+        let learned = "https://eu.api.openai.com/v1/responses"
+        for status in [429, 500] {
+            let hosts = LearnedHosts()
+            hosts.learn(learned, for: config.gpt.responsesUrl)
+            let http = FakeHTTP()
+            http.queued = [(status, Data())]
+            do {
+                _ = try await LiveJudge(config: config, key: APIKey("k")!, http: http, hosts: hosts).judge(prompt: "x")
+                XCTFail("expected error")
+            } catch {
+                XCTAssertEqual(error as? GptError, .http(status))
+                XCTAssertEqual(http.requests.count, 1)
+                XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl), learned)
+            }
+        }
+        let hosts = LearnedHosts()
+        hosts.learn(learned, for: config.gpt.responsesUrl)
+        let http = FakeHTTP()
+        http.queued = [(403, Data()), (503, Data())]
+        do {
+            _ = try await LiveJudge(config: config, key: APIKey("k")!, http: http, hosts: hosts).judge(prompt: "x")
+            XCTFail("expected error")
+        } catch {
+            XCTAssertEqual(error as? GptError, .http(403), "the learned host's rejection, not the configured host's outage")
+            XCTAssertEqual(http.requests.map { $0.url.host }, ["eu.api.openai.com", "api.openai.com"])
+        }
     }
 
     static func hostError(_ message: String) -> Data {
