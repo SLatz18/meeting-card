@@ -27,8 +27,8 @@ final class CoachController: NSObject {
         static let cardPosition = "coach.cardPosition"
     }
 
-    /// MeetingCard's choices on top of the coach's generic config: not_listening nudges are off by default.
-    static let configOverrides: [String: Any] = ["cues": ["disabled": [CueType.notListening.rawValue]]]
+    /// MeetingCard's choices on top of the coach's generic config: not_listening and self_pivot nudges are off by default.
+    static let configOverrides: [String: Any] = ["cues": ["disabled": [CueType.notListening.rawValue, CueType.selfPivot.rawValue]]]
 
     /// MeetingCard's Keychain item for the OpenAI key, `<bundle id>.openai` (the Kit's default service is not ours).
     static let keychainService = AppIdentity.current.keychainService

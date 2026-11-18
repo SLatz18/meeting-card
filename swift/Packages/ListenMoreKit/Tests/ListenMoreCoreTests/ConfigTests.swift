@@ -51,6 +51,14 @@ final class ConfigTests: XCTestCase {
                              "the ended stop is never slower than the Core Audio stop")
     }
 
+    /// No judge question for self_pivot: nothing asks a judge about it.
+    func testNoJudgeQuestionForSelfPivot() throws {
+        let q = try TestConfig.load().judge.typesafe.questions
+        XCTAssertNil(q.question(for: .selfPivot))
+        XCTAssertFalse(q.asked.contains { $0.type == .selfPivot })
+        XCTAssertEqual(q.asked.map(\.type), CueType.judged)
+    }
+
     func testLoadsDefaults() throws {
         let c = try TestConfig.load()
         XCTAssertEqual(c.audio.sampleRate, 24000)
@@ -60,6 +68,9 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.cues.gptMinConfidence, 0.7)
         XCTAssertEqual(c.cues.colors["interrupt"], .red)
         XCTAssertEqual(c.cues.colors["talk_share"], .amber)
+        XCTAssertEqual(c.cues.colors["self_pivot"], .amber)
+        XCTAssertEqual(c.cues.priority, ["talk_over", "interrupt", "missed_question", "aggressive", "monologue", "not_listening", "self_pivot", "talk_share"])
+        XCTAssertEqual(Set(c.cues.colors.keys), Set(CueType.allCases.map(\.rawValue)), "a colour for every cue type")
         XCTAssertEqual(c.meetTitleRegex, #"\bMeet\b"#)
         XCTAssertEqual(c.captureTargets.map(\.bundleId), ["us.zoom.xos", "com.google.Chrome", "company.thebrowser.dia",
                                                          "com.microsoft.teams2", "com.microsoft.teams", "Cisco-Systems.Spark",

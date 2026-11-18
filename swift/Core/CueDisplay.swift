@@ -55,7 +55,7 @@ public enum CueAnchorSpeaker: Equatable, Sendable {
 
 public extension CoachNudge.Kind {
     /// ListenMoreCore's `cues.priority` (DefaultConfig): candidates raised together are tried in this order.
-    static let priorityOrder: [CoachNudge.Kind] = [.talkOver, .interrupt, .missedQuestion, .aggressive, .monologue, .notListening, .talkShare]
+    static let priorityOrder: [CoachNudge.Kind] = [.talkOver, .interrupt, .missedQuestion, .aggressive, .monologue, .notListening, .selfPivot, .talkShare]
 
     var priority: Int { Self.priorityOrder.firstIndex(of: self) ?? Self.priorityOrder.count }
 
@@ -63,14 +63,14 @@ public extension CoachNudge.Kind {
     var tone: CoachNudge.Tone {
         switch self {
         case .interrupt, .talkOver, .aggressive: .rose
-        case .notListening, .missedQuestion, .monologue, .talkShare: .amber
+        case .notListening, .selfPivot, .missedQuestion, .monologue, .talkShare: .amber
         }
     }
 
     var direction: CueDirection {
         switch self {
         case .interrupt, .talkOver, .monologue, .talkShare: .yield
-        case .missedQuestion, .notListening: .engage
+        case .missedQuestion, .notListening, .selfPivot: .engage
         case .aggressive: .tone
         }
     }
@@ -78,7 +78,7 @@ public extension CoachNudge.Kind {
     var urgency: CueUrgency {
         switch self {
         case .interrupt, .talkOver, .monologue: .now
-        case .aggressive, .missedQuestion, .notListening: .nextTurn
+        case .aggressive, .missedQuestion, .notListening, .selfPivot: .nextTurn
         case .talkShare: .trend
         }
     }
@@ -87,7 +87,7 @@ public extension CoachNudge.Kind {
     var actionableMidSentence: Bool {
         switch self {
         case .interrupt, .talkOver, .monologue: true
-        case .aggressive, .missedQuestion, .notListening, .talkShare: false
+        case .aggressive, .missedQuestion, .notListening, .selfPivot, .talkShare: false
         }
     }
 
@@ -95,11 +95,12 @@ public extension CoachNudge.Kind {
     /// display gate past this is dropped, not shown late. From the rules' own windows: a cut-in or
     /// talk-over is over a few seconds after it fires (~1.2 s latency plus the 4.5 s hold); heat
     /// scores a 15 s window; a missed question escalates after 20 s of the user's reply; monologue
-    /// strong follows soft by 30 s; talk share is a 10 min trend.
+    /// strong follows soft by 30 s; talk share is a 10 min trend. A self pivot's onset is the end of
+    /// the turn it follows, so it has 10 s from the turn's end.
     var shelfLife: TimeInterval {
         switch self {
         case .interrupt, .talkOver: 6
-        case .notListening: 10
+        case .notListening, .selfPivot: 10
         case .aggressive: 15
         case .missedQuestion: 20
         case .monologue: 30
@@ -112,7 +113,7 @@ public extension CoachNudge.Kind {
     var anchor: CueAnchorSpeaker? {
         switch self {
         case .interrupt, .missedQuestion: .them
-        case .talkOver, .aggressive, .notListening, .monologue: .you
+        case .talkOver, .aggressive, .notListening, .selfPivot, .monologue: .you
         case .talkShare: nil
         }
     }

@@ -51,6 +51,16 @@ public enum CoachCardCopy {
         public static func accessibilityLabel(status: String, words: String) -> String { "\(status). Last cue: \(words)." }
     }
 
+    // MARK: self-pivot cue (draft copy)
+
+    /// The self-pivot cue's words and VoiceOver line. Its lingering line is `Linger`'s template.
+    public enum SelfPivot {
+        /// True until a writer approves the strings below.
+        public static let isDraft = true
+        public static let words = "Ask how they feel"
+        public static let announcement = "Call coach: ask how they feel about it."
+    }
+
     // MARK: call-mode tip (approved copy)
 
     /// The tip under the card when the user's headphones may be in call mode. Generic on purpose: it
@@ -95,6 +105,7 @@ public struct CoachNudge: Equatable, Sendable {
         case talkOver = "talk_over"
         case aggressive
         case notListening = "not_listening"
+        case selfPivot = "self_pivot"
         case missedQuestion = "missed_question"
         case monologue
         case talkShare = "talk_share"
@@ -114,6 +125,7 @@ public struct CoachNudge: Equatable, Sendable {
         case .talkOver: "You're both talking"
         case .aggressive: "Ease the tone"
         case .notListening: "Respond to their point"
+        case .selfPivot: CoachCardCopy.SelfPivot.words
         case .missedQuestion: "Answer their question"
         case .monologue: "Pause and hand over"
         case .talkShare: "Leave room for others"
@@ -127,6 +139,7 @@ public struct CoachNudge: Equatable, Sendable {
         case .talkOver: "Call coach: you're talking over someone."
         case .aggressive: "Call coach: your tone is heating up."
         case .notListening: "Call coach: respond to the point they just made."
+        case .selfPivot: CoachCardCopy.SelfPivot.announcement
         case .missedQuestion: "Call coach: a question went unanswered."
         case .monologue: "Call coach: you've been talking a while. Pause and hand over."
         case .talkShare: "Call coach: you're doing most of the talking."

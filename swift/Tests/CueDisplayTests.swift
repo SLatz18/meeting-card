@@ -128,13 +128,59 @@ final class CueDisplayTests: XCTestCase {
         let yield = CoachNudge.Kind.allCases.filter { $0.direction == .yield }
         let engage = CoachNudge.Kind.allCases.filter { $0.direction == .engage }
         XCTAssertEqual(Set(yield), [.interrupt, .talkOver, .monologue, .talkShare])
-        XCTAssertEqual(Set(engage), [.missedQuestion, .notListening])
+        XCTAssertEqual(Set(engage), [.missedQuestion, .notListening, .selfPivot])
         XCTAssertEqual(CoachNudge.Kind.aggressive.direction, .tone)
         for a in CoachNudge.Kind.allCases {
             for b in CoachNudge.Kind.allCases {
                 let expected = (yield.contains(a) && engage.contains(b)) || (engage.contains(a) && yield.contains(b))
                 XCTAssertEqual(a.direction.conflicts(with: b.direction), expected, "\(a) \(b)")
             }
+        }
+    }
+
+    /// The self-pivot cue: amber, engage, acted on at the next turn (not mid-sentence), 10 s from the end of the turn
+    /// it follows, anchored on the user's own line, ranked right after not_listening.
+    func testSelfPivotCueDisplayProperties() throws {
+        let k = CoachNudge.Kind.selfPivot
+        XCTAssertEqual(k.tone, .amber)
+        XCTAssertEqual(k.direction, .engage)
+        XCTAssertEqual(k.urgency, .nextTurn)
+        XCTAssertFalse(k.actionableMidSentence)
+        XCTAssertEqual(k.shelfLife, 10)
+        XCTAssertEqual(k.anchor, .you)
+        let order = CoachNudge.Kind.priorityOrder
+        XCTAssertEqual(order.firstIndex(of: k), try XCTUnwrap(order.firstIndex(of: .notListening)) + 1)
+        XCTAssertEqual(order.last, .talkShare)
+        XCTAssertEqual(k.priority, order.firstIndex(of: k))
+        XCTAssertTrue(k.direction.conflicts(with: CoachNudge.Kind.interrupt.direction), "it asks the user to talk: it conflicts with yielding")
+        XCTAssertFalse(k.direction.conflicts(with: CoachNudge.Kind.missedQuestion.direction))
+
+        // Held past its shelf life (measured from the turn's end, its onset) it is dropped, not shown late.
+        let events = [CueEvent(t: 1, onset: 0, kind: .interrupt), CueEvent(t: 4, onset: 3, kind: k)]
+        XCTAssertEqual(CueDisplayPacer.frame(at: 11, events: events).decisions.last, .shown(k, at: 11, waited: 7))
+        let late = [CueEvent(t: 1, onset: 0, kind: .interrupt), CueEvent(t: 4, onset: 0.5, kind: k)]
+        XCTAssertEqual(CueDisplayPacer.frame(at: 11, events: late).decisions.last, .stale(k, at: 11))
+    }
+
+    /// No `default:` in the code that switches over the cue enums: a new cue type fails to compile until
+    /// every one of them handles it.
+    func testCueSwitchesHaveNoDefault() throws {
+        for file in ["Core/CoachCard.swift", "Core/CueDisplay.swift", "Core/Theme.swift",
+                     "Packages/ListenMoreKit/Sources/ListenMoreCore/Config.swift"] {
+            let code = try read(file).components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            XCTAssertFalse(code.contains { $0.contains("default:") }, "\(file) has a default: case")
+        }
+    }
+
+    /// The self-pivot cue stays off in MeetingCard, and nothing in the code raises it yet.
+    func testSelfPivotIsDisabledAndNeverRaised() throws {
+        let controller = try read("App/CoachController.swift")
+        XCTAssertTrue(controller.contains("CueType.selfPivot.rawValue"))
+        let raisers = ["CueDisplayViews.swift", "CueTimelines.swift"].map { "Core/\($0)" } +
+            ["LocalLayer", "TextRules", "GptLayer", "CoachPipeline", "EngineBridge", "CoachSession"].map { "Packages/ListenMoreKit/Sources/ListenMoreCore/\($0).swift" }
+        for file in raisers {
+            let code = try read(file)
+            XCTAssertFalse(code.contains(".selfPivot") || code.contains("self_pivot"), "\(file) raises or shows the self-pivot cue")
         }
     }
 
