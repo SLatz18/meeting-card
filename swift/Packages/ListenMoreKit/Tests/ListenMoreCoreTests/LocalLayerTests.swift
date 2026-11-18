@@ -89,6 +89,16 @@ final class LocalLayerTests: XCTestCase {
         XCTAssertFalse(cut.trailing)
     }
 
+    /// The pause scenario's live miss (judge on, after Resume): You start 0.24 s into a 0.46 s pause of
+    /// theirs, so the opening overlap can't build and one long sentence never cuts in. Broken into two
+    /// sentences, the second onset lands while they talk and cuts in.
+    func testCutInStartingInTheirPauseNeedsASecondOnset() throws {
+        let them: [(Double, Double)] = [(1.0, 4.2), (4.66, 9.2)]
+        XCTAssertEqual(kinds(run(10, me: [(4.44, 7.4)], others: them)), [])
+        let cut = try XCTUnwrap(run(10, me: [(4.44, 5.4), (5.85, 8.0)], others: them).first { $0.kind == .interrupt })
+        XCTAssertEqual(cut.onset, 5.85, accuracy: 0.05)
+    }
+
     func testBackchannelIsNotACutIn() {
         XCTAssertEqual(kinds(run(7, me: [(3.0, 3.6)], others: [(1.0, 6.0)])), [])
     }

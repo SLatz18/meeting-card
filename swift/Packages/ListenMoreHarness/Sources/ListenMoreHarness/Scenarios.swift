@@ -87,17 +87,20 @@ public enum Scenarios {
     /// Pause mid-call: a cut-in before Pause gives one interrupt; a cut-in while paused (past that cue's
     /// cooldown, so a Pause that let it through would show) gives nothing and no audio reaches the
     /// engine; a cut-in after Resume gives a second interrupt, though the engine restarted at Resume
-    /// with its clock back at 0 (cooldowns count in session time).
+    /// with its clock back at 0 (cooldowns count in session time). Both scored cut-ins start in an
+    /// unpunctuated stretch of Them's line and break into a second sentence: a TTS take pauses at a
+    /// comma, or for a breath, for 0.2-0.4 s, past the 0.16 s a cut-in's opening overlap allows, and
+    /// You's second onset, with about 2 s of Them still to come, makes the cut-in if the first didn't.
     public static let pause = Scenario(
         name: "pause",
         summary: "interrupt before Pause; paused: no frames, no traffic, no captions, no cues; interrupt after Resume (cooldown in session time)",
         lines: [
-            Line("a1", .themA, "Quick update on the hiring loop, we have three candidates for the platform role.", .at(0.5)),
-            Line("y1", .you, "Nice, that is more than I expected.", .beforeEnd("a1", lead: 3.5)),
+            Line("a1", .themA, "Quick update on hiring: we have three candidates for the platform role and every one of them looks strong on paper.", .at(0.5)),
+            Line("y1", .you, "That is more than I expected. Let us go through each of them in turn.", .beforeEnd("a1", lead: 3.5)),
             Line("a2", .themA, "The first one has a strong background in data tooling and the second one comes from a small team that built a payments system.", .after("y1", gap: 16.0)),
             Line("y2", .you, "Hang on, I think we should talk about the third one first because the timing is tight.", .beforeEnd("a2", lead: 6.0)),
-            Line("a3", .themA, "The third candidate can start soon, and the interviews would wrap up by the end of the month if we move quickly.", .after("a2", gap: 5.0)),
-            Line("y3", .you, "Sorry to cut in, but if the third one can start soon we should book that interview first.", .beforeEnd("a3", lead: 4.0)),
+            Line("a3", .themA, "The third candidate can start soon and the interviews would wrap up by the end of the month if we move quickly on the scheduling.", .after("a2", gap: 5.0)),
+            Line("y3", .you, "Sorry to cut in. If the third one can start soon we should book that interview first.", .beforeEnd("a3", lead: 4.0)),
         ],
         controls: [
             Control(.pause, .after("y1", gap: 2.0)),
