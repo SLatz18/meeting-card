@@ -121,8 +121,10 @@ splits `self_pivot_calls` / `self_pivot_usd` from `other_calls` / `other_usd`.
 **Self-pivot precision run** (`lm-pivot-eval`, `swift/scripts/self-pivot-precision.sh`): a positive
 and a negative set of synthetic exchanges through the real gate and self-pivot lane with
 MeetingCard's config. It reports false self_pivot cues on the negatives (bar: 0), recall against the
-gate's shadow recall, store false on every request, and no case text in any output or log line.
-`--dry-run` uses the offline stub (CI runs only that, in `PivotEvalTests`); the paid run needs
+gate's shadow recall, store false on every request, one request per candidate (a case whose wire
+requests differ from the judge calls the layer counted fails the run), and no case text in any output
+or log line. It writes `pivot-eval.md`, `pivot-eval.json`, `SUMMARY.md` and `cost-log.jsonl`, with
+`self_pivot_usd` per case and in total in each; the script prints `SUMMARY.md` when it ends. `--dry-run` uses the offline stub (CI runs only that, in `PivotEvalTests`); the paid run needs
 `OPENAI_API_KEY` in the environment and `LISTEN_MORE_PAID_RUN=1`, and is run by hand only.
 
 Every scenario also checks You/Them attribution, the caption feed (at most three lines labelled You

@@ -7,7 +7,9 @@ import ListenMoreCore
 /// (the real Responses API in a paid run, a stub otherwise). It reports, per case, whether the gate took it
 /// (the shadow number), whether it was judged, the verdict's label and confidence, and whether it became a
 /// cue; then false self_pivot cues on the negatives (bar: 0), recall against the shadow recall, that every
-/// request sent `store: false`, and that no case's words reached any output. Numbers and labels only.
+/// request sent `store: false`, that each case sent exactly the requests the layer counted (one per candidate,
+/// never a resend), each case's self_pivot_usd and their total, and that no case's words reached any output.
+/// Numbers and labels only.
 public enum PivotEval {
     public enum CaseSet: String, Sendable, Codable {
         case positive
@@ -56,6 +58,17 @@ public enum PivotEval {
         public var cue: Bool
         /// A failure class (HTTP status, timeout), never a body.
         public var failure: String?
+        /// Judge requests that reached the transport for this case, and the judge calls the layer counted
+        /// (and charged against the per-call cap). A candidate has one request, so the two agree.
+        public var requests = 0
+        public var judgeCalls = 0
+        /// The self-pivot judge's spend on this case, from the replies' token usage and the configured prices.
+        public var selfPivotUsd = 0.0
+        public var selfPivotInputTokens = 0
+        public var selfPivotOutputTokens = 0
+
+        /// A request went out that the layer didn't count, or a counted call never reached the wire.
+        public var requestMismatch: Bool { requests != judgeCalls }
     }
 
     public struct Report: Sendable {
@@ -72,10 +85,14 @@ public enum PivotEval {
         public var recall: Double { Double(positives.filter(\.cue).count) / Double(max(1, positives.count)) }
         public var shadowRecall: Double { Double(positives.filter(\.candidate).count) / Double(max(1, positives.count)) }
         public var failures: [Outcome] { outcomes.filter { $0.failure != nil } }
+        public var requestMismatches: [Outcome] { outcomes.filter(\.requestMismatch) }
+        /// The self-pivot judge's spend over every case.
+        public var selfPivotUsd: Double { outcomes.reduce(0) { $0 + $1.selfPivotUsd } }
         /// The bar: no false self_pivot cue on a negative, store false on every request, no case text anywhere,
-        /// no cue judge request, and every judged case answered.
+        /// no cue judge request, every judged case answered, and no case with a request the layer didn't count.
         public var passed: Bool {
             falseCues.isEmpty && storeViolations == 0 && snippetLeaks.isEmpty && otherJudgeRequests == 0 && failures.isEmpty
+                && requestMismatches.isEmpty
         }
     }
 
@@ -93,7 +110,8 @@ public enum PivotEval {
             let o = await run(c, http: recorder, key: key, config: config)
             outcomes.append(o)
             log("\(c.set.rawValue) \(c.name): candidate \(o.candidate), judged \(o.judged), verdict \(o.verdict ?? "-") "
-                + "\(o.confidence.map { String(format: "%.2f", $0) } ?? "-"), cue \(o.cue)\(o.failure.map { ", failed \($0)" } ?? "")")
+                + "\(o.confidence.map { String(format: "%.2f", $0) } ?? "-"), cue \(o.cue), requests \(o.requests), "
+                + "self_pivot_usd \(usd(o.selfPivotUsd))\(o.failure.map { ", failed \($0)" } ?? "")")
         }
         return Report(outcomes: outcomes, requests: recorder.facts.count,
                       storeViolations: recorder.facts.filter { !$0.storeFalse }.count,
@@ -104,6 +122,7 @@ public enum PivotEval {
         let clock = EvalClock()
         let offers = EvalOffers()
         let before = http.verdicts.count
+        let requestsBefore = http.facts.count
         let lines: [Speaker: [String]] = Dictionary(grouping: c.turns, by: \.speaker).mapValues { $0.map(\.text) }
         let layer = GptLayer(config: config, now: { clock.now }, offer: { label, t, refT, conf in offers.add(label, t, refT, conf) },
                              provider: nil, selfPivotJudge: JudgeProviders.selfPivotJudge(config: config, openAIKey: key, http: http),
@@ -143,7 +162,10 @@ public enum PivotEval {
         let verdict = http.verdicts.count > before ? http.verdicts.last : nil
         return Outcome(name: c.name, set: c.set, candidate: snap.pivotCandidates > 0, judged: snap.selfPivotJudgeCalls > 0,
                        verdict: verdict?.label, confidence: verdict?.confidence,
-                       cue: offers.cues(config: config).contains { $0.type == .selfPivot }, failure: verdict?.failure)
+                       cue: offers.cues(config: config).contains { $0.type == .selfPivot }, failure: verdict?.failure,
+                       requests: http.facts.count - requestsBefore, judgeCalls: snap.selfPivotJudgeCalls,
+                       selfPivotUsd: snap.selfPivotJudgeUsd, selfPivotInputTokens: snap.selfPivotInputTokens,
+                       selfPivotOutputTokens: snap.selfPivotOutputTokens)
     }
 
     /// Outputs and log lines that carry four words in a row from any case's lines.
@@ -167,8 +189,8 @@ public enum PivotEval {
         }
     }
 
-    /// A whole run: every case, then pivot-eval.md and pivot-eval.json (scrubbed of `secrets`), and the
-    /// no-case-text check over both files and every log line. `log` gets numbers and labels only.
+    /// A whole run: every case, then pivot-eval.md, pivot-eval.json, SUMMARY.md and cost-log.jsonl (scrubbed of
+    /// `secrets`), and the no-case-text check over every file and log line. `log` gets numbers and labels only.
     public static func runAndWrite(cases: [Case] = cases, http: HTTPTransport, key: APIKey, secrets: [String], out: URL,
                                    mode: String, log: (String) -> Void = { _ in }) async throws
         -> (report: Report, files: [URL], keyLeaks: [String]) {
@@ -179,10 +201,13 @@ public enum PivotEval {
             log(line)
         }
         let writer = try OutputWriter(directory: out, secrets: secrets)
-        let md = markdown(report, mode: mode), js = json(report, mode: mode)
-        report.snippetLeaks = snippetLeaks(in: [("pivot-eval.md", md), ("pivot-eval.json", js), ("log", lines.joined(separator: "\n"))], cases: cases)
+        report.snippetLeaks = snippetLeaks(in: [("pivot-eval.md", markdown(report, mode: mode)), ("pivot-eval.json", json(report, mode: mode)),
+                                                ("SUMMARY.md", summary(report, mode: mode)), ("cost-log.jsonl", costLog(report, mode: mode)),
+                                                ("log", lines.joined(separator: "\n"))], cases: cases)
         try writer.write("pivot-eval.md", markdown(report, mode: mode))
         try writer.write("pivot-eval.json", json(report, mode: mode))
+        try writer.write("SUMMARY.md", summary(report, mode: mode))
+        try writer.write("cost-log.jsonl", costLog(report, mode: mode))
         return (report, writer.written, writer.leaks)
     }
 
@@ -197,13 +222,53 @@ public enum PivotEval {
         out += "- Self-pivot judge requests: \(r.requests); without store false: **\(r.storeViolations)**; cue judge requests: \(r.otherJudgeRequests)\n"
         out += "- Outputs carrying case text: **\(r.snippetLeaks.count)**\(r.snippetLeaks.isEmpty ? "" : " (\(r.snippetLeaks.joined(separator: ", ")))")\n"
         out += "- Failed calls: \(r.failures.count)\n"
+        out += "- Cases whose requests differ from the judge calls counted: **\(r.requestMismatches.count)** (bar: 0)\n"
+        out += "- self_pivot_usd total: \(usd(r.selfPivotUsd))\n"
         out += "- Result: **\(r.passed ? "PASS" : "FAIL")**\n\n"
-        out += "| Set | Case | Gate (shadow) | Judged | Verdict | Confidence | Cue |\n|---|---|---|---|---|---|---|\n"
+        out += "| Set | Case | Gate (shadow) | Judged | Verdict | Confidence | Cue | Requests | self_pivot_usd |\n|---|---|---|---|---|---|---|---|---|\n"
         for o in r.outcomes {
             out += "| \(o.set.rawValue) | \(o.name) | \(o.candidate ? "yes" : "no") | \(o.judged ? "yes" : "no") | "
-                + "\(o.failure.map { "failed: \($0)" } ?? o.verdict ?? "-") | \(o.confidence.map { String(format: "%.2f", $0) } ?? "-") | \(o.cue ? "yes" : "no") |\n"
+                + "\(o.failure.map { "failed: \($0)" } ?? o.verdict ?? "-") | \(o.confidence.map { String(format: "%.2f", $0) } ?? "-") | \(o.cue ? "yes" : "no") | "
+                + "\(o.requests) | \(usd(o.selfPivotUsd)) |\n"
         }
         return out
+    }
+
+    /// Dollars at the precision the judge's tiny calls need.
+    public static func usd(_ x: Double) -> String { String(format: "%.6f", x) }
+
+    /// SUMMARY.md: the run's verdict, request count and the self-pivot judge's spend, per case and in total.
+    public static func summary(_ r: Report, mode: String) -> String {
+        var out = "# Self-pivot precision run summary (\(mode))\n\n"
+        out += "- Result: **\(r.passed ? "PASS" : "FAIL")**\n"
+        out += "- Judged cases: \(r.outcomes.filter(\.judged).count) of \(r.outcomes.count); self-pivot judge requests: \(r.requests)\n"
+        out += "- self_pivot_usd total: **\(usd(r.selfPivotUsd))**\n\n"
+        out += "| Case | Requests | Input tokens | Output tokens | self_pivot_usd |\n|---|---|---|---|---|\n"
+        for o in r.outcomes {
+            out += "| \(o.name) | \(o.requests) | \(o.selfPivotInputTokens) | \(o.selfPivotOutputTokens) | \(usd(o.selfPivotUsd)) |\n"
+        }
+        out += "| **total** | \(r.requests) | \(r.outcomes.reduce(0) { $0 + $1.selfPivotInputTokens }) | "
+            + "\(r.outcomes.reduce(0) { $0 + $1.selfPivotOutputTokens }) | **\(usd(r.selfPivotUsd))** |\n"
+        return out
+    }
+
+    /// cost-log.jsonl, in the voice harness's shape: one `judge` entry per case with the self-pivot calls and
+    /// dollars, then a `judge_total` entry. Counts and dollars only.
+    public static func costLog(_ r: Report, mode: String) -> String {
+        var entries = r.outcomes.map { o in
+            CostEntry(kind: "judge", scenario: o.name,
+                      fields: ["calls": Double(o.requests), "self_pivot_calls": Double(o.judgeCalls), "self_pivot_usd": o.selfPivotUsd,
+                               "usd": o.selfPivotUsd, "other_calls": 0, "other_usd": 0,
+                               "self_pivot_input_tokens": Double(o.selfPivotInputTokens),
+                               "self_pivot_output_tokens": Double(o.selfPivotOutputTokens)],
+                      labels: ["mode": mode, "set": o.set.rawValue])
+        }
+        entries.append(CostEntry(kind: "judge_total", scenario: nil,
+                                 fields: ["calls": Double(r.requests), "self_pivot_calls": Double(r.outcomes.reduce(0) { $0 + $1.judgeCalls }),
+                                          "self_pivot_usd": r.selfPivotUsd, "usd": r.selfPivotUsd, "other_calls": Double(r.otherJudgeRequests),
+                                          "cases": Double(r.outcomes.count)],
+                                 labels: ["mode": mode]))
+        return entries.map(\.json).joined(separator: "\n") + "\n"
     }
 
     public static func json(_ r: Report, mode: String) -> String {
@@ -211,10 +276,13 @@ public enum PivotEval {
             "mode": mode, "passed": r.passed, "false_cues_on_negatives": r.falseCues.count, "negatives": r.negatives.count,
             "positives": r.positives.count, "recall": r.recall, "shadow_recall": r.shadowRecall, "requests": r.requests,
             "store_false_violations": r.storeViolations, "cue_judge_requests": r.otherJudgeRequests,
-            "snippet_leaks": r.snippetLeaks, "failed_calls": r.failures.count,
+            "snippet_leaks": r.snippetLeaks, "failed_calls": r.failures.count, "request_mismatches": r.requestMismatches.count,
+            "self_pivot_usd": r.selfPivotUsd,
             "cases": r.outcomes.map { o -> [String: Any] in
                 ["name": o.name, "set": o.set.rawValue, "candidate": o.candidate, "judged": o.judged, "verdict": o.verdict as Any,
-                 "confidence": o.confidence as Any, "cue": o.cue, "failure": o.failure as Any]
+                 "confidence": o.confidence as Any, "cue": o.cue, "failure": o.failure as Any, "requests": o.requests,
+                 "self_pivot_calls": o.judgeCalls, "self_pivot_usd": o.selfPivotUsd,
+                 "self_pivot_input_tokens": o.selfPivotInputTokens, "self_pivot_output_tokens": o.selfPivotOutputTokens]
             },
         ]
         let data = (try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])) ?? Data()

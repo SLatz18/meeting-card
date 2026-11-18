@@ -14,7 +14,8 @@ recall against the gate's shadow recall, the store:false check and the no-case-t
                      LISTEN_MORE_PAID_RUN=1.
   --dry-run          a local stub answers instead (default none); no network, no key.
   --stub-answer A    with --dry-run: what the stub answers every request (none or self_pivot, at 0.99)
-  --out DIR          where pivot-eval.md and pivot-eval.json go (numbers and labels only)
+  --out DIR          where pivot-eval.md, pivot-eval.json, SUMMARY.md and cost-log.jsonl go (numbers and labels
+                     only); they carry self_pivot_usd per case and in total
 
 Exit status: 0 when the bar holds, 1 when it doesn't, 2 on a usage or setup error.
 """
@@ -86,9 +87,13 @@ func main() async -> Int32 {
         let (report, _, keyLeaks) = try await PivotEval.runAndWrite(http: http, key: key, secrets: dryRun ? [] : [key.value],
                                                                     out: dir, mode: mode) { say($0) }
         say("results: \(dir.appendingPathComponent("pivot-eval.md").path)")
+        say("summary: \(dir.appendingPathComponent("SUMMARY.md").path)")
+        say("cost log: \(dir.appendingPathComponent("cost-log.jsonl").path)")
         say("false self_pivot cues on negatives: \(report.falseCues.count) of \(report.negatives.count) (bar: 0)")
         say(String(format: "recall %.0f%% vs shadow %.0f%%", report.recall * 100, report.shadowRecall * 100))
-        say("requests \(report.requests), without store false \(report.storeViolations), cue judge requests \(report.otherJudgeRequests)")
+        say("requests \(report.requests), without store false \(report.storeViolations), cue judge requests \(report.otherJudgeRequests), "
+            + "cases with an uncounted request \(report.requestMismatches.count)")
+        say("self_pivot_usd total \(PivotEval.usd(report.selfPivotUsd)) (per case in SUMMARY.md and cost-log.jsonl)")
         say("outputs carrying case text: \(report.snippetLeaks.count); failed calls: \(report.failures.count)")
         if !keyLeaks.isEmpty { say("FAIL: secret material reached output files (scrubbed): \(keyLeaks.joined(separator: ", "))") }
         let passed = report.passed && keyLeaks.isEmpty
