@@ -174,7 +174,7 @@ final class CueDisplaySnapshotTests: XCTestCase {
 
     /// The lab renders (the test build's window content).
     func testLabRenders() throws {
-        let renderer = ImageRenderer(content: CueDisplayLabView().frame(width: Theme.CoachPill.maxWidth * 2))
+        let renderer = ImageRenderer(content: CueDisplayLabView().frame(width: Theme.CueDisplay.pillMaxWidth * 2))
         XCTAssertNotNil(renderer.cgImage)
     }
 }

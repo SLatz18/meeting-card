@@ -230,6 +230,7 @@ final class CueDisplayTests: XCTestCase {
     /// coach's hearing state) or an ear (the coach itself).
     func testCueGlyphsKeepTheGlyphRules() {
         let glyphs = CoachNudge.Kind.allCases.map(Theme.CueDisplay.glyph)
+        XCTAssertEqual(glyphs, CoachNudge.Kind.allCases.map(Theme.CoachCard.Symbols.cue), "the prototype shows the shipped glyphs")
         XCTAssertEqual(Set(glyphs).count, glyphs.count)
         for g in glyphs {
             for reserved in ["mic", "waveform", "ear"] { XCTAssertFalse(g.hasPrefix(reserved), g) }

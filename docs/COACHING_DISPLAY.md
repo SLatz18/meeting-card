@@ -1,8 +1,19 @@
 # Coaching display: how the coach's cues show during a call
 
-Status: proposal, with a prototype in the **test build only** (draft PR #31). Nothing here changes the shipping
-app. **All new copy is placeholder** (`CueDisplayCopy.isPlaceholder`); the cue words and VoiceOver announcements
-it shows are the shipped, approved `CoachNudge.words` and `CoachNudge.announcement`.
+Status: decided. The proposal and its prototype came in draft PR #31; the prototype and its lab stay in the
+**test build only**. The chosen card and pill ship in draft PR #36 (below). The prototype's new copy is
+placeholder (`CueDisplayCopy.isPlaceholder`), as is the shipped card's one new string
+(`CoachCardCopy.Linger.isDraft`); the cue words and VoiceOver announcements are the shipped, approved
+`CoachNudge.words` and `CoachNudge.announcement`.
+
+**Decision (owner, 2026-11-18), shipped in #36:** the card shows the rotating words line for 4.5 s, then the
+cue's glyph lingers in the status glyph until 20 s after the cue; the pill is the glyph state at a constant
+width, with the words in its tooltip and VoiceOver label. A cue belongs to the listening it came in: pausing,
+muting (in Zoom or the coach's own Mute) or the call ending drops it, so it never returns after Resume or
+unmute. CC4 in [MAC_DEMO_CHECKS.md](MAC_DEMO_CHECKS.md) checks it by hand. Still open, with the proposals
+below as the defaults: the 10 s gap, the glyph set and the final copy (to a writer). In the shipped card the
+glyph is the cue's from the moment the words show, so the two are learned together; the prototype's rotating
+line keeps the coach glyph during the words.
 
 **Recommendation in one line:** keep the shipped rotating line on the card, let the cue's glyph linger in the
 status glyph after the words go, put the glyph state on the pill, and leave caption anchoring for later.

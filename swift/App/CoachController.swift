@@ -402,15 +402,32 @@ final class CoachController: NSObject {
         refresh()
     }
 
+    /// A cue that arrives while the coach isn't listening is neither shown nor announced.
     private func showNudge(_ cue: Cue) {
-        guard let n = CoachNudge(cue) else { return }
-        nudges.show(n, now: ProcessInfo.processInfo.systemUptime)
+        let status = enabled ? CoachCardState.Status(indicator) : nil
+        guard let n = CoachNudge(cue), nudges.show(n, now: ProcessInfo.processInfo.systemUptime, status: status) else { return }
         CoachCardPresenter.announce(n.announcement)
-        nudgeTimer?.invalidate()
-        let t = Timer(timeInterval: nudges.hold, repeats: false) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
+        scheduleNudgeStep()
+        refresh()
+    }
+
+    /// Redraws when a cue's words give way to its lingering glyph, and again when the glyph clears.
+    private func scheduleNudgeStep() {
+        stopNudgeTimer()
+        guard let wait = nudges.nextChange(now: ProcessInfo.processInfo.systemUptime) else { return }
+        let t = Timer(timeInterval: wait, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refresh()
+                self?.scheduleNudgeStep()
+            }
+        }
         RunLoop.main.add(t, forMode: .common)
         nudgeTimer = t
-        refresh()
+    }
+
+    private func stopNudgeTimer() {
+        nudgeTimer?.invalidate()
+        nudgeTimer = nil
     }
 
     func showSettings() {
@@ -443,11 +460,13 @@ final class CoachController: NSObject {
                                callMode: listening && ((service?.mic as? MicCapture)?.headphonesInCallMode() ?? false))
         noMicTracker.update(call: service?.session.session?.startedAt,
                             callMode: listening && ((service?.mic as? MicCapture)?.noMicStatus ?? false))
-        guard enabled, let status = CoachCardState.Status(indicator) else { return nil }
+        let status = enabled ? CoachCardState.Status(indicator) : nil
+        if nudges.follow(status) { stopNudgeTimer() }
+        guard let status else { return nil }
         let now = ProcessInfo.processInfo.systemUptime
         nudges.expire(now: now)
         var state = CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
-                                   nudge: nudges.active(now: now),
+                                   nudge: nudges.active(now: now), lingering: nudges.lingering(now: now),
                                    mode: minimized ? .pill : .card,
                                    increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
                                    savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
@@ -463,10 +482,11 @@ final class CoachController: NSObject {
 
     private func updateCoachCard(_ s: CoachCardState?) {
         guard let s else {
+            nudges.clear()
+            stopNudgeTimer()
             guard let c = coachCard, c.isShown else { return }
             let card = c.hide()
             minimized = false
-            nudges.clear()
             if let card, visibleCards().contains(where: { $0 === card }) { card.panel.orderFrontRegardless() }
             return
         }

@@ -123,19 +123,14 @@ public extension CoachNudge.Kind {
 public extension Theme {
     /// The prototype's look, derived from the coach card's tokens.
     enum CueDisplay {
-        /// One SF Symbol per cue type for the glyph-state option and the caption marks. Never a mic
-        /// (Mute in Zoom's), a waveform (the coach's hearing state) or an ear (the coach itself).
-        public static func glyph(_ kind: CoachNudge.Kind) -> String {
-            switch kind {
-            case .interrupt: "hand.raised.fill"
-            case .talkOver: "bubble.left.and.bubble.right.fill"
-            case .aggressive: "thermometer.medium"
-            case .notListening: "arrowshape.turn.up.left.fill"
-            case .missedQuestion: "questionmark.bubble.fill"
-            case .monologue: "timer"
-            case .talkShare: "chart.pie.fill"
-            }
-        }
+        /// One SF Symbol per cue type: the shipped card's (`Theme.CoachCard.Symbols.cue`).
+        public static func glyph(_ kind: CoachNudge.Kind) -> String { Theme.CoachCard.Symbols.cue(kind) }
+
+        /// The rotating-line pill as it was before the glyph-state pill shipped: it widened for the
+        /// words, up to the card's width.
+        public static let pillMaxWidth = CardLayout.W
+        public static let pillWordsFont = Theme.CoachCard.nudgeFont
+        public static let pillWordsInset = Theme.Coach.glyphGap
 
         /// Behind the snapshots and the lab's preview, so the card's edge shows.
         public static func backdrop(style: CardStyle) -> RGBA { style.controlFill(.normal).over(style.surface) }
@@ -274,7 +269,7 @@ public enum CueDisplayPacing {
     /// How long the glyph-state option keeps the cue's glyph (full for the hold, then fading),
     /// and the caption-anchored option its row mark: the policy's per-type cooldown, so a mark is
     /// gone before the same cue can come back.
-    public static let linger: TimeInterval = 20
+    public static let linger = CardStyle.Coach.cueLinger
 }
 
 /// A cue on the card, from when it showed.
