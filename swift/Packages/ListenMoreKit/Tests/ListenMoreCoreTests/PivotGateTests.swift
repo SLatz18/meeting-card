@@ -360,6 +360,45 @@ final class PivotGateTests: XCTestCase {
         XCTAssertEqual(heldAt[1260], 0)
     }
 
+    // MARK: one condition at a time
+
+    /// About the user (no other person), but only two first-person words and no opener.
+    func testTwoFirstPersonWordsWithoutAnOpenerIsNone() {
+        assertNoCandidate(pivot(reply: "Oh nice, the long ride last spring left me sore for days and the hills were brutal the whole way, my legs gave out."))
+    }
+
+    /// The question hides behind a lead-in word ("so how did…") and lost its "?".
+    func testAQuestionAfterALeadInWordIsNone() {
+        assertNoCandidate(pivot(reply: "Same thing happened to me last year, it took me weeks. So how did the move go in the end", share: PivotLines.moved))
+    }
+
+    /// An invitation inside a clause that doesn't open like a question.
+    func testAnInvitationInsideTheReplyIsNone() {
+        assertNoCandidate(pivot(reply: "Same thing happened to me last year, I spent weeks unpacking and I had to repaint my whole place, anything like that happening at the new place",
+                                share: PivotLines.moved))
+    }
+
+    func testTheirTurnWithoutAShareMarkerIsNone() {
+        assertNoCandidate(pivot(share: "Running my first half marathon on Sunday made me so nervous at the start line."))
+    }
+
+    func testTheirTurnWithoutAShareWordIsNone() {
+        assertNoCandidate(pivot(share: "I finally finished reading the long report on Sunday and I was so tired of it."))
+    }
+
+    func testTheirTurnShorterThanTheMinimumIsNone() {
+        assertNoCandidate(pivot(share: "I just got married!"))
+    }
+
+    /// Their share ended over 120 s before their next, plain turn: it is gone, not part of that turn.
+    func testAShareOlderThan120SIsNotPartOfTheirNextTurn() {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.them("Anyway, back to the agenda for today, the next item on the list is the budget review.", 130.0, 134.0)
+        s.you(PivotLines.pivot, 134.5, 140.5)
+        assertNoCandidate(s, until: 150)
+    }
+
     // MARK: transcript wait
 
     func testALateTranscriptInsideTheWaitIsDecidedWhenItLands() throws {

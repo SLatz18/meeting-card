@@ -747,11 +747,18 @@ final class PivotShadowTests: XCTestCase {
         XCTAssertEqual(GptCore(config: config).snapshot.pivotCandidates, 0)
     }
 
-    func testAStoppedLayerDecidesNothing() {
+    /// A stopped layer (an error or the budget cap) drops the gate's text at once and decides nothing.
+    func testAStoppedLayerDropsTheTextAndDecidesNothing() {
         let core = GptCore(config: config)
+        var held: [Int] = []
         pivot().play(into: core, until: 30) { t in
-            if abs(t - 13.0) < 1e-9 { core.fail("judge: HTTP 401") }
+            if abs(t - 13.0) < 1e-9 {
+                held.append(core.pivot.heldLines)
+                core.fail("judge: HTTP 401")
+                held.append(core.pivot.heldLines)
+            }
         }
+        XCTAssertEqual(held, [2, 0])
         XCTAssertEqual(core.snapshot.pivotCandidates, 0)
     }
 
