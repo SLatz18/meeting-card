@@ -67,6 +67,45 @@ jobs:
             test "$in_shipping" -eq 0
             test "$in_test" -gt 0
           done
+      # The coaching-display prototype (Core/CueDisplay*.swift, App/CoachCueDisplayLab.swift) is compiled into
+      # test builds only: none of it in the shipping app or its Core framework, all of it in the test build.
+      - name: Cue display prototype only in the test build
+        working-directory: swift
+        run: |
+          bins() { echo "$1/Contents/MacOS/MeetingCardSwift" "$1/Contents/Frameworks/MeetingCardCore.framework/MeetingCardCore"; }
+          shipping=build/dd/Build/Products/Release/MeetingCardSwift.app
+          testbuild=build/dd-test/Build/Products/Release/MeetingCardSwift.app
+          for marker in "MeetingCard cue display prototype" "Cue Display Prototype" "CueDisplayPacer" "CueDisplayLabView" "CueTimeline" "CoachCueDisplayLab"; do
+            in_shipping=$(strings -a $(bins "$shipping") | grep -c "$marker" || true)
+            in_test=$(strings -a $(bins "$testbuild") | grep -c "$marker" || true)
+            echo "$marker: shipping $in_shipping, test build $in_test"
+            test "$in_shipping" -eq 0
+            test "$in_test" -gt 0
+          done
+      # The prototype's snapshot tests (Tests/CueDisplaySnapshotTests.swift) wrote one PNG per option, surface and appearance.
+      - name: Cue display snapshots
+        working-directory: swift
+        run: |
+          ls build/cue-display
+          missing=0
+          for o in rotating-line glyph-state caption-anchored; do
+            for a in light dark; do
+              for s in card pill burst-card burst-pill before-pacing-card; do
+                [[ -s "build/cue-display/$s-$o-$a.png" ]] || { echo "missing $s-$o-$a.png"; missing=1; }
+              done
+            done
+          done
+          for a in light dark; do
+            for s in card-glyph-state-hover card-glyph-state-lingering pill-glyph-state-hover glyphs; do
+              [[ -s "build/cue-display/$s-$a.png" ]] || { echo "missing $s-$a.png"; missing=1; }
+            done
+          done
+          [[ $missing == 0 ]]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cue-display-snapshots
+          path: swift/build/cue-display/
+          if-no-files-found: error
       - name: Kit test summary
         working-directory: swift
         run: grep -E "Executed [0-9]+ tests" build/kit-test.log | tail -1

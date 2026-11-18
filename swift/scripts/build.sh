@@ -9,7 +9,8 @@
 #     privacy grants, log and Application Support dir (MeetingCardSwift-Test) are its own. Release
 #     build in build/dd-test; installs to ~/Applications/MeetingCardSwift-Test.app, which is never
 #     registered as a login item. It alone compiles the coach's audio debug readout
-#     (MEETINGCARD_TEST_ID; App/CoachDebugReadout.swift).
+#     (MEETINGCARD_TEST_ID; App/CoachDebugReadout.swift) and, of the Release builds, the coaching-display
+#     prototype (Core/CueDisplay*.swift, App/CoachCueDisplayLab.swift; Debug builds have it for the tests).
 #     Mac hand checks use it (docs/MAC_DEMO_CHECKS.md).
 # Tests include the ListenMoreKit package (swift test); SKIP_KIT_TESTS=1 skips them.
 # Never launches the app.
