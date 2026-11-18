@@ -130,8 +130,9 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         /// `pivot_first_person_share` of first-person plus `pivot_other_person` words, and a sentence
         /// opens with a pivot opener or there are at least `pivot_first_person_min_words` first-person
         /// words. A reply opening with a `pivot_sympathy` phrase is judged on the text after it, where
-        /// `pivot_first_person_plural` ("we", "our", "us") counts as first person too. A reply with a
-        /// `pivot_help_offers` phrase is about them.
+        /// `pivot_first_person_plural` ("we", "our", "us") counts as first person too when that text
+        /// also has a singular first-person word or a share marker. A reply with a `pivot_help_offers`
+        /// phrase (help, or accommodation such as "no stress") is about them.
         public var pivotReplyMaxStartS: Double
         public var pivotReplyMinWords: Int
         public var pivotOpeners: [String]

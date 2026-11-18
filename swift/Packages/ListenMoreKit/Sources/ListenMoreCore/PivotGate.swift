@@ -20,7 +20,8 @@ import Foundation
 ///    and either a sentence opens with a pivot opener and there are `pivot_opener_min_first_person`
 ///    of them, or there are at least `pivot_first_person_min_words`. A reply that opens with sympathy (`pivot_sympathy`:
 ///    "sorry to hear", "i hope he", "congratulations", "that's rough") is judged on what follows the
-///    sympathy, where "we", "our" and "us" count as the user too (`pivot_first_person_plural`): "i'm
+///    sympathy, where "we", "our" and "us" count as the user too (`pivot_first_person_plural`) when
+///    that text also has "i", "my" or the like, or a share marker ("we just"): "i'm
 ///    so sorry. my mom was in the hospital last year and i was there every night…" is a pivot, and
 ///    sympathy with only talk about them is commiseration. A reply offering help (`pivot_help_offers`:
 ///    "let me know", "if you need", "i can help") is about them.
@@ -107,7 +108,9 @@ final class PivotGate {
     private let tags: [[String]]
     private let firstPerson: Set<String>
     /// With "we", "our" and "us": in the text after a sympathy opening the user's own story often
-    /// starts with their household ("congrats! we just bought a house too").
+    /// starts with their household ("congrats! we just bought a house too"). Used only when that text
+    /// also has a singular first-person word or a share marker; otherwise "we" is the team ("we can
+    /// push the review").
     private let firstPersonAfterSympathy: Set<String>
     private let otherPerson: Set<String>
     private var them: [Line] = []
@@ -307,7 +310,9 @@ final class PivotGate {
               !lines.contains(where: { has($0.text, x.pivotHelpOffers) }) else { return false }
         let opening = sympathyOpening(lines)
         if opening.led {
-            return aboutUser(opening.rest.flatMap(TextRules.tokens), firstPerson: firstPersonAfterSympathy,
+            let rest = opening.rest.flatMap(TextRules.tokens)
+            let ownStory = rest.contains(where: firstPerson.contains) || opening.rest.contains(where: { has($0, x.pivotShareMarkers) })
+            return aboutUser(rest, firstPerson: ownStory ? firstPersonAfterSympathy : firstPerson,
                              opens: opening.starts.contains(where: opensWithOpener))
         }
         return aboutUser(words, firstPerson: firstPerson, opens: lines.contains(where: opensWithPivot))

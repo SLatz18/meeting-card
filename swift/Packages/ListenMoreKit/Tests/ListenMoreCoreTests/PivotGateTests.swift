@@ -243,6 +243,23 @@ final class PivotGateTests: XCTestCase {
         }
     }
 
+    /// After sympathy, "we" is the team unless the user's own story is there too ("i", "my", "we just").
+    func testWeAfterSympathyWithoutTheUsersOwnStoryIsTheTeam() {
+        let house = "We finally bought our first house last week and I am so excited to move in."
+        assertNoCandidate(pivot(reply: "So sorry to hear that. We will sort out the plan on our side and we will move the review to the week after.",
+                                share: PivotLines.worried))
+        assertNoCandidate(pivot(reply: "Congratulations! We should all celebrate, our whole team will chip in and we will get a cake for the office on Friday.",
+                                share: house))
+    }
+
+    /// Accommodation is an offer of help: "we can push", "no stress", "take your time".
+    func testAccommodatingThemIsAboutThem() {
+        assertNoCandidate(pivot(reply: "So sorry to hear that. We can push the review to next week, we will sort out the plan on our side, no stress at all.",
+                                share: PivotLines.worried))
+        assertNoCandidate(pivot(reply: "No stress at all, I will take my part of the review and I can do my slides for it later in the week.",
+                                share: PivotLines.worried))
+    }
+
     /// "We" counts as the user only after sympathy: elsewhere it is often the team.
     func testWeCountsAsTheUserOnlyAfterSympathy() {
         assertNoCandidate(pivot(reply: "Oh nice, we just shipped the new build and we are moving the whole team to it, our rollout starts on Monday."))

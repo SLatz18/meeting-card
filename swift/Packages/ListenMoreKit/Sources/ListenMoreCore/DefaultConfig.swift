@@ -95,7 +95,7 @@ public enum DefaultConfig {
     "pivot_first_person": ["i", "i'm", "i've", "i'd", "i'll", "me", "my", "mine", "myself"],
     "pivot_other_person": ["you", "you're", "you've", "you'd", "you'll", "your", "yours", "yourself", "he", "he's", "he'd", "he'll", "him", "his", "himself", "she", "she's", "she'd", "she'll", "her", "hers", "herself", "they", "they're", "they've", "they'd", "they'll", "them", "their", "theirs", "themselves"],
     "pivot_first_person_plural": ["we", "we're", "we've", "we'd", "we'll", "our", "ours", "us", "ourselves"],
-    "pivot_help_offers": ["if you need", "let me know", "here if", "here for you", "i can help", "happy to help", "anything i can do", "i can cover"],
+    "pivot_help_offers": ["if you need", "let me know", "here if", "here for you", "i can help", "happy to help", "anything i can do", "i can cover", "we can push", "we can move", "no stress", "take your time", "no rush"],
     "pivot_first_person_min_words": 3,
     "pivot_opener_min_first_person": 2,
     "pivot_first_person_share": 0.8,
