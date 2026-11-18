@@ -6,6 +6,24 @@ import ListenMoreCore
 final class LiveRun3Tests: XCTestCase {
     let config = try! ListenMoreConfig.builtIn()
 
+    /// pause: the paused y2 cut-in would fire past the cooldown of the pre-Pause interrupt even at the
+    /// late end of that cue's live window, for TTS from the synthetic 2.6 words/s up to a fast 3.4.
+    func testPausedCutInIsPastAPrePauseCueCooldown() throws {
+        let s = Scenarios.pause
+        for wordsPerS in [2.6, 3.0, 3.4] {
+            let shapes = Dictionary(uniqueKeysWithValues: s.lines.map { line -> (String, ClipShape) in
+                let voiced = line.seconds ?? Double(line.words.count) / wordsPerS
+                return (line.id, ClipShape(lead: 0, voiced: voiced, total: voiced))
+            })
+            let t = try Timeline.realize(s, shapes: shapes)
+            let pre = try XCTUnwrap(CueOracle.expected(t, config: config, facts: .init(keyless: false, gptStopT: nil, mode: .live)).cues.first)
+            let y2 = try XCTUnwrap(t.line("y2"))
+            let y2Fire = y2.start + config.local.cutInBackchannelMaxMs / 1000
+            XCTAssertTrue(t.windows(.pause, .resume, end: t.duration).contains { $0.contains(y2Fire) }, "y2 cuts in while paused")
+            XCTAssertGreaterThanOrEqual(y2Fire - pre.window.upperBound, config.cues.cooldownS, "at \(wordsPerS) words/s")
+        }
+    }
+
     /// The judge-off mute-unmute take around its false interrupt: Them quiet 28.56-29.16 s at a comma,
     /// You's first words back with comma pauses. The diagnostics list both sides' pauses, so a live run
     /// shows what ended the first words back's exemption.
