@@ -226,6 +226,7 @@ enum UISnapshots {
                         settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                             transcriptShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                                 startToggleCheck(tag: tag, controller: controller)
+                                selfPivotNoticeCheck(tag: tag, controller: controller)
                                 symbolCheck(tag: tag, controller: controller)
                                 menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
                                 noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
@@ -476,6 +477,30 @@ enum UISnapshots {
             "\(name)=\(NSImage(systemSymbolName: name, accessibilityDescription: nil) == nil ? "missing" : "ok")"
         }
         controller.log("coach check symbols-\(tag) \(found.joined(separator: " "))")
+    }
+
+    /// Settings' Show Notice Again opens the ask-back notice (and nothing had opened it on its own: the coach is
+    /// off, no call is starting).
+    @MainActor
+    static func selfPivotNoticeCheck(tag: String, controller: Controller) {
+        let suite = AppIdentity.current.scoped("self-pivot-check")
+        guard let defaults = UserDefaults(suiteName: suite) else { return }
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set(true, forKey: CoachController.Keys.onboarded)
+        var result = "unavailable"
+        if let coach = try? CoachController(defaults: defaults, keychain: KeychainStore(service: suite, account: "none"), showsStatusItem: false,
+                                            transcriptStore: MemoryTranscriptStore()) {
+            coach.showSettings()
+            let before = coach.selfPivotNotice == nil ? "closed" : "open"
+            coach.settingsWindow?.showNoticeAgainButton.performClick(nil)
+            let opened = coach.selfPivotNotice?.window.isVisible == true ? "yes" : "no"
+            let title = coach.selfPivotNotice?.content.title == CoachSelfPivot.Copy.noticeTitle ? "ok" : "wrong"
+            coach.selfPivotNotice?.close()
+            coach.settingsWindow?.window.orderOut(nil)
+            result = "before=\(before) opened=\(opened) title=\(title)"
+        }
+        defaults.removePersistentDomain(forName: suite)
+        controller.log("coach check self-pivot-reopen-\(tag) \(result)")
     }
 
     @MainActor

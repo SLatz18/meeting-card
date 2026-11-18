@@ -96,6 +96,9 @@ case "${1:-}" in
     for a in light dark; do
       grep -q "coach check start-toggle-$a before=off open=on reopened=on fresh=on" "$OUT/coach-shots.log" \
         || { echo "Start Coach didn't show in Settings ($a)" >&2; missing=1; }
+      # Settings' Show Notice Again opens the ask-back notice (UISnapshots.selfPivotNoticeCheck).
+      grep -q "coach check self-pivot-reopen-$a before=closed opened=yes title=ok" "$OUT/coach-shots.log" \
+        || { echo "Show Notice Again didn't open the ask-back notice ($a)" >&2; missing=1; }
       # The coach Mute's SF Symbols load on this macOS (UISnapshots.symbolCheck).
       grep -q "coach check symbols-$a waveform=ok waveform.slash=ok" "$OUT/coach-shots.log" \
         || { echo "coach Mute glyphs missing ($a)" >&2; missing=1; }

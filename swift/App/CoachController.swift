@@ -10,7 +10,8 @@ import MeetingCardCore
 /// captions and transcript settings (`CoachTranscript`) and the ask-back cue's two (`CoachSelfPivot`); the API
 /// keys live only in the Keychain. The cue judge (`coach.judgeProvider`, gpt unless set) applies from the next call.
 /// The ask-back cue (the Kit's self_pivot) is on inside the coach with a usable key and a cue judge that can
-/// check it, but sends and shows nothing until its one-time notice has been answered.
+/// check it, but sends and shows nothing until its one-time notice has been answered. The notice opens at the
+/// next coach enable or call start, never during a live call; Settings can show it again.
 /// "Use Zoom/Meet controls" (off by default) lets Zoom's meeting controls and an open Meet tab stop
 /// the coach within seconds of a call ending and hold it while Zoom is muted; its Accessibility and
 /// Automation prompts appear only when the user turns it on (or asks again from Settings).
@@ -88,8 +89,12 @@ final class CoachController: NSObject {
     private var noMicTracker = OncePerCallNotice()
     /// The coach card is the pill (for the rest of this showing).
     private(set) var minimized = false
-    /// The ask-back cue's one-time notice, while it's up.
+    /// The ask-back cue's one-time notice, while it's up, and whether Settings' Show Notice Again opened it.
     private(set) var selfPivotNotice: CoachNotice?
+    private var selfPivotNoticeFromSettings = false
+    private var selfPivotNoticeTiming = CoachSelfPivot.NoticeTiming()
+    /// The coach was turned on since the last refresh: one of the notice's moments.
+    private var enabledSinceRefresh = false
 
     init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
          showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore()) throws {
@@ -159,11 +164,39 @@ final class CoachController: NSObject {
         refresh()
     }
 
-    /// Shows the ask-back notice when it's due (`CoachSelfPivot.noticeDue`); until it's answered the engine's
-    /// switch stays off. Either button answers it; Open Settings also opens Settings.
-    private func showSelfPivotNoticeIfDue() {
-        guard selfPivotNotice == nil,
-              CoachSelfPivot.noticeDue(coachEnabled: enabled, state: selfPivotState, seen: CoachSelfPivot.noticeSeen(defaults)) else { return }
+    /// A coach session is running: the call is live (the notice never opens on its own then).
+    nonisolated static func isLiveCall(_ i: CoachIndicator) -> Bool {
+        switch i {
+        case .listening, .paused, .muted, .micOff: true
+        case .hidden, .on: false
+        }
+    }
+
+    /// On every refresh: opens the due ask-back notice (`CoachSelfPivot.noticeDue`) at a coach enable or a call
+    /// start (pre-warmed), never while a call is live, and takes down one that opened on its own when a call goes
+    /// live. Until it's answered the engine's switch stays off.
+    private func updateSelfPivotNotice() {
+        let live = enabled && Self.isLiveCall(indicator)
+        if let open = selfPivotNotice,
+           CoachSelfPivot.NoticeTiming.shouldClose(callLive: live, openedFromSettings: selfPivotNoticeFromSettings) {
+            open.close()
+            selfPivotNotice = nil
+        }
+        let enabledNow = enabledSinceRefresh
+        enabledSinceRefresh = false
+        let due = CoachSelfPivot.noticeDue(coachEnabled: enabled, state: selfPivotState, seen: CoachSelfPivot.noticeSeen(defaults))
+        let open = selfPivotNoticeTiming.shouldOpen(due: due, enabledNow: enabledNow, callStarting: enabled && indicator == .on,
+                                                    callLive: live)
+        if open && selfPivotNotice == nil { showSelfPivotNotice(fromSettings: false) }
+    }
+
+    /// The ask-back notice, at its moment or from Settings' Show Notice Again. Either button answers it; Open
+    /// Settings also opens Settings.
+    func showSelfPivotNotice(fromSettings: Bool = true) {
+        if let open = selfPivotNotice {
+            open.presentAlone()
+            return
+        }
         let notice = CoachNotice(content: .selfPivot) { [weak self] gotIt in
             guard let self else { return }
             self.defaults.set(true, forKey: CoachSelfPivot.Keys.noticeSeen)
@@ -172,6 +205,7 @@ final class CoachController: NSObject {
             self.refresh()
         }
         selfPivotNotice = notice
+        selfPivotNoticeFromSettings = fromSettings
         notice.presentAlone()
     }
 
@@ -199,6 +233,7 @@ final class CoachController: NSObject {
         }
         if let service { service.setEnabled(true) } else { makeService() }
         keyProblem = nil
+        enabledSinceRefresh = true
         refresh()
         checkStoredKey(completion: completion)
     }
@@ -453,7 +488,7 @@ final class CoachController: NSObject {
         updateCoachCard(card)
         updateStatusItem()
         settingsWindow?.update()
-        showSelfPivotNoticeIfDue()
+        updateSelfPivotNotice()
     }
 
     /// What the coach card shows now, or nil while the coach isn't on for a call.

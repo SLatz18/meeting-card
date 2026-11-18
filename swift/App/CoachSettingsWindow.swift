@@ -39,6 +39,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let selfPivotNote = CoachSettingsWindow.text(CoachSelfPivot.Copy.unsupportedJudge, font: Theme.Settings.helperFont,
                                                          color: CoachSettingsWindow.color(.secondary))
     private var selfPivotGroupView: NSView?
+    /// Settings' way back to the ask-back notice (`CoachController.showSelfPivotNotice`).
+    let showNoticeAgainButton = NSButton(title: CoachSelfPivot.Copy.showNoticeAgain, target: nil, action: nil)
     private let root = NSStackView()
     private let document = NSView()
     private let scroll = NSScrollView()
@@ -512,15 +514,20 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         judgeStoppedNote.isHidden = stopped == nil
     }
 
-    /// The ask-back cue: its switch, what it sends (the notice's terms, always here), and why it is off on a cue
-    /// judge that can't check it. Dimmed without a usable key; hidden when the build ships the cue disabled.
+    /// The ask-back cue: its switch, what it sends (the notice's terms, always here), Show Notice Again, and why
+    /// it is off on a cue judge that can't check it. Dimmed without a usable key; hidden when the build ships the
+    /// cue disabled.
     private func selfPivotGroup() -> Group {
         selfPivotSwitch.target = self
         selfPivotSwitch.action = #selector(selfPivotToggled(_:))
         selfPivotSwitch.setAccessibilityLabel(CoachSelfPivot.Copy.toggle)
+        showNoticeAgainButton.target = self
+        showNoticeAgainButton.action = #selector(showNoticeAgain(_:))
+        showNoticeAgainButton.bezelStyle = startButton.bezelStyle
+        showNoticeAgainButton.controlSize = startButton.controlSize
         let row = Self.row(Self.text(CoachSelfPivot.Copy.toggle, font: Theme.Settings.rowFont), selfPivotSwitch)
         let help = Self.text(CoachSelfPivot.Copy.help, font: Theme.Settings.helperFont, color: Self.color(.secondary))
-        let g = Self.group([row, help, selfPivotNote])
+        let g = Self.group([row, help, showNoticeAgainButton, selfPivotNote])
         for v in [row, help, selfPivotNote] { pin(v, in: g) }
         return g
     }
@@ -746,6 +753,10 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     @objc private func selfPivotToggled(_ sender: NSSwitch) {
         coach.setSelfPivot(sender.state == .on)
         update()
+    }
+
+    @objc private func showNoticeAgain(_ sender: Any?) {
+        coach.showSelfPivotNotice()
     }
 
     @objc private func typeSafeKeyEntered(_ sender: NSSecureTextField) {

@@ -134,9 +134,14 @@ final class CoachNotice: NSObject {
     @objc private func cancel(_ sender: Any?) { finish(false) }
 
     private func finish(_ ok: Bool) {
+        close()
+        onChoice(ok)
+    }
+
+    /// Takes the notice down without an answer.
+    func close() {
         if let parent = window.sheetParent { parent.endSheet(window) }
         window.orderOut(nil)
-        onChoice(ok)
     }
 
     final class NoticeView: NSView {
