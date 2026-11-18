@@ -171,6 +171,8 @@ public struct RunRecord: @unchecked Sendable {
     /// Self-pivot judge HTTP posts on the wire (a judge call posts once, or twice after a `401 incorrect_hostname`),
     /// and judge requests that didn't send `store: false`.
     public var selfPivotPosts = 0
+    /// Self-pivot posts answered `401 incorrect_hostname` (the judge resends once for each).
+    public var selfPivotRedirects = 0
     public var storeViolations = 0
     /// Each engine run's last GPT layer snapshot (nil without one), in start order.
     public var engineSnapshots: [GptLayer.Snapshot?] = []
@@ -397,6 +399,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.micMuteCalls = mic.muteCalls
         record.judgeCalls = services.judgeCalls()
         record.selfPivotPosts = services.traffic.selfPivotCalls
+        record.selfPivotRedirects = services.traffic.selfPivotRedirects
         record.storeViolations = services.traffic.storeViolations
         record.engineSnapshots = engine.snapshots
         record.selfPivotYes = services.selfPivotYes

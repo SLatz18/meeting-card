@@ -231,13 +231,18 @@ public final class StubJudgeHTTP: HTTPTransport, @unchecked Sendable {
     private var _calls = 0
     private let notListeningOn: String?
     private let selfPivotAnswer: (cue: String, confidence: Double)
+    private var redirectsLeft: Int
     /// Requests per judge, and any without `store: false`.
     public let traffic = JudgeTraffic()
 
     /// `selfPivotAnswer`: what every self-pivot judge request gets (default: none).
-    public init(notListeningOn: String? = nil, selfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9)) {
+    /// `redirectSelfPivot`: how many of the first self-pivot posts answer `401 incorrect_hostname` (naming the
+    /// regional host) instead of a verdict; the judge's resend is the next post.
+    public init(notListeningOn: String? = nil, selfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9),
+                redirectSelfPivot: Int = 0) {
         self.notListeningOn = notListeningOn
         self.selfPivotAnswer = selfPivotAnswer
+        redirectsLeft = redirectSelfPivot
     }
 
     public var calls: Int { lock.withLock { _calls } }
@@ -246,6 +251,14 @@ public final class StubJudgeHTTP: HTTPTransport, @unchecked Sendable {
         lock.withLock { _calls += 1 }
         let inner: String
         if traffic.record(body).selfPivot {
+            let redirect = lock.withLock { () -> Bool in
+                defer { redirectsLeft = max(0, redirectsLeft - 1) }
+                return redirectsLeft > 0
+            }
+            if redirect {
+                traffic.recordSelfPivotRedirect()
+                return (401, Data(#"{"error":{"code":"incorrect_hostname","message":"Use eu.api.openai.com"}}"#.utf8))
+            }
             inner = #"{"cue":"\#(selfPivotAnswer.cue)","confidence":\#(selfPivotAnswer.confidence),"short_reason":"stub"}"#
         } else {
             let flagged = notListeningOn.map { String(decoding: body, as: UTF8.self).contains($0) } ?? false

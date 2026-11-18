@@ -100,6 +100,26 @@ final class LiveFixesTests: XCTestCase {
         XCTAssertEqual(MeteredHTTP.failureClass(status: 500, root: ["error": ["code": "contains a space"]]), "HTTP 500", "only identifier-like codes")
     }
 
+    /// The live meter counts a self-pivot judge's `401 incorrect_hostname` apart from the cue judge's, so the
+    /// self-pivot check can require posts = judge calls + redirects.
+    func testSelfPivotRedirectsAreCountedApart() async throws {
+        struct Redirecting: HTTPTransport {
+            func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
+                (401, Data(#"{"error":{"code":"incorrect_hostname","message":"use eu.api.openai.com"}}"#.utf8))
+            }
+        }
+        let http = MeteredHTTP(inner: Redirecting())
+        let url = URL(string: "https://example.invalid")!
+        let selfPivot = Data(#"{"store":false,"text":{"format":{"name":"\#(SelfPivotJudgeSpec.name)"}}}"#.utf8)
+        let cue = Data(#"{"store":false,"text":{"format":{"name":"listen_more_cue"}}}"#.utf8)
+        _ = try await http.post(url: url, headers: [:], body: selfPivot, timeout: 1)
+        _ = try await http.post(url: url, headers: [:], body: cue, timeout: 1)
+        XCTAssertEqual(http.hostRedirects, 2)
+        XCTAssertEqual(http.traffic.selfPivotRedirects, 1)
+        XCTAssertEqual(http.traffic.selfPivotCalls, 1)
+        XCTAssertTrue(http.failures.isEmpty, "a redirect is not a failure")
+    }
+
     /// Live HTTP uses one URLSession for the whole process (libcurl 8.11+ aborts when one is released).
     func testLiveHTTPSessionIsShared() {
         XCTAssertTrue((LiveBackend.real().http as? EphemeralHTTPTransport) === EphemeralHTTPTransport.shared)

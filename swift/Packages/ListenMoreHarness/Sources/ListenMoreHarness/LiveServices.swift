@@ -147,7 +147,12 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
             _calls += 1
             if reply.status != 200 {
                 let failure = Self.failureClass(status: reply.status, root: root)
-                if failure == Self.hostRedirect { _hostRedirects += 1 } else { _failures.append(failure) }
+                if failure == Self.hostRedirect {
+                    _hostRedirects += 1
+                    if facts.selfPivot { traffic.recordSelfPivotRedirect() }
+                } else {
+                    _failures.append(failure)
+                }
             }
             let input = (usage?["input_tokens"] as? NSNumber)?.intValue ?? 0
             let output = (usage?["output_tokens"] as? NSNumber)?.intValue ?? 0

@@ -12,11 +12,12 @@ final class SelfPivotHarnessTests: XCTestCase {
     static let yes = (cue: "self_pivot", confidence: 0.99)
 
     func run(_ scenarios: [Scenario], answer: (cue: String, confidence: Double) = ("none", 0.9),
-             judge: Bool? = nil) async throws -> (summary: HarnessSummary, out: URL) {
+             judge: Bool? = nil, redirects: Int = 0) async throws -> (summary: HarnessSummary, out: URL) {
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: out) }
         let summary = try await Harness.run(HarnessOptions(mode: .offline, scenarios: scenarios, outputDirectory: out, environment: [:],
-                                                           judge: judge, offlineSelfPivotAnswer: answer))
+                                                           judge: judge, offlineSelfPivotAnswer: answer,
+                                                           offlineSelfPivotRedirects: redirects))
         return (summary, out)
     }
 
@@ -100,6 +101,31 @@ final class SelfPivotHarnessTests: XCTestCase {
         let log = try String(contentsOf: out.appendingPathComponent("cost-log.jsonl"), encoding: .utf8)
         XCTAssertTrue(log.contains(#""self_pivot_calls":1"#))
         XCTAssertTrue(log.contains(#""other_calls":"#))
+    }
+
+    /// The stub answers the first self-pivot post `401 incorrect_hostname`: the judge resends once, the cue is
+    /// still judged and shown, and the self-pivot check holds: wire posts = engine posts = judge calls + redirects.
+    func testOneHostRedirectIsCountedAndPasses() async throws {
+        let (summary, _) = try await run([Scenarios.selfPivotGroup], answer: Self.yes, redirects: 1)
+        let r = try XCTUnwrap(summary.results.first)
+        XCTAssertTrue(r.passed, "\(r.failures.map { "\($0.name): \($0.detail)" })")
+        let check = try XCTUnwrap(r.check("self-pivot"))
+        XCTAssertTrue(check.passed, check.detail)
+        XCTAssertTrue(check.detail.contains("posts 2 (engine 2), judge calls 1, redirects 1"), check.detail)
+        let e = try judgeEntry(summary, r.scenario)
+        XCTAssertEqual(e.fields["self_pivot_calls"], 2, "every post")
+        XCTAssertEqual(e.fields["self_pivot_judge_calls"], 1, "judge calls, apart")
+        XCTAssertEqual(e.fields["self_pivot_redirects"], 1)
+        XCTAssertEqual(shown(r).count, 1)
+    }
+
+    /// Two redirects in a row (the resend is redirected too) is a failed check: more than one redirect, and the
+    /// judge made no verdict.
+    func testTwoRedirectsFailTheSelfPivotCheck() async throws {
+        let (summary, _) = try await run([Scenarios.selfPivotGroup], answer: Self.yes, redirects: 2)
+        let r = try XCTUnwrap(summary.results.first)
+        XCTAssertEqual(r.check("self-pivot")?.passed, false)
+        XCTAssertEqual(try judgeEntry(summary, r.scenario).fields["self_pivot_redirects"], 2)
     }
 
     /// Criterion 4: no transcript or snippet text in any output: results.md, results.json, cost-log.jsonl.

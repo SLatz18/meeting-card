@@ -28,13 +28,16 @@ public struct HarnessOptions {
     public var offlineNotListeningOn: String?
     /// Offline: what the stub answers every self-pivot judge request (default none).
     public var offlineSelfPivotAnswer: (cue: String, confidence: Double)
+    /// Offline: how many of the first self-pivot posts the stub answers `401 incorrect_hostname`.
+    public var offlineSelfPivotRedirects: Int
 
     public init(mode: Mode = .offline, scenarios: [Scenario] = Scenarios.all, outputDirectory: URL,
                 environment: [String: String] = ProcessInfo.processInfo.environment, liveBackend: LiveBackend? = nil,
                 ttsModel: String = "gpt-4o-mini-tts", offlineVoices: OfflineVoices = .synthetic, judge: Bool? = nil,
                 engineOverrides: [String: Any] = [:], ignoredControls: Set<ControlKind> = [], offlineNotListeningOn: String? = nil,
-                offlineSelfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9)) {
+                offlineSelfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9), offlineSelfPivotRedirects: Int = 0) {
         self.offlineSelfPivotAnswer = offlineSelfPivotAnswer
+        self.offlineSelfPivotRedirects = offlineSelfPivotRedirects
         self.mode = mode
         self.scenarios = scenarios
         self.outputDirectory = outputDirectory
@@ -121,7 +124,7 @@ public enum Harness {
                 switch o.mode {
                 case .offline:
                     services = try offlineServices(scenario, config: config, voices: o.offlineVoices, notListeningOn: o.offlineNotListeningOn,
-                                                   selfPivotAnswer: o.offlineSelfPivotAnswer)
+                                                   selfPivotAnswer: o.offlineSelfPivotAnswer, selfPivotRedirects: o.offlineSelfPivotRedirects)
                 case .live:
                     let built = try await liveServices(scenario, config: config, key: liveKey!, options: o, cache: &clipCache, cost: &cost)
                     services = built.services
@@ -173,11 +176,12 @@ public enum Harness {
 
     static func offlineServices(_ scenario: Scenario, config: ListenMoreConfig, voices: OfflineVoices,
                                 notListeningOn: String? = nil,
-                                selfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9)) throws -> RunServices {
+                                selfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9),
+                                selfPivotRedirects: Int = 0) throws -> RunServices {
         let clock = HarnessClock(.simulated)
         let sr = config.audio.sampleRate
         let server = ScriptedRealtime(clock: clock, sampleRate: sr)
-        let judge = StubJudgeHTTP(notListeningOn: notListeningOn, selfPivotAnswer: selfPivotAnswer)
+        let judge = StubJudgeHTTP(notListeningOn: notListeningOn, selfPivotAnswer: selfPivotAnswer, redirectSelfPivot: selfPivotRedirects)
         var clips: [String: [Float]]
         var shapes: [String: ClipShape]
         switch voices {
@@ -194,7 +198,7 @@ public enum Harness {
             }
         }
         return RunServices(mode: .offline, config: config, engineConfig: config, key: scenario.keyless ? nil : APIKey("offline-stub"),
-                           transports: GptTransports(http: judge, webSocket: server, scheduler: InstantScheduler(clock: clock)),
+                           transports: GptTransports(http: judge, webSocket: server, scheduler: InstantScheduler(clock: clock), hosts: LearnedHosts()),
                            clock: clock, sockets: server, offlineServer: server, judgeCalls: { judge.calls },
                            clips: clips, shapes: shapes, traffic: judge.traffic,
                            selfPivotYes: selfPivotAnswer.cue == SelfPivotJudgeSpec.label && selfPivotAnswer.confidence >= config.gpt.selfPivotMinConfidence)
@@ -228,7 +232,7 @@ public enum Harness {
         let http = MeteredHTTP(inner: backend.http, clock: clock)
         let ws = MeteredConnector(inner: backend.webSocket, clock: clock)
         let services = RunServices(mode: .live, config: config, engineConfig: config, key: scenario.keyless ? nil : key,
-                                   transports: GptTransports(http: http, webSocket: ws, scheduler: backend.scheduler),
+                                   transports: GptTransports(http: http, webSocket: ws, scheduler: backend.scheduler, hosts: LearnedHosts()),
                                    clock: clock, sockets: ws, offlineServer: nil, judgeCalls: { http.calls }, clips: clips, shapes: shapes,
                                    traffic: http.traffic)
         return (services, http)
@@ -275,6 +279,7 @@ public enum Harness {
         var judge: [String: Double] = ["calls": Double(record.judgeCalls), "usd": meter.judgeUsd,
                                        "self_pivot_calls": Double(record.selfPivotPosts),
                                        "self_pivot_judge_calls": Double(record.selfPivotEngineJudgeCalls),
+                                       "self_pivot_redirects": Double(record.selfPivotRedirects),
                                        "other_calls": Double(record.judgeCalls - record.selfPivotPosts),
                                        "self_pivot_usd": meter.selfPivotJudgeUsd, "other_usd": meter.judgeUsd - meter.selfPivotJudgeUsd,
                                        "self_pivot_candidates": Double(record.pivotCandidates),

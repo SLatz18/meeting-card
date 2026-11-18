@@ -130,10 +130,13 @@ public enum Checks {
             && JudgeProviders.judgesSelfPivot(r.config.judge.provider)
         let shown = r.cues.filter { $0.type == .selfPivot }.count
         let wantShown = !live && judgesSelfPivot && r.selfPivotYes ? 1 : 0
-        let selfPivotOK = r.pivotCandidates == (declared ? 1 : 0) && r.selfPivotPosts == (judgesSelfPivot ? 1 : 0)
-            && r.selfPivotEnginePosts == r.selfPivotPosts && r.selfPivotEngineJudgeCalls == (judgesSelfPivot ? 1 : 0) && (live ? shown <= 1 : shown == wantShown)
+        // Posts on the wire = posts the engine counted = judge calls + redirects (each `401 incorrect_hostname`
+        // makes one resend), and at most one redirect.
+        let selfPivotOK = r.pivotCandidates == (declared ? 1 : 0) && r.selfPivotEngineJudgeCalls == (judgesSelfPivot ? 1 : 0)
+            && r.selfPivotPosts == r.selfPivotEngineJudgeCalls + r.selfPivotRedirects && r.selfPivotEnginePosts == r.selfPivotPosts
+            && r.selfPivotRedirects <= 1 && (live ? shown <= 1 : shown == wantShown)
         check("self-pivot", selfPivotOK,
-              "candidates \(r.pivotCandidates), posts \(r.selfPivotPosts) (engine \(r.selfPivotEnginePosts)), judge calls \(r.selfPivotEngineJudgeCalls), cues \(shown)")
+              "candidates \(r.pivotCandidates), posts \(r.selfPivotPosts) (engine \(r.selfPivotEnginePosts)), judge calls \(r.selfPivotEngineJudgeCalls), redirects \(r.selfPivotRedirects), cues \(shown)")
         check("judge store false", r.storeViolations == 0, "\(r.storeViolations) judge requests without store false")
         let problems = r.problems.filter { $0 != "transcriberClearRejected" }
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))

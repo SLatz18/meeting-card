@@ -19,12 +19,18 @@ public struct JudgeRequestFacts: Equatable, Sendable {
 public final class JudgeTraffic: @unchecked Sendable {
     private let lock = NSLock()
     private var _selfPivotCalls = 0
+    private var _selfPivotRedirects = 0
     private var _storeViolations = 0
 
     public init() {}
 
+    /// Self-pivot posts on the wire (a judge call posts once, or twice after a `401 incorrect_hostname`).
     public var selfPivotCalls: Int { lock.withLock { _selfPivotCalls } }
+    /// Self-pivot posts answered `401 incorrect_hostname` (each makes the judge's one resend).
+    public var selfPivotRedirects: Int { lock.withLock { _selfPivotRedirects } }
     public var storeViolations: Int { lock.withLock { _storeViolations } }
+
+    func recordSelfPivotRedirect() { lock.withLock { _selfPivotRedirects += 1 } }
 
     @discardableResult
     func record(_ body: Data) -> JudgeRequestFacts {
