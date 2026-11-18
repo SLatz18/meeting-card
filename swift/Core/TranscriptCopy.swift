@@ -8,6 +8,9 @@ public enum TranscriptCopy {
     public static let inVault = "In the Obsidian vault \u{201C}%@\u{201D}."
     public static let notInVault = "Not in an Obsidian vault: notes are plain Markdown files."
     public static let folderUnavailable = "This folder is missing or in the Trash, so nothing is saved. Choose another."
+    public static let unfinishedOne = "1 unfinished transcript: MeetingCard finishes it after a call or at the next launch."
+    /// %d: how many.
+    public static let unfinishedMany = "%d unfinished transcripts: MeetingCard finishes them after a call or at the next launch."
     public static let fileNameLabel = "File name"
     public static let fileNameHelp = "Use {date}, {time}, {title} and {app}."
     public static let tagsLabel = "Tags"
@@ -31,6 +34,11 @@ public enum TranscriptCopy {
     public static func vaultStatus(_ vaultName: String?, folderUsable: Bool = true) -> String {
         guard folderUsable else { return folderUnavailable }
         return vaultName.map { String(format: inVault, $0) } ?? notInVault
+    }
+
+    /// nil when nothing is unfinished.
+    public static func unfinished(_ n: Int) -> String? {
+        n <= 0 ? nil : n == 1 ? unfinishedOne : String(format: unfinishedMany, n)
     }
 
     public static func retention(_ days: Int?) -> String {

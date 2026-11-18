@@ -54,6 +54,14 @@ final class TranscriptSettingsSnapshotTests: XCTestCase {
         """)
     }
 
+    func testUnfinishedTranscriptsAreCounted() {
+        XCTAssertNil(TranscriptSettingsRows(input(), chooseFolder: choose).snapshot.range(of: "[unfinished]"), "none: no line")
+        XCTAssertTrue(TranscriptSettingsRows(input { $0.unfinished = 1 }, chooseFolder: choose).snapshot
+            .contains("[unfinished] 1 unfinished transcript: MeetingCard finishes it after a call or at the next launch.\n[fileName]"))
+        XCTAssertEqual(TranscriptSettingsRows(input { $0.unfinished = 3 }, chooseFolder: choose).row("unfinished")?.control,
+                       .note("3 unfinished transcripts: MeetingCard finishes them after a call or at the next launch."))
+    }
+
     func testAFolderThatIsGoneSaysSo() {
         let rows = TranscriptSettingsRows(input { $0.vaultName = "Example Vault"; $0.folderUsable = false }, chooseFolder: choose)
         XCTAssertEqual(rows.row("vault")?.control, .note("This folder is missing or in the Trash, so nothing is saved. Choose another."))

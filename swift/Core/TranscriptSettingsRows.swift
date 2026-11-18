@@ -17,10 +17,12 @@ public struct TranscriptSettingsRows: Equatable {
         public var dailyNoteEmbed: Bool
         public var retentionDays: Int?
         public var canDelete: Bool
+        /// Calls whose transcript is still unfinished (left by recovery).
+        public var unfinished: Int
 
         public init(folderPath: String, vaultName: String? = nil, folderUsable: Bool = true, keyUsable: Bool, fileNamePattern: String, tags: String,
                     dailyNoteOn: Bool = false, dailyNotePath: String, dailyNoteEmbed: Bool = false, retentionDays: Int? = nil,
-                    canDelete: Bool = false) {
+                    canDelete: Bool = false, unfinished: Int = 0) {
             self.folderPath = folderPath
             self.vaultName = vaultName
             self.folderUsable = folderUsable
@@ -32,6 +34,7 @@ public struct TranscriptSettingsRows: Equatable {
             self.dailyNoteEmbed = dailyNoteEmbed
             self.retentionDays = retentionDays
             self.canDelete = canDelete
+            self.unfinished = unfinished
         }
     }
 
@@ -63,6 +66,7 @@ public struct TranscriptSettingsRows: Equatable {
         rows = [
             Row(id: "folder", control: .folder(path: i.folderPath, button: chooseFolder), enabled: on, hidden: false),
             Row(id: "vault", control: .note(TranscriptCopy.vaultStatus(i.vaultName, folderUsable: i.folderUsable)), enabled: true, hidden: false),
+            Row(id: "unfinished", control: .note(TranscriptCopy.unfinished(i.unfinished) ?? ""), enabled: true, hidden: i.unfinished <= 0),
             Row(id: "fileName", control: .field(label: TranscriptCopy.fileNameLabel, value: i.fileNamePattern), enabled: on, hidden: false),
             Row(id: "fileNameHelp", control: .note(TranscriptCopy.fileNameHelp), enabled: true, hidden: false),
             Row(id: "tags", control: .field(label: TranscriptCopy.tagsLabel, value: i.tags), enabled: on, hidden: false),
