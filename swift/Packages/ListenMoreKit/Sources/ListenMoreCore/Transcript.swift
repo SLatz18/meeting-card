@@ -532,8 +532,11 @@ public enum TranscriptMaintenance {
                              timeZone: TimeZone = .current, keep: Set<URL> = []) -> [URL] {
         guard days > 0 else { return [] }
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
+        // A listing can name the same file by another path (macOS: /private/var for /var).
+        func key(_ u: URL) -> String { u.standardizedFileURL.resolvingSymlinksInPath().path }
+        let kept = Set(keep.map(key))
         var removed: [URL] = []
-        for url in store.contents(of: folder) where url.pathExtension == NoteFileName.fileExtension && !keep.contains(url) {
+        for url in store.contents(of: folder) where url.pathExtension == NoteFileName.fileExtension && !kept.contains(key(url)) {
             guard let m = store.modified(url), m < cutoff, let text = store.read(url) else { continue }
             let props = CallNote.properties(text)
             guard props[CallNote.callProperty] != nil, let s = props["start"],

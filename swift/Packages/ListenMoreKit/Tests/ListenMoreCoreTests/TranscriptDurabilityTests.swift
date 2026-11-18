@@ -197,8 +197,11 @@ final class TranscriptDurabilityTests: XCTestCase {
         let current = try note("current.md", daysAgo: 40)
         let sub = folder.appendingPathComponent("Sub", isDirectory: true)
         try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
-        let removed = TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 30, timeZone: utc, keep: [current])
-        XCTAssertEqual(removed, [old])
+        let viaLink = root.appendingPathComponent("Link", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: viaLink, withDestinationURL: root.appendingPathComponent("Vault"))
+        let currentByOtherPath = viaLink.appendingPathComponent("Meetings/current.md")
+        let removed = TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 30, timeZone: utc, keep: [currentByOtherPath])
+        XCTAssertEqual(removed.map(\.lastPathComponent), [old.lastPathComponent], "the kept note is kept by any path to it")
         for kept in [recent, edited, foreign, current, sub] { XCTAssertTrue(store.exists(kept), kept.lastPathComponent) }
         XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 0, timeZone: utc), [], "0: off")
     }
