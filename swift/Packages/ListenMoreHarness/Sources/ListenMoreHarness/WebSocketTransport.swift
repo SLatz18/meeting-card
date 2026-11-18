@@ -64,7 +64,10 @@ final class URLSessionWebSocketConnection: WebSocketConnection, @unchecked Senda
 
 #if canImport(CHarnessTLS)
 public final class SocketWebSocketConnector: WebSocketConnector, @unchecked Sendable {
-    public init() {}
+    /// A write to a socket the server already closed must fail with EPIPE, not kill the process.
+    public init() {
+        signal(SIGPIPE, SIG_IGN)
+    }
 
     public func connect(url: URL, headers: [String: String]) async throws -> WebSocketConnection {
         try await withCheckedThrowingContinuation { c in
@@ -92,6 +95,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
     private var inbox: [String] = []
     private var waiters: [CheckedContinuation<String, Error>] = []
     private var closed = false
+    private var closeRequested = false
     private var failure: Error?
 
     private init(fd: Int32, ctx: OpaquePointer?, ssl: OpaquePointer?, leftover: [UInt8]) {
@@ -124,6 +128,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
             guard let ssl else { throw fail("TLS session") }
             _ = lm_tls_set_partial_writes(ssl)
             guard lm_tls_set_sni(ssl, host) == 1, SSL_set1_host(ssl, host) == 1, SSL_set_fd(ssl, fd) == 1 else { throw fail("TLS host") }
+            ERR_clear_error()
             if SSL_connect(ssl) != 1 {
                 let verify = SSL_get_verify_result(ssl)
                 throw fail("TLS handshake failed (verify result \(verify))")
@@ -176,12 +181,21 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
         }
     }
 
+    /// The close frame goes out on the write queue while the connection is still open (the reader,
+    /// which frees the TLS session and the socket, only stops once it sees `closed`), then the
+    /// connection is marked closed and the socket shut down.
     func close() {
-        guard markClosed(nil) else { return }
+        let first = stateLock.withLock { () -> Bool in
+            defer { closeRequested = true }
+            return !closeRequested && !closed
+        }
+        guard first else { return }
         let frame = WebSocketCodec.encode(.close, [0x03, 0xE8], mask: WebSocketCodec.randomMask())
         writes.async { [self] in
-            _ = writeAll(frame)
-            shutdown(fd, Int32(SHUT_RDWR))
+            if !isClosed { _ = writeAll(frame) }
+            // Only while the reader is still running (it frees the socket after it sees `closed` and
+            // this queue drains); if the connection already failed, the reader closes the socket itself.
+            if markClosed(nil) { shutdown(fd, Int32(SHUT_RDWR)) }
         }
     }
 
@@ -225,7 +239,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
             case .binary(let b): deliver(String(decoding: b, as: UTF8.self))
             case .ping(let payload):
                 let pong = WebSocketCodec.encode(.pong, payload, mask: WebSocketCodec.randomMask())
-                writes.async { [self] in _ = writeAll(pong) }
+                writes.async { [self] in if !isClosed && !isClosing { _ = writeAll(pong) } }
             case .pong: break
             case .close(let code):
                 _ = markClosed(HarnessError.webSocket("closed by server (\(code.map(String.init) ?? "no code"))"))
@@ -247,6 +261,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
     }
 
     private var isClosed: Bool { stateLock.withLock { closed } }
+    private var isClosing: Bool { stateLock.withLock { closeRequested } }
 
     /// First close wins; pending receivers get the error. Returns false if already closed.
     private func markClosed(_ error: Error?) -> Bool {
@@ -269,6 +284,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
         ioLock.lock()
         defer { ioLock.unlock() }
         if let ssl {
+            ERR_clear_error()
             let n = buf.withUnsafeMutableBytes { SSL_read(ssl, $0.baseAddress, Int32($0.count)) }
             if n > 0 { return Int(n) }
             let e = SSL_get_error(ssl, n)
@@ -283,7 +299,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
     private func write(_ bytes: [UInt8]) async throws {
         try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
             writes.async { [self] in
-                if isClosed {
+                if isClosed || isClosing {
                     c.resume(throwing: GptError.notConnected)
                 } else if writeAll(bytes) {
                     c.resume()
@@ -306,6 +322,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
                 let p = raw.baseAddress!.advanced(by: off)
                 let left = raw.count - off
                 if let ssl {
+                    ERR_clear_error()
                     let r = SSL_write(ssl, p, Int32(left))
                     if r > 0 { return Int(r) }
                     let e = SSL_get_error(ssl, r)
@@ -362,7 +379,10 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
         while off < bytes.count {
             let n: Int = bytes.withUnsafeBytes { raw in
                 let p = raw.baseAddress!.advanced(by: off)
-                if let ssl { return Int(SSL_write(ssl, p, Int32(raw.count - off))) }
+                if let ssl {
+                    ERR_clear_error()
+                    return Int(SSL_write(ssl, p, Int32(raw.count - off)))
+                }
                 return Glibc.write(fd, p, raw.count - off)
             }
             guard n > 0 else { return false }
@@ -373,7 +393,10 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
 
     private static func blockingRead(fd: Int32, ssl: OpaquePointer?, _ buf: inout [UInt8]) -> Int {
         buf.withUnsafeMutableBytes { raw in
-            if let ssl { return Int(SSL_read(ssl, raw.baseAddress, Int32(raw.count))) }
+            if let ssl {
+                ERR_clear_error()
+                return Int(SSL_read(ssl, raw.baseAddress, Int32(raw.count)))
+            }
             return Glibc.read(fd, raw.baseAddress, raw.count)
         }
     }

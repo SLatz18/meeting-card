@@ -92,6 +92,9 @@ public enum Harness {
                 record = try await ScenarioRun(scenario: scenario, services: services, workDir: dir.url).run()
             } catch {
                 dir.wipe()
+                // What was spent and scored so far is still written before the error goes up.
+                try? writeOutputs(writer, results: results, cost: cost, options: o, base: base,
+                                  failure: "\(scenario.name) stopped: \(writer.scrub("\(error)", context: "error"))")
                 throw error
             }
             record.workDirWiped = dir.wipe()
@@ -102,8 +105,14 @@ public enum Harness {
             log("\(scenario.name): \(result.passed ? "PASS" : "FAIL") (\(result.checks.filter(\.passed).count)/\(result.checks.count) checks)")
             for f in result.failures { log("  FAIL \(f.name): \(f.detail)") }
         }
+        try writeOutputs(writer, results: results, cost: cost, options: o, base: base, failure: nil)
+        return HarnessSummary(mode: o.mode, results: results, outputDirectory: o.outputDirectory, files: writer.written,
+                              leaks: writer.leaks, costEntries: cost)
+    }
 
-        let header = [
+    static func writeOutputs(_ writer: OutputWriter, results: [ScenarioResult], cost: [CostEntry], options o: HarnessOptions,
+                             base: ListenMoreConfig, failure: String?) throws {
+        var header = [
             "Mode: \(o.mode.rawValue)" + (o.mode == .offline
                 ? " (synthetic audio, scripted transcription text, stub judge, simulated clock; WER checks the plumbing)"
                 : " (OpenAI TTS \(o.ttsModel), realtime transcription \(base.gpt.transcribeModel), judge \(base.gpt.judgeModel))"),
@@ -111,11 +120,10 @@ public enum Harness {
             "Engine: ListenMoreCore's CoachSession / LocalCoachEngine / GptLayer / LiveTranscriber, built-in config",
             "Streams: You = mic, Them = call (two Them voices in two-them-voices)",
         ]
+        if let failure { header.append("INCOMPLETE: \(failure)") }
         try writer.write("results.md", Report.markdown(results, mode: o.mode, header: header))
         try writer.write("results.json", Report.json(results, mode: o.mode))
         try writer.write("cost-log.jsonl", cost.map(\.json).joined(separator: "\n") + "\n")
-        return HarnessSummary(mode: o.mode, results: results, outputDirectory: o.outputDirectory, files: writer.written,
-                              leaks: writer.leaks, costEntries: cost)
     }
 
     static func offlineServices(_ scenario: Scenario, config: ListenMoreConfig) -> RunServices {

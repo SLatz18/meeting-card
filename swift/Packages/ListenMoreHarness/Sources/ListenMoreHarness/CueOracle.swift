@@ -173,14 +173,17 @@ public enum CueOracle {
         // Cue policy: one at a time, cooldowns, the closing-phrase quiet.
         let quiet = lines.filter { p in c.text.closingPhrases.contains { ScriptText.contains(ScriptText.normalize(p.line.text), phrase: $0) } }
             .map { $0.end...($0.end + c.text.closingQuietS) }
+        // Cooldowns are measured in session time; a candidate within `edge` of a cooldown's end may go either way.
+        let edge = live ? 2.0 : 0.6
         var accepted: [ExpectedCue] = []
-        for e in cands.sorted(by: { $0.window.lowerBound < $1.window.lowerBound }) {
+        for var e in cands.sorted(by: { $0.window.lowerBound < $1.window.lowerBound }) {
             let t = e.window.lowerBound
             if inside(quiet, t) { continue }
-            let blocked = accepted.contains { a in
-                !a.optional && t - a.window.lowerBound < max(c.cues.globalCooldownS, a.type == e.type ? c.cues.cooldownS : 0)
+            let gaps = accepted.filter { !$0.optional }.map { a in
+                t - a.window.lowerBound - max(c.cues.globalCooldownS, a.type == e.type ? c.cues.cooldownS : 0)
             }
-            if blocked { continue }
+            if gaps.contains(where: { $0 < -edge }) { continue }
+            if gaps.contains(where: { abs($0) <= edge }) { e.optional = true }
             accepted.append(e)
         }
         return (accepted, tolerated)

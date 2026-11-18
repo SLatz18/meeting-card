@@ -47,7 +47,7 @@ final class OfflineScenarioTests: XCTestCase {
 
     func testPause() async throws {
         let r = try await run(Scenarios.pause)
-        XCTAssertEqual(cues(r), ["interrupt"])
+        XCTAssertEqual(cues(r), ["interrupt", "interrupt"], "one before Pause, one after Resume")
     }
 
     func testSilenceToStop() async throws {

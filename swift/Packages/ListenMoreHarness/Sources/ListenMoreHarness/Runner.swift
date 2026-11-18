@@ -136,6 +136,14 @@ public struct RunRecord: @unchecked Sendable {
     public var transcriptDeletedAtTeardown = false
     /// When each control took effect: the first 20 ms frame boundary at or after its scripted time.
     public var applied: [(kind: ControlKind, t: Double)] = []
+    /// When the engine itself handled each Mute / Unmute (on its queue, after every frame queued before it).
+    public var engineMicMutes: [(t: Double, muted: Bool)] = []
+    /// Every call the transcript store got: folders prepared, files written.
+    public var storePrepared: [URL] = []
+    public var storeWritten: [URL] = []
+    public var transcriptsFolder: URL?
+    /// The recorder's last file before teardown (nil when nothing was ever written).
+    public var recorderLastURL: URL?
     public var barrierTimeouts = 0
     public var problems: [String] = []
     /// Filled in by the harness after teardown.
@@ -183,6 +191,7 @@ public final class ScenarioRun: CoachSessionDelegate {
     let call = HarnessCall()
     let audioState = HarnessAudioState()
     let renderer = HarnessRenderer()
+    let store = CountingTranscriptStore()
     let finalsDelivered = AsyncCounter()
     var origin = 0.0
     var record: RunRecord!
@@ -215,7 +224,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         let clock = self.clock
         live = LiveTranscript(settings: .init(captions: true, saving: scenario.saving, folder: transcriptsDir,
                                               keyUsable: services.key != nil),
-                              store: FileTranscriptStore(), timeZone: TimeZone(identifier: "UTC") ?? .current,
+                              store: store, timeZone: TimeZone(identifier: "UTC") ?? .current,
                               clock: { base.addingTimeInterval(clock.now()) })
         let engine = MeteredEngine(inner: LocalCoachEngine(transports: services.key == nil ? nil : services.transports),
                                    clock: clock, lockstep: offline)
@@ -246,6 +255,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         var nextControl = 0
         var nextTick = poll
         var expectedCallFrames = engine.callIngests.current
+        var droppedFinals = 0
         var wasCapturing = true
         var callAudioOn = true
         let steps = tracks.mic.count / hop
@@ -277,9 +287,16 @@ public final class ScenarioRun: CoachSessionDelegate {
                     }
                 }
                 if let server = services.offlineServer, session.gptStopped == nil, capturing {
-                    if !(await finalsDelivered.wait(atLeast: server.finalsSent.current, timeout: 10)) { record.barrierTimeouts += 1 }
+                    if !(await finalsDelivered.wait(atLeast: server.finalsSent.current - droppedFinals, timeout: 10)) {
+                        record.barrierTimeouts += 1
+                        droppedFinals = server.finalsSent.current - finalsDelivered.current
+                    }
                 }
                 await mainQueueFlush()
+                if record.barrierTimeouts >= 5 {
+                    record.problems.append("lockstep stalled")
+                    break
+                }
             } else {
                 let wait = origin + tEnd - clock.now()
                 if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
@@ -295,6 +312,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         session.shutdown()
         await settle(engine: engine)
         observeTranscripts("teardown")
+        record.recorderLastURL = live.recorder.lastURL
         if live.recorder.lastURL != nil {
             let deleted = (try? live.deleteTranscript()) ?? false
             record.transcriptDeletedAtTeardown = deleted
@@ -304,6 +322,10 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.engineIngests = engine.ingests.map { MeteredEngine.Ingest(t: $0.t - origin, stream: $0.stream, samples: $0.samples) }
         record.engineStarts = engine.starts.map { $0 - origin }
         record.engineStops = engine.stops.map { $0 - origin }
+        record.engineMicMutes = engine.micMutes.map { ($0.t - origin, $0.muted) }
+        record.storePrepared = store.prepared
+        record.storeWritten = store.written
+        record.transcriptsFolder = transcriptsDir
         record.barrierTimeouts += engine.barrierTimeouts
         record.sockets = services.sockets?.stats() ?? SocketStats()
         record.micOfferedWhileMuted = mic.offeredWhileMuted

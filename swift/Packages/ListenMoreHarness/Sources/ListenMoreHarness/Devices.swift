@@ -182,6 +182,34 @@ public final class HarnessAudioState: AudioStateProvider {
     }
 }
 
+/// The Kit's `FileTranscriptStore` (the coach's only disk writer) with every call recorded, so a
+/// keep-nothing run can show it was never asked to write and a saving run that it wrote only in the run dir.
+public final class CountingTranscriptStore: TranscriptStore {
+    private let inner = FileTranscriptStore()
+    public private(set) var prepared: [URL] = []
+    public private(set) var written: [URL] = []
+    public private(set) var removed: [URL] = []
+
+    public init() {}
+
+    public func prepare(folder: URL) throws {
+        prepared.append(folder)
+        try inner.prepare(folder: folder)
+    }
+
+    public func exists(_ url: URL) -> Bool { inner.exists(url) }
+
+    public func write(_ text: String, to url: URL) throws {
+        written.append(url)
+        try inner.write(text, to: url)
+    }
+
+    public func remove(_ url: URL) throws {
+        removed.append(url)
+        try inner.remove(url)
+    }
+}
+
 public struct HarnessKeys: APIKeyProvider {
     public var key: APIKey?
 

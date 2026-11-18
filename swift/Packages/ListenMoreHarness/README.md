@@ -50,9 +50,11 @@ seconds, transcription billed seconds and dollars, and judge calls, tokens and d
 harness cap; the engine's own `gpt.budget_usd_per_call` still applies per scenario).
 
 On GitHub: Actions → **Voice harness live (manual, paid)** → Run workflow (optionally one scenario).
-It runs only by manual dispatch, only for the repository owner, in the `openai-live` environment
-(restricted to main), never on push, pull requests or forks, and uploads only the results table,
-`results.json` and the cost log.
+It runs only by manual dispatch, only when the repository owner both started and triggered the run
+(a collaborator's re-run is skipped), one at a time, in the `openai-live` environment (restricted to
+main), never on push, pull requests or forks, and uploads only the results table, `results.json` and
+the cost log. Keep `OPENAI_API_KEY` as a secret of the `openai-live` environment, not a repository
+secret, so the main-only restriction guards it.
 
 ## Output
 
@@ -70,7 +72,7 @@ run if an audio-like file appeared anywhere else (temp dir, the repository, the 
 | `monologue` | You hold the floor for over 60 s after Them ask for the plan: one soft `monologue` cue at the 60 s mark. |
 | `missed-question` | A question You answer ("Yes, ...") gives no cue; one You talk past gives one soft `missed_question`. Save transcripts on, then Delete Transcript mid-call: the file is gone and stays gone (T4). |
 | `mute-unmute` | The coach's Mute: zero mic samples reach the engine and zero ME audio is sent, though the fake device keeps offering audio; no You lines in captions or the saved file; Them captions continue; You cutting in and Them asking a question while muted give nothing; You speaking 0.3 s after Unmute, inside `local.unmute_grace_s`, gives no cue; a real cut-in after the grace gives one `interrupt`. Saved transcript: one `Call … .md`, mode 0600, times and labels, deleted at teardown (T3, T4). |
-| `pause` | Paused: no frames reach the engine on either stream, no transcription traffic, no captions, no cues; the engine stops at Pause and restarts at Resume; one `interrupt` after Resume. |
+| `pause` | One `interrupt` before Pause. Paused: no frames reach the engine on either stream, no transcription traffic, no captions, no cues; the engine stops at Pause and restarts at Resume. A second `interrupt` after Resume, more than the 20 s cooldown after the first in session time, though the restarted engine's clock is back near 0. |
 | `silence-to-stop` | The call app stops running audio: the session ends `trigger.stop_after_s` (30 s) later, not sooner; captions are cleared; no cues during the silence; keep-nothing (saving off) writes nothing (T2). |
 | `two-them-voices` | Two distinct Them voices on the call stream. The engine attributes by stream (no diarization), so the report says **merged as Them**. Them renamed mid-call: caption rows and the saved file use the tag; the next call is back to Them (X4). |
 | `no-key` | No key: local cues only (the `interrupt` still fires), captions unavailable, no transcription or judge traffic (X3). |
@@ -95,7 +97,11 @@ transcription latency. Live, `not_listening` comes from a model and is reported 
 ## Limits
 
 - No echo or bleed between streams: each stream is clean. Speaker attribution is by stream, so it
-  can only be wrong if routing is.
+  can only be wrong if routing is. Offline, the stand-in server answers each socket with its own
+  stream's lines, so attribution is right by construction there; the `stream-routing` check (loud
+  audio on the wrong transcriber) is what tests routing offline. Live, attribution is measured on
+  real transcripts.
+- Which socket is You and which is Them is taken from the order `GptLayer` opens them (You first).
 - The oracle covers what the scenarios exercise; heat (`aggressive`) and talk share can't fire in calls
   this short (`heat_suppress_first_s` is 300 s, `talk_share_min_speech_s` 300 s) and are expected never to.
 - Live transcription passes under 35 % WER. A live line can be split across captions; fragments match

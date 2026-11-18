@@ -84,7 +84,9 @@ public enum Checks {
         // Persistence.
         let everFiles = r.transcripts.flatMap(\.files)
         if !s.saving {
-            check("keep-nothing", r.transcripts.allSatisfy { !$0.folderExists }, "saving off: transcript folder never created")
+            let untouched = r.storePrepared.isEmpty && r.storeWritten.isEmpty && r.recorderLastURL == nil
+            check("keep-nothing", untouched && r.transcripts.allSatisfy { !$0.folderExists },
+                  "saving off: transcript store asked to prepare \(r.storePrepared.count) folders and write \(r.storeWritten.count) files; folder never created: \(r.transcripts.allSatisfy { !$0.folderExists })")
         } else if s.checks.contains(.deleteMidCall) {
             let deleted = r.deleteResults.first?.deleted == true
             let afterDelete = r.transcripts.drop { $0.phase != "after-delete" }
@@ -101,18 +103,33 @@ public enum Checks {
             check("opt-in-transcript", files.count == 1 && named && f?.mode == 0o600 && labelled && wiped,
                   "files \(files.count), name ok \(named), mode \(f.map { String($0.mode, radix: 8) } ?? "-"), times+labels \(labelled), deleted at teardown \(wiped)")
         }
+        if s.saving, let folder = r.transcriptsFolder?.standardizedFileURL.path {
+            let outside = r.storeWritten.filter { !$0.standardizedFileURL.path.hasPrefix(folder + "/") }
+            check("transcript stays in the run dir", !r.storeWritten.isEmpty && outside.isEmpty,
+                  "\(r.storeWritten.count) writes, \(outside.count) outside the run's folder")
+        }
+        check("no-traffic-after-close", r.sockets.sendsAfterClose == 0, "\(r.sockets.sendsAfterClose) sends on a closed transcription socket")
         check("no-audio-on-disk", r.diskViolations.isEmpty && r.workDirWiped,
               "audio-like files outside the run dir: \(r.diskViolations.count); run dir wiped: \(r.workDirWiped)")
         if !live { check("lockstep", r.barrierTimeouts == 0, "\(r.barrierTimeouts) barrier timeouts") }
         let problems = r.problems.filter { $0 != "transcriberClearRejected" }
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))
 
-        // Scenario-specific.
+        // Scenario-specific. Offline the windows are exact (lockstep). Live, frames already queued when a
+        // control was applied still drain: engine frames count from when the engine handled the control,
+        // transcriber traffic half a second after that; captions count from the control itself.
+        func window(_ w: ClosedRange<Double>, from marks: [Double], slack: Double = 0) -> ClosedRange<Double> {
+            let handled = live ? marks.first { $0 >= w.lowerBound - 0.05 && $0 <= w.upperBound } ?? w.lowerBound : w.lowerBound
+            let lo = handled + (live ? slack : 0) + 1e-6
+            return lo...max(lo, w.upperBound - 1e-6)
+        }
         if s.checks.contains(.muteWindow) {
+            let engineMutes = r.engineMicMutes.filter(\.muted).map(\.t)
             for w in mutes {
                 let inner = (w.lowerBound + 1e-6)...(w.upperBound - 1e-6)
-                let micFrames = r.samples(.mic, in: inner)
-                let meAppends = r.sockets.appends.filter { $0.stream == .mic && inner.contains($0.t) }.count
+                let micFrames = r.samples(.mic, in: window(w, from: engineMutes))
+                let sendWindow = window(w, from: engineMutes, slack: 0.5)
+                let meAppends = r.sockets.appends.filter { $0.stream == .mic && sendWindow.contains($0.t) }.count
                 let youLines = finals.filter { $0.speaker == .me && inner.contains($0.t) }.count
                 let themLines = finals.filter { $0.speaker == .others && inner.contains($0.t) }.count
                 check("muted: zero mic frames", micFrames == 0 && meAppends == 0,
@@ -129,21 +146,23 @@ public enum Checks {
             check("muted: indicator", indicatorOK, "indicator showed micOff: \(indicatorOK)")
             let grace = r.config.local.unmuteGraceS
             for u in r.timeline.times(.unmute) {
-                let early = r.cues.filter { $0.t >= u && $0.t <= u + grace + 4 }
+                let early = r.cues.filter { $0.t >= u && $0.t <= u + grace + 4 && !oracle.tolerated.contains($0.type) }
                 check("unmute grace: no false cue", early.isEmpty,
                       "cues in the \(fmt(grace + 4)) s after unmute (local.unmute_grace_s = \(fmt(grace))): \(early.map { $0.type.rawValue })")
             }
         }
         if s.checks.contains(.pauseWindow) {
             for w in pauses {
-                let inner = (w.lowerBound + 1e-6)...(w.upperBound - 1e-6)
-                let frames = r.samples(.mic, in: inner) + r.samples(.call, in: inner)
-                let appends = r.sockets.appends.filter { inner.contains($0.t) }.count
-                let caps = r.captions.filter { inner.contains($0.t) }.count
+                let frameWindow = window(w, from: r.engineStops)
+                let frames = r.samples(.mic, in: frameWindow) + r.samples(.call, in: frameWindow)
+                let sendWindow = window(w, from: r.engineStops, slack: 0.5)
+                let appends = r.sockets.appends.filter { sendWindow.contains($0.t) }.count
+                let caps = r.captions.filter { sendWindow.contains($0.t) }.count
                 check("paused: no frames, traffic or captions", frames == 0 && appends == 0 && caps == 0,
                       "engine samples \(frames), transcriber appends \(appends), captions \(caps)")
-                let stopped = r.engineStops.contains { abs($0 - w.lowerBound) < 0.1 }
-                let restarted = r.engineStarts.contains { abs($0 - w.upperBound) < 0.1 }
+                let near = live ? 0.5 : 0.1
+                let stopped = r.engineStops.contains { abs($0 - w.lowerBound) < near }
+                let restarted = r.engineStarts.contains { abs($0 - w.upperBound) < near }
                 check("paused: engine stopped and restarted", stopped && restarted, "stopped at pause \(stopped), restarted at resume \(restarted)")
             }
             check("paused: indicator", r.indicators.contains { $0.indicator == .paused }, "indicator showed paused")
