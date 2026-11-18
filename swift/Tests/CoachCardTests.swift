@@ -57,15 +57,16 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(k.cardHeight(tipRow: none.tipRow), k.height)
     }
 
-    /// The no-mic notice is draft copy: its words, exactly, and nothing naming a call app.
-    func testNoMicNoticeDraftCopy() {
+    /// The no-mic notice's approved words, exactly, and nothing naming a call app.
+    func testNoMicNoticeApprovedCopy() {
         let c = CoachCardCopy.NoMicNotice.self
-        XCTAssertTrue(c.isDraft, "not yet copy-reviewed")
-        XCTAssertEqual(c.title, "Mic cues are off")
-        XCTAssertEqual(c.body, "This Mac has no built-in mic, and Call coach doesn't use headset mics, so cues about how you speak are off with Bluetooth headphones.")
+        XCTAssertFalse(c.isDraft, "approved")
+        XCTAssertEqual(c.title, "Speaking cues are off")
+        XCTAssertEqual(c.body, "With Bluetooth headphones, Call coach can't hear you on this Mac. It has no built-in mic, and the coach doesn't use headset mics. Captions and cues about the others still work.")
         XCTAssertEqual(c.dismiss, "Got it")
-        XCTAssertEqual(c.accessibilityLabel, "Mic cues are off. This Mac has no built-in mic, and Call coach doesn't use headset mics, so cues about how you speak are off with Bluetooth headphones.")
-        XCTAssertEqual(c.settingsNote, "On a Mac without a built-in mic, Call coach can't hear you while you use Bluetooth headphones, so cues about how you speak are off. Wired headphones or speakers keep them.")
+        XCTAssertEqual(c.accessibilityLabel, "Speaking cues are off. With Bluetooth headphones, Call coach can't hear you on this Mac. It has no built-in mic, and the coach doesn't use headset mics. Captions and cues about the others still work.",
+                       "VoiceOver reads the title, then the body")
+        XCTAssertEqual(c.settingsNote, "On a Mac with no built-in mic, Call coach can't hear you while you use Bluetooth headphones, so cues about how you speak are off. Captions and cues about the others still work.")
         for app in ["Zoom", "Meet", "Teams", "Slack", "Webex", "FaceTime"] {
             for s in [c.title, c.body, c.dismiss, c.accessibilityLabel, c.settingsNote] { XCTAssertFalse(s.contains(app), "the notice names \(app)") }
         }
