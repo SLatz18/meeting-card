@@ -137,12 +137,24 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(k.radius, CardStyle.Radius.card)
         XCTAssertEqual(k.height, 2 * CardStyle.Spacing.controlBottom + 2 * CardStyle.Size.control
                        + 2 * CardStyle.Spacing.control + 3 * Theme.Metrics.captionHeight)
-        XCTAssertEqual(k.stopButton(labelWidth: 70).x, Theme.Metrics.leadingInset, "Stop Coach sits in the Ignore slot")
-        XCTAssertEqual(k.pauseButton.maxX, k.width - Theme.Metrics.trailingInset, accuracy: 1e-9, "Pause/Resume where Join ends")
-        XCTAssertEqual(k.pauseButton.x - k.muteButton.maxX, CardStyle.Spacing.control, accuracy: 1e-9)
-        XCTAssertEqual(k.minimizeButton.maxX, k.pauseButton.maxX, accuracy: 1e-9)
+        XCTAssertEqual(k.micMuteButton.x, Theme.Metrics.leadingInset, "the coach's Mute starts where Ignore starts")
+        XCTAssertEqual(k.buttonGap, CardStyle.Spacing.control)
+        XCTAssertEqual(k.muteButton.x - k.micMuteButton.maxX, k.buttonGap, accuracy: 1e-9, "Mute in Zoom right after it")
+        XCTAssertEqual(k.pauseButton(showsMute: true).x - k.muteButton.maxX, k.buttonGap, accuracy: 1e-9)
+        XCTAssertEqual(k.pauseButton(showsMute: false).x, k.muteButton.x, accuracy: 1e-9, "no Mute in Zoom: Pause takes its place")
+        for b in [k.micMuteButton, k.muteButton, k.pauseButton(showsMute: true)] {
+            XCTAssertEqual(b.width, CardStyle.Size.control); XCTAssertEqual(b.height, CardStyle.Size.control)
+            XCTAssertEqual(b.y, k.vertical, accuracy: 1e-9)
+        }
+        let stop = k.stopButton(labelWidth: 70)
+        XCTAssertEqual(stop.maxX, k.width - Theme.Metrics.trailingInset, accuracy: 1e-9, "Stop Coach ends where Join ends")
+        XCTAssertEqual(stop.width, 70 + 2 * k.textButtonPadding, accuracy: 1e-9)
+        XCTAssertEqual(stop.y, k.vertical, accuracy: 1e-9)
+        XCTAssertGreaterThanOrEqual(stop.x - k.pauseButton(showsMute: true).maxX, k.buttonGap,
+                                    "the fullest row keeps a control gap before Stop Coach")
+        XCTAssertEqual(k.minimizeButton.maxX, stop.maxX, accuracy: 1e-9)
         XCTAssertEqual(k.minimizeButton.x - k.statusRow.maxX, CardStyle.Spacing.control, accuracy: 1e-9)
-        XCTAssertEqual(k.captions.y, k.pauseButton.maxY + CardStyle.Spacing.control, accuracy: 1e-9)
+        XCTAssertEqual(k.captions.y, k.micMuteButton.maxY + CardStyle.Spacing.control, accuracy: 1e-9)
         XCTAssertEqual(k.statusRow.y, k.captions.maxY + CardStyle.Spacing.control, accuracy: 1e-9)
         XCTAssertEqual(k.statusRow.maxY + CardStyle.Spacing.controlBottom, k.height, accuracy: 1e-9)
         XCTAssertEqual(p.button, Theme.Coach.pauseButtonSize)
@@ -268,7 +280,7 @@ final class CoachCardTests: XCTestCase {
         }
     }
 
-    /// The pill's Mute is the coach's own (Mute My Mic for Coach), never Zoom's: Unmute while the
+    /// The pill's and the card's Mute is the coach's own (Mute My Mic for Coach), never Zoom's: Unmute while the
     /// coach's Mute is on (also through Pause and Zoom's mute), the coach menu's symbols, nothing to
     /// mute before a session.
     func testPillMuteIsTheCoachsOwn() {
@@ -285,6 +297,61 @@ final class CoachCardTests: XCTestCase {
         for status in [CoachCardState.Status.listening, .paused, .muted, .micOff] { XCTAssertTrue(control(status).enabled) }
         XCTAssertNotEqual(control(.listening).tooltip, CoachCardState(status: .listening, mute: Self.live).muteControl.tooltip,
                           "the two mutes never share a label")
+        for status in CoachCardState.Status.allCases {
+            for coachMuted in [false, true] {
+                XCTAssertEqual(CoachCardState(status: status, mute: Self.live, coachMicMuted: coachMuted, mode: .card).coachMuteControl,
+                               control(status, coachMuted: coachMuted), "the card's Mute is the pill's: \(status) \(coachMuted)")
+            }
+        }
+    }
+
+    /// The coach's Mute shows the coach's state and is never a mic (that's Zoom's): waveform while the
+    /// coach hears the user, the same waveform slashed while it doesn't, on the card, the pill and the
+    /// menu's Mute/Unmute items, in every state. The mic-off status (the card's status line, the chip,
+    /// the menu's status line) is that same slashed waveform. Only Mute in Zoom keeps a mic.
+    func testCoachMuteGlyphIsNeverAMic() throws {
+        let s = Theme.CoachCard.Symbols.self, m = Theme.Coach.menuSymbols
+        XCTAssertEqual(s.coachHearing, "waveform")
+        XCTAssertEqual(s.coachNotHearing, s.coachHearing + ".slash", "the same glyph, slashed")
+        XCTAssertEqual([m.mute, m.unmute], [s.coachHearing, s.coachNotHearing], "the menu items use the same tokens")
+        for status in CoachCardState.Status.allCases {
+            for coachMuted in [false, true] {
+                for mode in [CoachCardState.Mode.card, .pill] {
+                    for zoom in [Self.live, Self.muted, CoachMuteCopy.presentation(reason: .toggleOff, isMuted: false)] {
+                        let glyph = CoachCardState(status: status, mute: zoom, coachMicMuted: coachMuted, mode: mode).coachMuteControl.symbol
+                        XCTAssertFalse(glyph.hasPrefix("mic"), "\(status) \(coachMuted) \(mode): \(glyph)")
+                        let off = coachMuted || status == .micOff
+                        XCTAssertEqual(glyph, off ? s.coachNotHearing : s.coachHearing, "\(status) \(coachMuted) \(mode)")
+                    }
+                }
+            }
+        }
+        for glyph in [m.mute, m.unmute] { XCTAssertFalse(glyph.hasPrefix("mic"), glyph) }
+        XCTAssertTrue(s.mute.hasPrefix("mic") && s.unmute.hasPrefix("mic"), "Mute in Zoom keeps Zoom's mic, so the two never look alike")
+
+        // The mic-off status: one token, the coach's not-hearing glyph, on every status surface.
+        XCTAssertEqual(Theme.Coach.micOffSymbol, s.coachNotHearing)
+        XCTAssertEqual(s.micOff, s.coachNotHearing)
+        for glyph in [Theme.Coach.symbol, s.status, Theme.CallControls.mutedSymbol, Theme.Coach.micOffSymbol, s.micOff] {
+            XCTAssertFalse(glyph.hasPrefix("mic"), glyph)
+        }
+        let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
+        func read(_ f: String) throws -> String { try String(contentsOf: app.appendingPathComponent(f), encoding: .utf8) }
+        XCTAssertTrue(try read("CoachCardView.swift").contains("self == .micOff ? Theme.CoachCard.Symbols.micOff : Theme.CoachCard.Symbols.status"),
+                      "the card's status line")
+        XCTAssertTrue(try read("CoachChip.swift").contains("mode == .micOff ? Theme.Coach.micOffSymbol : Theme.Coach.symbol"), "the chip")
+        XCTAssertTrue(try read("CoachController.swift").contains("case .micOff: m = note(CoachCopy.coachMicOff, Theme.Coach.micOffSymbol)"),
+                      "the menu's status line")
+        // No mic symbol literal anywhere in the coach UI but Mute in Zoom's two tokens.
+        let re = try NSRegularExpression(pattern: #""(mic(\.[a-z.]+)?)""#)
+        var found: [String] = []
+        for f in try FileManager.default.contentsOfDirectory(atPath: app.path) where f.hasPrefix("Coach") && f.hasSuffix(".swift") {
+            let text = try read(f)
+            found += re.matches(in: text, range: NSRange(text.startIndex..., in: text)).map { (text as NSString).substring(with: $0.range(at: 1)) }
+        }
+        let theme = try String(contentsOf: app.deletingLastPathComponent().appendingPathComponent("Core/Theme.swift"), encoding: .utf8)
+        found += re.matches(in: theme, range: NSRange(theme.startIndex..., in: theme)).map { (theme as NSString).substring(with: $0.range(at: 1)) }
+        XCTAssertEqual(Set(found), [s.mute, s.unmute], "only Mute in Zoom's mic.fill / mic.slash.fill")
     }
 
     func testCopy() {

@@ -79,6 +79,31 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(view.contains("b.isEnabled = c.enabled"))
     }
 
+    /// The menu's, the pill's and the card's Mute share one path: menu items and both surfaces' button
+    /// end in `CoachController.setMicMuted`, the only place the App reaches the service's Mute, and
+    /// card and pill draw the same `coachMuteControl`.
+    func testMenuPillAndCardShareOneMutePath() throws {
+        let controller = try read("App/CoachController.swift"), view = try read("App/CoachCardView.swift")
+        let app = Self.swiftDir.appendingPathComponent("App")
+        let calls = try FileManager.default.contentsOfDirectory(atPath: app.path).filter { $0.hasSuffix(".swift") }
+            .map { try read("App/" + $0).components(separatedBy: "service.setMicMuted(").count - 1 }.reduce(0, +)
+        XCTAssertEqual(calls, 1, "one call site for the coach's Mute")
+        let set = try XCTUnwrap(controller.components(separatedBy: "func setMicMuted(_ muted: Bool) {").dropFirst().first?
+            .components(separatedBy: "\n    }").first)
+        XCTAssertTrue(set.contains("service.setMicMuted(muted)"), "the call site is setMicMuted")
+        XCTAssertTrue(controller.contains("@objc func muteMicClicked(_ sender: Any?) { setMicMuted(true) }"), "menu Mute")
+        XCTAssertTrue(controller.contains("@objc func unmuteMicClicked(_ sender: Any?) { setMicMuted(false) }"), "menu Unmute")
+        let toggle = try XCTUnwrap(controller.components(separatedBy: "func toggleMicMuted() {").dropFirst().first?
+            .components(separatedBy: "\n    }").first)
+        XCTAssertEqual(toggle.trimmingCharacters(in: .whitespacesAndNewlines), "setMicMuted(!micMuted)")
+        XCTAssertEqual(controller.components(separatedBy: "muteMic: { [weak self] in self?.toggleMicMuted() }").count - 1, 1,
+                       "one action, handed to the presenter that hosts both the card and the pill")
+        XCTAssertEqual(view.components(separatedBy: "@objc func muteMicPressed(_ sender: Any?) { actions.muteMic() }").count - 1, 1,
+                       "one handler, on the surface both views share")
+        XCTAssertEqual(view.components(separatedBy: "#selector(muteMicPressed(_:))").count - 1, 2, "the card's button and the pill's")
+        XCTAssertEqual(view.components(separatedBy: "set(micMute, s.coachMuteControl,").count - 1, 2, "drawn from the same control")
+    }
+
     /// Placement reads no window: the call's display is the one the glow already found.
     func testPlacementReadsNoWindows() throws {
         for f in Self.cardFiles + ["App/CoachController.swift"] {
@@ -215,7 +240,7 @@ final class CoachCardWiringTests: XCTestCase {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
         let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
-        XCTAssertEqual(found.count, 21, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), the call-mode tip and the no-mic notice")
+        XCTAssertEqual(found.count, 23, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), the call-mode tip and the no-mic notice, and the fullest button row over each tip row")
         XCTAssertTrue(found.contains("card-call-mode-tip"), "the call-mode tip card has a shot")
         XCTAssertTrue(found.contains("card-no-mic-notice"), "the no-mic notice card has a shot")
         for n in found + ["morph-end", "collapse-end"] {

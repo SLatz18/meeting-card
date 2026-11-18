@@ -20,7 +20,7 @@ public enum CoachCardCopy {
         public static let stop = "Stop coach for this call"
         public static let expand = "Expand coach"
         public static let minimize = "Minimize coach"
-        /// The pill's Mute: the coach's own, also its VoiceOver label.
+        /// The card's and pill's Mute: the coach's own, also its VoiceOver label.
         public static let muteMic = "Mute My Mic for Coach"
         public static let unmuteMic = "Unmute My Mic for Coach"
     }
@@ -275,13 +275,15 @@ public extension CoachCardState {
                             accessibilityLabel: mute.accessibilityLabel ?? "", enabled: mute.visibility == .enabled)
     }
 
-    /// The pill's Mute: the coach's own (it stops the coach hearing the user's mic, never Zoom's
-    /// mute), with the coach menu's symbols; nothing to mute before a session starts.
+    /// The card's and pill's Mute: the coach's own (it stops the coach hearing the user's mic, never
+    /// Zoom's mute). Its glyph shows the coach's state: hearing, or slashed while not hearing the user.
+    /// Nothing to mute before a session starts.
     var coachMuteControl: CoachControl {
-        let s = Theme.Coach.menuSymbols
+        let s = Theme.CoachCard.Symbols.self
         let off = coachMicMuted || status == .micOff
         let text = off ? CoachCardCopy.Tooltip.unmuteMic : CoachCardCopy.Tooltip.muteMic
-        return CoachControl(symbol: off ? s.unmute : s.mute, tooltip: text, accessibilityLabel: text, enabled: status != .idle)
+        return CoachControl(symbol: off ? s.coachNotHearing : s.coachHearing, tooltip: text, accessibilityLabel: text,
+                            enabled: status != .idle)
     }
 
     /// Pause while listening, muted or mic off, Resume while paused; nothing to pause before a session starts.

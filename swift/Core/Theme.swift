@@ -279,14 +279,21 @@ public enum Theme {
         public static let symbol = "ear.badge.waveform"
         public static let pauseSymbol = "pause.fill"
         public static let resumeSymbol = "play.fill"
-        /// The coach's own Mute: the glyph on the chip, the card's status line and the menu.
-        public static let micOffSymbol = "mic.slash"
+        /// The coach's own Mute as a status (the chip, the card's status line, the menu's status line):
+        /// the not-hearing glyph, never a mic.
+        public static let micOffSymbol = notHearingSymbol
+        /// The coach's Mute button (card, pill and the menu's Mute/Unmute items) shows the coach's state,
+        /// never the action and never a mic, so it can't pass for Zoom's mic: a waveform (the coach's
+        /// glyph is an ear with one) while the coach hears the user, the same waveform slashed while it
+        /// doesn't. SF Symbols has no slashed ear.
+        public static let hearingSymbol = "waveform"
+        public static let notHearingSymbol = "waveform.slash"
         /// SF Symbols for the coach status menu, drawn at the body font size like a native menu.
         public static let menuSymbols = (start: resumeSymbol, stop: CoachCard.Symbols.stop,
                                          pause: pauseSymbol, resume: resumeSymbol,
                                          gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
                                          settings: "gearshape", feedback: "bubble.left",
-                                         mute: micOffSymbol, unmute: "mic")
+                                         mute: hearingSymbol, unmute: notHearingSymbol)
         public static let menuSymbolSize = CardStyle.Typography.body.size
         /// The status bar glyph, at the button font size and weight.
         public static let statusSymbolFont = CardStyle.Typography.button
@@ -397,7 +404,7 @@ public enum Theme {
 
     /// The call coach card the reminder card morphs into: card width, radius, fill and insets; a
     /// status row (the nudge band while a nudge holds) with Minimize, the captions area, and a
-    /// button row with Stop Coach in the Ignore slot and Mute and Pause/Resume where Join sits.
+    /// button row: the coach's Mute, Mute in Zoom (only while it can act), Pause/Resume, Stop Coach.
     public enum CoachCard {
         public static let width = CardLayout.W
         public static let radius = CardStyle.Radius.card
@@ -441,7 +448,8 @@ public enum Theme {
         public static let buttonFont = CardStyle.Typography.button
         public static let glyphSize = Coach.glyphSize
         public static let glyphGap = Coach.glyphGap
-        /// Icon buttons (Mute, Pause/Resume, Minimize): one control height square, the control radius.
+        /// Icon buttons (the coach's Mute, Mute in Zoom, Pause/Resume, Minimize): one control height
+        /// square, the control radius.
         public static let iconButton = CardStyle.Size.control
         public static let iconButtonRadius = CardStyle.Radius.control
         public static let iconGlyph = CardStyle.Typography.button
@@ -458,6 +466,9 @@ public enum Theme {
             public static let mute = "mic.fill"
             public static let unmute = "mic.slash.fill"
             public static let micOff = Coach.micOffSymbol
+            /// The coach's Mute button, by the coach's state (`Coach.hearingSymbol`).
+            public static let coachHearing = Coach.hearingSymbol
+            public static let coachNotHearing = Coach.notHearingSymbol
             public static let pause = Coach.pauseSymbol
             public static let resume = Coach.resumeSymbol
             public static let stop = "stop.fill"
@@ -496,14 +507,22 @@ public enum Theme {
         public static var captions: Frame {
             Frame(x: leading, y: vertical + rowHeight + rowGap, width: width - leading - trailing, height: captionsHeight)
         }
-        public static var pauseButton: Frame {
-            Frame(x: width - trailing - iconButton, y: vertical, width: iconButton, height: iconButton)
+        /// The button row, left to right: the coach's Mute, Mute in Zoom (only while it can act) and
+        /// Pause/Resume as icon buttons from the leading inset (where the reminder card's Ignore starts),
+        /// a control gap apart; then Stop Coach, the Ignore-styled text button, ending at the trailing
+        /// inset (where Join ends).
+        public static let buttonGap = CardStyle.Spacing.control
+        /// The `index`th icon button of the row.
+        public static func iconFrame(_ index: Int) -> Frame {
+            Frame(x: leading + Double(index) * (iconButton + buttonGap), y: vertical, width: iconButton, height: iconButton)
         }
-        public static var muteButton: Frame {
-            Frame(x: pauseButton.x - CardStyle.Spacing.control - iconButton, y: vertical, width: iconButton, height: iconButton)
-        }
+        public static var micMuteButton: Frame { iconFrame(0) }
+        public static var muteButton: Frame { iconFrame(1) }
+        /// Pause/Resume follows Mute in Zoom when that shows, else the coach's Mute.
+        public static func pauseButton(showsMute: Bool) -> Frame { iconFrame(showsMute ? 2 : 1) }
         public static func stopButton(labelWidth: Double) -> Frame {
-            Frame(x: leading, y: vertical, width: labelWidth + 2 * textButtonPadding, height: rowHeight)
+            let w = labelWidth + 2 * textButtonPadding
+            return Frame(x: width - trailing - w, y: vertical, width: w, height: rowHeight)
         }
         /// The tip row's frames, in card coordinates of a card `cardHeight(tipRow: true)` tall: the
         /// usual content sits `tipExtra` higher than in a card without the tip.
@@ -518,7 +537,8 @@ public enum Theme {
         }
     }
 
-    /// The minimized coach: a pill with a grabber, the coach glyph, and Mute, Pause/Resume and Stop.
+    /// The minimized coach: a pill with a grabber, the coach glyph, and the coach's Mute, Mute in Zoom
+    /// (only while it can act), Pause/Resume and Stop.
     /// While a nudge holds it tints, shows the nudge's leading bar, and widens for the nudge words.
     public enum CoachPill {
         public static let width = CardStyle.Coach.pill.width

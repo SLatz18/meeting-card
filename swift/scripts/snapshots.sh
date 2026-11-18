@@ -75,7 +75,7 @@ case "${1:-}" in
     (cd "$OUT" && ls packet-*.png) > "$OUT/packet-list.txt" 2>/dev/null || true
     missing=0
     for s in card-idle card-listening card-paused card-muted card-nudge-amber card-nudge-rose card-increased-contrast \
-             card-saving card-saving-nudge card-mic-off card-zoom-mute pill-mic-off card-call-mode-tip card-no-mic-notice \
+             card-saving card-saving-nudge card-mic-off card-zoom-mute pill-mic-off card-call-mode-tip card-no-mic-notice card-zoom-call-mode-tip card-zoom-no-mic-notice \
              pill-idle pill-listening pill-muted pill-paused pill-nudge-amber pill-nudge-rose \
              pill-zoom-mute morph-end collapse-end; do
       for a in light dark; do
@@ -91,6 +91,9 @@ case "${1:-}" in
     for a in light dark; do
       grep -q "coach check start-toggle-$a before=off open=on reopened=on fresh=on" "$OUT/coach-shots.log" \
         || { echo "Start Coach didn't show in Settings ($a)" >&2; missing=1; }
+      # The coach Mute's SF Symbols load on this macOS (UISnapshots.symbolCheck).
+      grep -q "coach check symbols-$a waveform=ok waveform.slash=ok" "$OUT/coach-shots.log" \
+        || { echo "coach Mute glyphs missing ($a)" >&2; missing=1; }
     done
     [[ $missing == 0 ]]
     ;;
