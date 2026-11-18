@@ -10,7 +10,9 @@ import Foundation
 /// - judges only the user's first line after a substantive OTHERS turn, never mid-monologue, and drops
 ///   not_listening below `not_listening_min_confidence`; never judges while every cue the provider
 ///   decides is in `cues.disabled` (GPT decides only not_listening);
-/// - stops on the first hard error; transient judge errors skip a verdict up to `judge_max_transient_errors`.
+/// - stops on the first hard error; transient judge errors skip a verdict up to `judge_max_transient_errors`;
+/// - runs the self-pivot gate (`PivotGate`) in shadow on every frame and transcript: it counts
+///   candidates for the snapshot and never judges or offers anything.
 ///
 /// The judge is a `JudgeProvider` (`judge.provider`). The GPT judge's prompt, verdict rules and errors
 /// are the ones above. A state-based provider (TypeSafe) gets the minimal redacted window instead of
@@ -71,6 +73,13 @@ public final class GptCore {
         public var judgeModel: String?
         /// Engine audio time of the latest frame: how long this call has been coached.
         public var callSeconds: Double
+        /// Self-pivot gate counters (shadow; no cue, no judge call): candidates, candidates held by
+        /// the re-arm or the per-call cap, and turns dropped because a transcript came too late. Per
+        /// engine run, like the re-arm and the cap: Pause and the call app's mute start a new
+        /// `GptCore` at 0, so a whole call is the sum over its runs.
+        public var pivotCandidates: Int
+        public var pivotRateLimited: Int
+        public var pivotLateTranscripts: Int
 
         /// Provider tokens per hour of coached call (the provider reports cost as tokens, with no
         /// dollar rate). nil before any audio.
@@ -125,9 +134,11 @@ public final class GptCore {
     public private(set) var meMuted = false
     /// Speakers whose last clear the transcriber refused; it's sent again before their next audio.
     private var clearRetry: Set<Speaker> = []
+    let pivot: PivotGate
 
     public init(config: ListenMoreConfig) {
         self.config = config
+        pivot = PivotGate(config: config)
         judges = !CueType.decided(by: config.judge.provider).isSubset(of: config.cues.disabledTypes)
         transcript = RollingTranscript(windowS: config.gpt.judgeWindowS)
         cost = CostTracker(prices: config.gpt.pricesUsd, budget: config.gpt.budgetUsdPerCall)
@@ -150,7 +161,9 @@ public final class GptCore {
                         lastJudgeFailure: lastJudgeFailure?.description, belowFloorVerdicts: belowFloorVerdicts,
                         judgeLatenciesMs: judgeLatenciesMs, judgeCallUsd: priced ? cost.judgeCallUsd : nil,
                         judgeStopReason: judgeStopReason, judgeInputTokens: judgeInputTokens,
-                        judgeOutputTokens: judgeOutputTokens, judgeModel: judgeModel, callSeconds: callSeconds)
+                        judgeOutputTokens: judgeOutputTokens, judgeModel: judgeModel, callSeconds: callSeconds,
+                        pivotCandidates: pivot.counters.candidates, pivotRateLimited: pivot.counters.rateLimited,
+                        pivotLateTranscripts: pivot.counters.lateTranscripts)
     }
 
     /// No judge calls for the rest of the session (no provider wired, or repeated provider failures).
@@ -168,6 +181,7 @@ public final class GptCore {
     public func fail(_ msg: String, reason: GptStopReason = .error) {
         errors.append(msg)
         enabled = false
+        pivot.clear()
         if stopReason == nil { stopReason = reason }
     }
 
@@ -193,6 +207,7 @@ public final class GptCore {
         guard muted != meMuted else { return [] }
         meMuted = muted
         othersSpoke = false
+        pivot.setMuted(muted)
         guard muted else { return clearRetry.remove(.me) != nil && enabled ? [.clear(.me)] : [] }
         let open = streaming[.me] == true || commitDue[.me] != nil || (cost.openS[.me] ?? 0) > 0
         streaming[.me] = false
@@ -218,6 +233,7 @@ public final class GptCore {
             budgetStop()
             return []
         }
+        _ = pivot.onVad(speaker, vad, now: now)
         var out: [TxAction] = []
         if vad.onset != nil && streaming[speaker] != true {
             streaming[speaker] = true
@@ -283,6 +299,7 @@ public final class GptCore {
         let ref = refT >= 0 ? refT : now
         if speaker == .me && meMuted { return (ref, nil) }
         transcript.add(t: now, speaker: speaker, text: text)
+        if enabled { _ = pivot.onText(speaker, text: text, refT: ref, now: now) }
         if speaker == .others {
             if text.split(whereSeparator: \.isWhitespace).count >= config.gpt.judgeMinOthersWords { othersSpoke = true }
             return (ref, nil)
@@ -439,6 +456,7 @@ public final class GptCore {
 
     public func clearTranscript() {
         transcript.clear()
+        pivot.clear()
     }
 }
 

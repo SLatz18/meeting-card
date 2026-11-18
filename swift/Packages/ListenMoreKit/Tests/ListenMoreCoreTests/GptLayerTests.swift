@@ -687,3 +687,131 @@ final class GptLayerTests: XCTestCase {
         await layer.close()
     }
 }
+
+/// The self-pivot gate inside the GPT layer: it runs in shadow with a key, counts candidates in the
+/// snapshot, and adds no judge call. Without a key there is no GPT layer, so no gate and no counts.
+final class PivotShadowTests: XCTestCase {
+    var config: ListenMoreConfig!
+    let clock = ManualClock(0)
+    let offers = OfferBox()
+
+    override func setUpWithError() throws {
+        config = try TestConfig.load()
+        config.gpt.judgeMinIntervalS = 0
+    }
+
+    func pivot() -> PivotScript {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.you(PivotLines.pivot, 6.0, 12.0)
+        return s
+    }
+
+    func testTheCoreCountsATruePivotInItsSnapshot() {
+        let core = GptCore(config: config)
+        pivot().play(into: core, until: 30)
+        let snap = core.snapshot
+        XCTAssertEqual(snap.pivotCandidates, 1)
+        XCTAssertEqual(snap.pivotRateLimited, 0)
+        XCTAssertEqual(snap.pivotLateTranscripts, 0)
+        XCTAssertEqual(core.pivot.candidates.map(\.turnEnd), [14.0])
+    }
+
+    func testMuteMidTurnIsNoneInTheCore() {
+        var s = pivot()
+        s.mute(true, at: 13.0)
+        s.mute(false, at: 20.0)
+        let core = GptCore(config: config)
+        s.play(into: core, until: 30)
+        XCTAssertEqual(core.snapshot.pivotCandidates, 0)
+    }
+
+    func testUnmuteDropsAShareHeardBeforeTheMute() {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.mute(true, at: 6.0)
+        s.mute(false, at: 6.5)
+        s.you(PivotLines.pivot, 7.0, 13.0)
+        let core = GptCore(config: config)
+        s.play(into: core, until: 30)
+        XCTAssertEqual(core.snapshot.pivotCandidates, 0)
+    }
+
+    /// Pause stops the engine, which closes the layer (`clearTranscript`); Resume builds a new one.
+    func testClosingTheLayerMidTurnDropsTheTurn() {
+        let core = GptCore(config: config)
+        pivot().play(into: core, until: 30) { t in
+            if abs(t - 13.0) < 1e-9 { core.clearTranscript() }
+        }
+        XCTAssertEqual(core.snapshot.pivotCandidates, 0)
+        XCTAssertEqual(GptCore(config: config).snapshot.pivotCandidates, 0)
+    }
+
+    /// A stopped layer (an error or the budget cap) drops the gate's text at once and decides nothing.
+    func testAStoppedLayerDropsTheTextAndDecidesNothing() {
+        let core = GptCore(config: config)
+        var held: [Int] = []
+        pivot().play(into: core, until: 30) { t in
+            if abs(t - 13.0) < 1e-9 {
+                held.append(core.pivot.heldLines)
+                core.fail("judge: HTTP 401")
+                held.append(core.pivot.heldLines)
+            }
+        }
+        XCTAssertEqual(held, [2, 0])
+        XCTAssertEqual(core.snapshot.pivotCandidates, 0)
+    }
+
+    /// Steps the layer one frame at a time on the manual clock; transcripts come from the fake
+    /// transcribers at each commit.
+    func runLayer(_ s: PivotScript, judge: FakeJudge, until: Double, awaitJudgeCalls: Int = 0) async -> GptLayer.Snapshot {
+        let clock = clock, offers = offers
+        let layer = GptLayer(config: config, now: { clock.now() }, offer: { offers.add($0, $1, $2, $3) },
+                             judge: judge, scheduler: InstantScheduler()) { speaker, onEvent in
+            FakeTranscriber(speaker: speaker, script: speaker == .me ? [PivotLines.pivot] : [PivotLines.share], onEvent: onEvent)
+        }
+        layer.start()
+        for f in s.frames(until: until) {
+            clock.set(f.t)
+            layer.feed(me: f.me.raw ? GptFrames.voiced : GptFrames.silent, meVad: f.me,
+                       others: f.others.raw ? GptFrames.voiced : GptFrames.silent, othersVad: f.others, meRunS: 0)
+            _ = await layer.snapshot()
+        }
+        if awaitJudgeCalls > 0 { _ = await eventually { await layer.snapshot().judgeCalls >= awaitJudgeCalls } }
+        let snap = await layer.snapshot()
+        await layer.close()
+        return snap
+    }
+
+    /// MeetingCard's default (not_listening off): nothing is judged, and the candidate is only counted.
+    func testACandidateAddsNoJudgeCallWithTheJudgeOff() async throws {
+        config = try ListenMoreConfig.load(overrides: ["cues": ["disabled": ["not_listening"]], "gpt": ["judge_min_interval_s": 0]])
+        let judge = FakeJudge()
+        let snap = await runLayer(pivot(), judge: judge, until: 20)
+        XCTAssertEqual(snap.pivotCandidates, 1)
+        XCTAssertEqual(snap.judgeCalls, 0)
+        XCTAssertEqual(judge.prompts, [])
+        XCTAssertTrue(offers.offers.isEmpty)
+    }
+
+    /// With the judge on, the only call is the existing one on the user's first line after their turn.
+    func testACandidateAddsNoJudgeCallWithTheJudgeOn() async {
+        let judge = FakeJudge()
+        let snap = await runLayer(pivot(), judge: judge, until: 20, awaitJudgeCalls: 1)
+        XCTAssertEqual(snap.pivotCandidates, 1)
+        XCTAssertEqual(snap.judgeCalls, 1)
+        XCTAssertEqual(judge.prompts.count, 1)
+        XCTAssertTrue(judge.prompts.allSatisfy { $0.hasSuffix("TRIGGER: me_reply") })
+        XCTAssertTrue(offers.offers.isEmpty)
+    }
+
+    func testNoKeyMeansNoGateAndNoCounts() async {
+        let engine = LocalCoachEngine(transports: GptTransports(http: FakeHTTP(), webSocket: FakeConnector(), scheduler: InstantScheduler()))
+        engine.start(config: config, apiKey: nil)
+        XCTAssertFalse(engine.hasGptLayer)
+        let snap = await engine.gptSnapshot()
+        XCTAssertNil(snap)
+        XCTAssertNil(CoachPipeline(config: config, gpt: nil).text)
+        engine.stop()
+    }
+}
