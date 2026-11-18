@@ -148,7 +148,7 @@ public enum CueOracle {
                 // speech), their restarts are speaker switches and the talk-over rule may raise the red cue
                 // instead, once You hold the floor after they stop. A pause after the overlap has built up
                 // changes nothing.
-                let gap = openingOverlapGaps(facts, from: u.start, until: th.end, overlapS: cutOverlap)
+                let gap = openingOverlapGaps(facts, from: u.start, until: th.end, overlapS: cutOverlap, confirmFrames: c.vad.onsetFrames)
                 let over = gap.atOnset > l.cutInOnsetGapMs / 1000 + 1e-9 ? gap.atOnset
                     : gap.later > LocalLayer.cutInMaxOthersGapS + 1e-9 ? gap.later : nil
                 if let over {
@@ -282,12 +282,24 @@ public enum CueOracle {
 
     /// Runs of unvoiced frames in Them's audio from `start` until `overlapS` of both streams voiced has
     /// built up (or `end`), the span in which the cut-in can still be dropped: the one `start` lands in
-    /// (from `start`), and the longest after Them speak again. 0 when the audio isn't known.
-    static func openingOverlapGaps(_ f: Facts, from start: Double, until end: Double, overlapS: Double) -> (atOnset: Double, later: Double) {
+    /// (from `start`), and the longest after Them speak again. The engine counts Them as speaking for
+    /// `LocalLayer.speakingTailS` after their last voiced frame, and starts the cut-in once You's VAD has
+    /// confirmed (`confirmFrames` voiced frames after the onset). If their last voiced frame is still
+    /// inside that tail then, `start` didn't land in a pause: their pause is a later one, measured from
+    /// that frame. 0 when the audio isn't known.
+    static func openingOverlapGaps(_ f: Facts, from start: Double, until end: Double, overlapS: Double,
+                                   confirmFrames: Int) -> (atOnset: Double, later: Double) {
         let n = min(f.callVoiced.count, f.micVoiced.count)
         guard n > 0, end > start else { return (0, 0) }
         var overlap = 0.0, run = 0, atOnset = 0, longest = 0, heard = false
         var i = max(0, Int((start / f.frameS).rounded()))
+        var back = 0
+        while back < i && back < n && !f.callVoiced[i - 1 - back] && Double(back + 1) * f.frameS <= LocalLayer.speakingTailS + 1e-9 { back += 1 }
+        let spoke = back < i && i - 1 - back < n && f.callVoiced[i - 1 - back]
+        if spoke && Double(back + confirmFrames) * f.frameS <= LocalLayer.speakingTailS + 1e-9 {
+            heard = true
+            run = back
+        }
         while i < n && Double(i) * f.frameS < end && overlap < overlapS - 1e-9 {
             if f.callVoiced[i] {
                 if !heard { atOnset = run }

@@ -115,18 +115,38 @@ final class LiveRun2Tests: XCTestCase {
     }
 
     /// The pause You start in is allowed `cut_in_onset_gap_ms` (0.3 s) from You's onset, as in the engine:
-    /// Them silent for 15 frames from y3's start leave the cut-in alone; 16 frames offer talk-over.
+    /// Them silent from two frames before y3's start (their speaking tail is over by the time You's VAD
+    /// confirms) for 15 frames past it leave the cut-in alone; 16 frames offer talk-over.
     func testTalkOverAlternativeFollowsTheOnsetGapTolerance() throws {
         XCTAssertEqual(config.local.cutInOnsetGapMs, 300)
         func cutIn(onsetGapFrames: Int) throws -> ExpectedCue {
             let (t, facts0) = try interruptionFacts(gapFrames: 0, after: 0)
             var facts = facts0
             let first = Int((t.line("y3")!.start / 0.02).rounded())
-            for k in first..<(first + onsetGapFrames) { facts.callVoiced[k] = false }
+            for k in (first - 2)..<(first + onsetGapFrames) { facts.callVoiced[k] = false }
             return try XCTUnwrap(CueOracle.expected(t, config: config, facts: facts).cues.first { $0.type == .interrupt })
         }
         XCTAssertNil(try cutIn(onsetGapFrames: 15).alternative, "0.30 s from the onset: within the tolerance")
         XCTAssertEqual(try cutIn(onsetGapFrames: 16).alternative?.type, .talkOver, "0.32 s: the engine drops the cut-in")
+    }
+
+    /// Them count as speaking for `LocalLayer.speakingTailS` after their last voiced frame, and the cut-in
+    /// starts once You's VAD has confirmed (two frames by default). Their last voiced frame one frame
+    /// before You's start is still inside that tail, so the pause that follows is a later one (0.16 s, 12
+    /// quiet frames being 0.24 s); with two frames between, You's start lands in the pause and the same
+    /// 0.24 s of quiet runs 0.20 s from it, inside the onset tolerance.
+    func testTalkOverAlternativeCountsTheEnginesSpeakingTail() throws {
+        XCTAssertEqual(config.vad.onsetFrames, 2)
+        func cutIn(framesBeforeStart back: Int, quietFrames: Int) throws -> ExpectedCue {
+            let (t, facts0) = try interruptionFacts(gapFrames: 0, after: 0)
+            var facts = facts0
+            let first = Int((t.line("y3")!.start / 0.02).rounded())
+            for k in (first - back)..<(first - back + quietFrames) { facts.callVoiced[k] = false }
+            return try XCTUnwrap(CueOracle.expected(t, config: config, facts: facts).cues.first { $0.type == .interrupt })
+        }
+        XCTAssertEqual(try cutIn(framesBeforeStart: 1, quietFrames: 12).alternative?.type, .talkOver, "still speaking at the onset: 0.24 s")
+        XCTAssertNil(try cutIn(framesBeforeStart: 2, quietFrames: 12).alternative, "the onset lands in the pause: 0.20 s from it")
+        XCTAssertNil(try cutIn(framesBeforeStart: 1, quietFrames: 8).alternative, "still speaking at the onset, 0.16 s: kept")
     }
 
     /// The alternative is accepted only in its window after Them stop, and only where it was offered.
