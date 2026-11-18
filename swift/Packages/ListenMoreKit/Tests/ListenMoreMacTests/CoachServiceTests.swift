@@ -273,9 +273,10 @@ final class CoachServiceTests: XCTestCase {
 
         s.session.tick()
         let first = try XCTUnwrap(fake.asked.last)
-        XCTAssertTrue(first.contains("us.zoom.xos"), "the allowlist's native apps are watched")
+        XCTAssertTrue(first.contains("us.zoom.xos"), "Zoom is watched on every poll")
         XCTAssertFalse(first.contains("com.google.chrome") || first.contains("company.thebrowser.dia"),
                        "browsers with no Meet hint cost no window-list read")
+        XCTAssertEqual(first, Set(["us.zoom.xos"]), "with no session only Zoom is read: Slack, Teams, FaceTime and Webex are not")
 
         let chromeWindow = AppWindow(id: 7, bundleId: "com.google.Chrome", layer: 0, onScreen: true,
                                      bounds: CGRect(x: 100, y: 100, width: 800, height: 600))
@@ -290,6 +291,24 @@ final class CoachServiceTests: XCTestCase {
         s.session.tick()
         XCTAssertFalse(try XCTUnwrap(fake.asked.last).contains("com.google.chrome"), "no hint: Chrome is dropped again")
         XCTAssertNil(s.callWindows.target(appKey: "com.google.chrome"))
+        s.setEnabled(false)
+    }
+
+    func testANonZoomNativeAppIsReadOnlyWhileItsSessionIsActive() {
+        let slack = "com.tinyspeck.slackmacgap"
+        let fake = FakeWindows()
+        let s = service(enabled: true, callWindows: CallWindowTracker(lookbackS: 60, windowSource: fake.read))
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        XCTAssertFalse(fake.asked.isEmpty)
+        XCTAssertFalse(fake.asked.contains { $0.contains(slack) }, "Slack with no session: no window read")
+        provider.snap = AudioStateSnapshot(defaultInputRunning: true, processes: [
+            AudioProcessState(pid: 78, bundleId: slack, isRunningInput: true, isRunningOutput: true)])
+        RunLoop.main.run(until: Date().addingTimeInterval(4.2))
+        XCTAssertEqual(s.state, .active(paused: false))
+        XCTAssertEqual(s.session.session?.appKey, slack)
+        fake.asked.removeAll()
+        s.session.tick()
+        XCTAssertEqual(fake.asked.last, Set(["us.zoom.xos", slack]), "Slack with an active session is read")
         s.setEnabled(false)
     }
 }

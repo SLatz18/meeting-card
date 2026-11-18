@@ -204,16 +204,37 @@ final class CallWindowsTests: XCTestCase {
         XCTAssertEqual(selector.target(appKey: other), preview, "a window it opens after that binds")
     }
 
-    func testOnlyNativeAppsAndBrowsersWithAHintAreRead() {
+    func testOnlyZoomSessionAppsAndBrowsersWithAHintAreRead() {
         let hint = CallWindowHint(rank: 1, visibleWindows: 1)
-        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: keys, browserKeys: browsers, hints: [:]), [Self.zoom],
-                       "browsers without a hint cost no window-list read")
-        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: keys, browserKeys: browsers, hints: [Self.chrome: hint]),
-                       [Self.zoom, Self.chrome])
-        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: browsers, browserKeys: browsers, hints: [:]), [],
-                       "browser-only: nothing to read")
-        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: [Self.zoom, "com.microsoft.teams2"], browserKeys: browsers, hints: [:]),
-                       [Self.zoom, "com.microsoft.teams2"])
+        let slack = "com.tinyspeck.slackmacgap"
+        let all: Set<String> = [Self.zoom, slack, Self.chrome, Self.dia]
+        func read(session: String? = nil, hints: [String: CallWindowHint] = [:], appKeys: Set<String>? = nil) -> Set<String> {
+            CallWindowSelector.keysToRead(appKeys: appKeys ?? all, browserKeys: browsers, alwaysKeys: [Self.zoom],
+                                          sessionAppKey: session, hints: hints)
+        }
+        XCTAssertEqual(read(), [Self.zoom], "Zoom always; Slack with no session and browsers with no hint cost no window-list read")
+        XCTAssertEqual(read(session: slack), [Self.zoom, slack], "Slack with an active session")
+        XCTAssertEqual(read(hints: [Self.chrome: hint]), [Self.zoom, Self.chrome])
+        XCTAssertEqual(read(appKeys: browsers), [], "browser-only: nothing to read")
+        XCTAssertEqual(read(session: Self.chrome, appKeys: browsers), [], "a browser session with no hint is still not read")
+        XCTAssertEqual(read(appKeys: [slack, "com.microsoft.teams2"]), [], "non-Zoom natives with no session")
+    }
+
+    /// An app that isn't read on a poll forgets its windows: the next session's first read sees
+    /// every open window as unknown age, so a window opened before the session never binds.
+    func testANonZoomNativeAppForgetsItsWindowsBetweenSessions() {
+        let slack = "com.tinyspeck.slackmacgap"
+        func win(_ id: Int, _ r: CGRect) -> AppWindow { AppWindow(id: id, bundleId: slack, layer: 0, onScreen: true, bounds: r) }
+        selector.observe([win(1, home)], appKeys: [slack], browserKeys: browsers, session: (appKey: slack, startedAt: 10), hints: [:], now: 10)
+        XCTAssertNil(selector.target(appKey: slack))
+        selector.observe([win(1, home), win(2, meeting)], appKeys: [slack], browserKeys: browsers,
+                         session: (appKey: slack, startedAt: 10), hints: [:], now: 15)
+        XCTAssertEqual(selector.target(appKey: slack), meeting)
+        selector.observe([], appKeys: [], browserKeys: browsers, session: nil, hints: [:], now: 100)   // session over: not read
+        XCTAssertNil(selector.target(appKey: slack))
+        selector.observe([win(1, home), win(2, meeting)], appKeys: [slack], browserKeys: browsers,
+                         session: (appKey: slack, startedAt: 200), hints: [:], now: 200)
+        XCTAssertNil(selector.target(appKey: slack), "both were open before the new session: unknown age, so neither binds")
     }
 
     func testReResolveFindsAMeetingWindowOlderThanTheLookback() {

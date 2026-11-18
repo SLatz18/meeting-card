@@ -5,9 +5,9 @@ import ListenMoreCore
 /// Observes call apps' windows into a `CallWindowSelector`: window number, owner, layer, on-screen
 /// flag and bounds from CGWindowListCopyWindowInfo (never titles or pixels, so no Screen Recording
 /// permission is involved). Updated from the coach's poll on the main thread and read from the
-/// call-controls queue, so it locks. Reads nothing while no call app is running, and never lists
-/// a browser's windows until the Meet script has named the window holding a meeting
-/// (`CallWindowSelector.keysToRead`).
+/// call-controls queue, so it locks. The window list is read only for Zoom (always), another native
+/// call app while its session is active, and a browser once the Meet script has named its meeting
+/// window (`CallWindowSelector.keysToRead`); an app that isn't read on a poll forgets its windows.
 public final class CallWindowTracker: @unchecked Sendable {
     /// The windows of the running apps in a set of bundle ID keys (tests inject their own).
     public typealias WindowSource = (_ appKeys: Set<String>) -> [AppWindow]
@@ -26,13 +26,16 @@ public final class CallWindowTracker: @unchecked Sendable {
         self.init(lookbackS: config.trigger.callWindowLookbackS, windowSource: windowSource)
     }
 
-    /// One observation. `session` is the coach session's app and start time (system uptime).
+    /// One observation. `session` is the coach session's app and start time (system uptime);
+    /// `alwaysOnKeys` are the apps read on every poll (Zoom).
     public func update(session: (appKey: String, startedAt: Double)?, appKeys: Set<String>, browserKeys: Set<String>,
-                       hints: [String: CallWindowHint], now: Double = ProcessInfo.processInfo.systemUptime) {
-        let readKeys = CallWindowSelector.keysToRead(appKeys: appKeys, browserKeys: browserKeys, hints: hints)
+                       alwaysOnKeys: Set<String> = [], hints: [String: CallWindowHint],
+                       now: Double = ProcessInfo.processInfo.systemUptime) {
+        let readKeys = CallWindowSelector.keysToRead(appKeys: appKeys, browserKeys: browserKeys, alwaysKeys: alwaysOnKeys,
+                                                     sessionAppKey: session?.appKey, hints: hints)
         let all = readKeys.isEmpty ? [] : windowSource(readKeys)
         lock.withLock {
-            selector.observe(all, appKeys: appKeys, browserKeys: browserKeys, session: session, hints: hints, now: now)
+            selector.observe(all, appKeys: readKeys, browserKeys: browserKeys, session: session, hints: hints, now: now)
         }
     }
 

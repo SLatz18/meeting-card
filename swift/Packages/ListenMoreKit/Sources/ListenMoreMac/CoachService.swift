@@ -82,12 +82,13 @@ public final class CoachService: CoachSessionDelegate {
         session.delegate = self
         let hints = callState as? CallControlsProvider
         let browserKeys = Set(config.captureTargets.filter { $0.kind == .browser }.map { $0.bundleId.lowercased() })
+        let zoomKeys = Set(config.captureTargets.filter { $0.kind == .zoom }.map { $0.bundleId.lowercased() })
         session.onTick = { [weak self] in
             guard let self else { return }
             let s = self.session.session
             let keys = Set(self.session.trigger.settings.allowlist.map { $0.lowercased() } + [s?.appKey].compactMap { $0 })
             self.callWindows.update(session: s.flatMap { s in s.appKey.map { (appKey: $0, startedAt: s.startedAt) } }, appKeys: keys,
-                                    browserKeys: browserKeys, hints: hints?.windowHints ?? [:])
+                                    browserKeys: browserKeys, alwaysOnKeys: zoomKeys, hints: hints?.windowHints ?? [:])
         }
         locateScreen = { [weak self] appKey, fallback in
             CallDisplayLocator.screen(callWindow: callWindows.target(appKey: appKey), fallback: fallback, screens: self?.screenFrames())

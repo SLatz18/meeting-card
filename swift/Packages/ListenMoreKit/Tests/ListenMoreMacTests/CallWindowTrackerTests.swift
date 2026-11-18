@@ -38,15 +38,57 @@ final class CallWindowTrackerTests: XCTestCase {
         XCTAssertNil(t.target(appKey: Self.chrome))
     }
 
-    func testNativeAppsAreReadEveryPollAndBrowsersOnlyWithAHint() {
+    static let slack = "com.tinyspeck.slackmacgap"
+
+    func testSlackRunningWithNoSessionDoesNoWindowRead() {
+        let src = Source()
+        src.windows = [window(1, "com.tinyspeck.slackmacgap", home)]
+        let t = CallWindowTracker(lookbackS: 60, windowSource: src.read)
+        for i in 0..<20 {
+            t.update(session: nil, appKeys: [Self.slack, "com.microsoft.teams2", "com.apple.facetime"], browserKeys: browsers,
+                     alwaysOnKeys: [Self.zoom], hints: [:], now: Double(i) / 2)
+        }
+        XCTAssertTrue(src.asked.isEmpty, "non-Zoom native apps are not watched without a session")
+        XCTAssertNil(t.target(appKey: Self.slack))
+    }
+
+    func testSlackWithAnActiveSessionIsRead() {
+        let src = Source()
+        src.windows = [window(1, "com.tinyspeck.slackmacgap", home)]
+        let t = CallWindowTracker(lookbackS: 60, windowSource: src.read)
+        let keys: Set<String> = [Self.zoom, Self.slack]
+        t.update(session: (appKey: Self.slack, startedAt: 5), appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 5)
+        XCTAssertEqual(src.asked, [Set([Self.zoom, Self.slack])])
+        XCTAssertNil(t.target(appKey: Self.slack), "open before its session: unknown age, so no first-bind lookback")
+        src.windows.append(window(2, "com.tinyspeck.slackmacgap", meeting))
+        t.update(session: (appKey: Self.slack, startedAt: 5), appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 6)
+        XCTAssertEqual(t.target(appKey: Self.slack), meeting, "a window it opens during the session binds")
+        t.update(session: nil, appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 30)
+        XCTAssertEqual(src.asked.last, Set([Self.zoom]), "session over: Slack is no longer read")
+        XCTAssertNil(t.target(appKey: Self.slack))
+    }
+
+    func testZoomRunningWithNoSessionStillReadsSoTheLookbackIsKept() {
+        let src = Source()
+        let t = CallWindowTracker(lookbackS: 60, windowSource: src.read)
+        let keys: Set<String> = [Self.zoom, Self.slack, Self.chrome, Self.dia]
+        src.windows = [window(1, "us.zoom.xos", home)]
+        t.update(session: nil, appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 0)
+        t.update(session: nil, appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 0.5)
+        XCTAssertEqual(src.asked, [Set([Self.zoom]), Set([Self.zoom])])
+        src.windows.append(window(2, "us.zoom.xos", meeting))        // the meeting window opens before the session
+        t.update(session: nil, appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 30)
+        t.update(session: (appKey: Self.zoom, startedAt: 40), appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 40)
+        XCTAssertEqual(t.target(appKey: Self.zoom), meeting, "seen at 30 s, within the 60 s lookback of the session start")
+    }
+
+    func testBrowsersAreReadOnlyWithAHint() {
         let src = Source()
         let t = CallWindowTracker(lookbackS: 60, windowSource: src.read)
         let keys: Set<String> = [Self.zoom, Self.chrome, Self.dia]
-        t.update(session: nil, appKeys: keys, browserKeys: browsers, hints: [:], now: 0)
-        t.update(session: nil, appKeys: keys, browserKeys: browsers, hints: [:], now: 0.5)
-        XCTAssertEqual(src.asked, [[Self.zoom], [Self.zoom]])
-        t.update(session: nil, appKeys: keys, browserKeys: browsers, hints: [Self.chrome: CallWindowHint(rank: 1, visibleWindows: 1)], now: 1)
-        XCTAssertEqual(src.asked.last, [Self.zoom, Self.chrome], "Dia has no hint, so it is not read")
+        t.update(session: nil, appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom],
+                 hints: [Self.chrome: CallWindowHint(rank: 1, visibleWindows: 1)], now: 1)
+        XCTAssertEqual(src.asked.last, Set([Self.zoom, Self.chrome]), "Dia has no hint, so it is not read")
     }
 
     func testBrowserBindsOnlyFromTheHint() {
@@ -64,9 +106,10 @@ final class CallWindowTrackerTests: XCTestCase {
         let src = Source()
         let t = CallWindowTracker(lookbackS: 60, windowSource: src.read)
         src.windows = [window(1, "us.zoom.xos", home)]
-        t.update(session: nil, appKeys: [Self.zoom], browserKeys: browsers, hints: [:], now: 0)
+        t.update(session: nil, appKeys: [Self.zoom], browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 0)
         src.windows = [window(1, "us.zoom.xos", home), window(2, "us.zoom.xos", meeting)]
-        t.update(session: (appKey: Self.zoom, startedAt: 5), appKeys: [Self.zoom], browserKeys: browsers, hints: [:], now: 5)
+        t.update(session: (appKey: Self.zoom, startedAt: 5), appKeys: [Self.zoom], browserKeys: browsers,
+                 alwaysOnKeys: [Self.zoom], hints: [:], now: 5)
         XCTAssertEqual(t.target(appKey: Self.zoom), meeting, "the meeting window, not the larger home window")
         XCTAssertEqual(t.callWindowPresent(appKey: Self.zoom), true)
         t.reset()

@@ -76,12 +76,17 @@ public struct CallWindowSelector: Sendable {
         self.lookbackS = lookbackS
     }
 
-    /// The apps whose window list is worth reading on this poll: every native call app (windows are
-    /// watched from the moment they open, so a call's window is told from the home window by when
-    /// it appeared), but a browser only once the Meet script has named the window holding a
-    /// meeting. A browser with no hint binds nothing, so it never costs a window-list read.
-    public static func keysToRead(appKeys: Set<String>, browserKeys: Set<String>, hints: [String: CallWindowHint]) -> Set<String> {
-        appKeys.filter { !browserKeys.contains($0) || hints[$0] != nil }
+    /// The apps whose window list is read on this poll. Zoom (`alwaysKeys`) is watched all the time, so
+    /// a call's window is told from the home window by when it appeared (the lookback). Any other
+    /// native call app is read only while a coach session is active for it (`sessionAppKey`), so its
+    /// windows already open when the session starts have unknown age and never bind. A browser is read
+    /// only once the Meet script has named the window holding a meeting; with no hint it binds nothing.
+    public static func keysToRead(appKeys: Set<String>, browserKeys: Set<String>, alwaysKeys: Set<String>,
+                                  sessionAppKey: String?, hints: [String: CallWindowHint]) -> Set<String> {
+        appKeys.filter { key in
+            if browserKeys.contains(key) { return hints[key] != nil }
+            return alwaysKeys.contains(key) || key == sessionAppKey
+        }
     }
 
     /// Forget everything (the coach was switched off; ages restart as unknown).

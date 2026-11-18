@@ -78,9 +78,10 @@ first bind only. A re-resolve after the bound window closes takes the newest win
 watch, skipping windows opened while another one was bound. A bound window never holds a session: Core Audio's stop
 still applies.
 
-The window list (CGWindowList) is read each poll only while a watched native call app runs (or the app of a coach-any-app
-session); the running-apps list is still read every poll. A browser is listed only once the Meet script's hint names a
-window (`CallWindowSelector.keysToRead`). `CallWindowTracker`'s window source is injectable. When Zoom's menu shows no
+The window list (CGWindowList) is read each poll only for Zoom (always, so the lookback works), for another native call
+app while a session is active for it (no first-bind lookback: windows already open at the session start never bind), and
+for a browser once the Meet script's hint names a window (`CallWindowSelector.keysToRead`); the running-apps list is still
+read every poll. `CallWindowTracker`'s window source is injectable. When Zoom's menu shows no
 in-meeting shortcuts (neither ⇧⌘A nor ⇧⌘V) while the call's window is still open, `ZoomControlsReader` holds the call on
 (`isHeld`) and `CallControlsModel` reports `noZoomCall`, since there is no Mute item to press.
 
