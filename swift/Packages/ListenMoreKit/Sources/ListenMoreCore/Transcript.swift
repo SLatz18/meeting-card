@@ -559,7 +559,8 @@ public enum TranscriptMaintenance {
     /// its last event and `recovered` status, and every note recovery writes gets a `recovered` time.
     /// Left alone: the calls in `skip`, a spool another running process on this device is writing
     /// (same boot, same PID and start time), and one from another device unless idle for
-    /// `otherDeviceIdle`. Names come from the spool only
+    /// `otherDeviceIdle`. Without a device ID on either side, a spool from another boot gets the
+    /// same idle rule, since it may be another machine's. Names come from the spool only
     /// if plain (`CallSpool.replay`), and the daily note is found again through `DailyNote.url`. The
     /// note is rewritten only if it still holds what the recorder wrote; otherwise the recovered note
     /// goes beside it, and it never replaces a file. A note removed after it reached disk stays
@@ -581,7 +582,12 @@ public enum TranscriptMaintenance {
                 continue
             }
             guard !skip.contains(replay.record.callId) else { continue }
-            if let other = replay.device, let mine = identity.device, other != mine {
+            // Another machine, or (without a device ID on either side) another boot that could be one:
+            // wait until it has been idle. Otherwise it's this machine, and only a live writer is waited for.
+            let devicesKnown = replay.device != nil && identity.device != nil
+            let otherMachine = devicesKnown ? replay.device != identity.device
+                : replay.boot.map { b in identity.boot.map { $0 != b } ?? false } ?? false
+            if otherMachine {
                 guard let m = store.modified(spool), now.timeIntervalSince(m) > otherDeviceIdle else { continue }
             } else if identity.mayBeWriting(boot: replay.boot, pid: replay.pid, startTime: replay.startTime) {
                 continue
@@ -603,7 +609,9 @@ public enum TranscriptMaintenance {
             var note = folder.appendingPathComponent(replay.noteName)
             let base = String(note.deletingPathExtension().lastPathComponent)
             do {
-                if store.exists(note), store.read(note).map({ replay.hashes.contains(noteHash($0)) }) == true {
+                let onDisk = store.exists(note) ? store.read(note) : nil
+                // Ours, or the empty placeholder a crash left while claiming the name (FAT, exFAT).
+                if onDisk.map({ replay.hashes.contains(noteHash($0)) || ($0.isEmpty && !replay.written.contains(replay.noteName)) }) == true {
                     try store.write(noteText, to: note)
                 } else if !store.exists(note) && replay.written.contains(replay.noteName) {
                     // It reached disk and is gone: the user removed it.

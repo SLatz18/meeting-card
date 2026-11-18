@@ -54,6 +54,9 @@ final class NoteFileNameTests: XCTestCase {
         XCTAssertEqual(NoteFileName.sanitize("a\u{202E}b"), "a b")
         XCTAssertTrue(NoteFileName.isPlainNoteName("\u{1F469}\u{200D}\u{1F4BB}.md"))
         XCTAssertEqual(CallNote.yaml("a\u{200D}b"), "\"a\u{200D}b\"")
+        XCTAssertEqual(name("\u{200D}"), "2026-01-31 0905 Call", "a title of joiners alone is no title")
+        XCTAssertEqual(name(" \u{200D}\u{200C} "), "2026-01-31 0905 Call")
+        XCTAssertEqual(NoteFileName.sanitize("a \u{200D}b"), "a b", "a joiner after a space joins nothing")
     }
 
     func testRunsOfDotsBecomeOne() {

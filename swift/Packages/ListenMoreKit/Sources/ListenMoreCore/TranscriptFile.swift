@@ -165,10 +165,15 @@ private func posixRenameExclusive(_ from: String, _ to: String) -> Int32 {
     guard errno == EPERM || errno == ENOTSUP || errno == EOPNOTSUPP || errno == EMLINK else { return -1 }
     let placeholder = open(to, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
     guard placeholder >= 0 else { return -1 }
-    _ = close(placeholder)
+    defer { _ = close(placeholder) }
     if posixRename(from, to) == 0 { return 0 }
     let e = errno
-    _ = unlink(to)
+    // Only our own placeholder is removed, never a file that took its place meanwhile. A crash
+    // before this leaves it empty, and recovery writes the note into it.
+    var mine = stat(), there = stat()
+    if fstat(placeholder, &mine) == 0, lstat(to, &there) == 0, mine.st_ino == there.st_ino, mine.st_dev == there.st_dev {
+        _ = unlink(to)
+    }
     errno = e
     return -1
 }

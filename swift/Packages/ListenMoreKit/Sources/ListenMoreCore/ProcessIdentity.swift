@@ -78,7 +78,8 @@ public struct ProcessIdentity: Sendable {
         return s.split(separator: "\n").first.map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
-    /// Whether a spool from this device may still be written by the process named in it: not after
+    /// Whether a spool from this device may still be written by the process named in it (the caller
+    /// has ruled out another machine, including another boot when a device ID is missing): not after
     /// a reboot, not by this process (its recorder would have skipped it), and only by a process
     /// with that PID that started when the spool's writer did.
     func mayBeWriting(boot otherBoot: String?, pid: Int32?, startTime started: String?) -> Bool {

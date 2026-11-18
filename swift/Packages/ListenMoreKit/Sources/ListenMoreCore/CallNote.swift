@@ -94,7 +94,12 @@ public enum NoteFileName {
         for ch in s.precomposedStringWithCanonicalMapping {
             let control = ch.unicodeScalars.contains { isControl($0) || CharacterSet.newlines.contains($0) }
             if ch == ".", out.last == "." { continue }
-            out.append(control || unsafe.contains(ch) ? " " : ch)
+            // A joiner joins nothing after a space or at the start: it goes, with its space.
+            let joinerAlone = ch.unicodeScalars.allSatisfy { $0 == "\u{200C}" || $0 == "\u{200D}" }
+            if joinerAlone && (out.isEmpty || out.last?.isWhitespace == true) { continue }
+            let joinerAfterSpace = ch.unicodeScalars.first.map(CharacterSet.whitespaces.contains) == true
+                && ch.unicodeScalars.contains { $0 == "\u{200C}" || $0 == "\u{200D}" }
+            out.append(control || joinerAfterSpace || unsafe.contains(ch) ? " " : ch)
         }
         out = out.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         out = trimDotsAndSpaces(out)

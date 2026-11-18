@@ -256,6 +256,43 @@ final class TranscriptDurabilityTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: spool("live").path))
     }
 
+    /// Without a device ID on either side, a spool from another boot may be another machine's live
+    /// call: it waits the same six idle hours. With both IDs and a different boot, it's this machine's crash.
+    func testAMissingDeviceIdWithAnotherBootWaitsUntilIdle() throws {
+        let noDevice = ProcessIdentity(device: nil, boot: "boot-1", pid: getpid(), startTime: Self.here.startTime)
+        try writeSpool("a", [beginRecord("a", note: "a.md", device: nil, boot: "boot-0", pid: 4343, startTime: "t1"), line(1, "a")])
+        try writeSpool("b", [beginRecord("b", note: "b.md", device: "other-mac", boot: "boot-0", pid: 4343, startTime: "t1"), line(1, "b")])
+        try writeSpool("c", [beginRecord("c", note: "c.md", device: nil, pid: 4343, startTime: "t1"), line(1, "c")])
+        try writeSpool("d", [beginRecord("d", note: "d.md", device: "this-mac", boot: "boot-0", pid: 4343, startTime: "t1"), line(1, "d")])
+        func recover(_ identity: ProcessIdentity) -> Set<String> {
+            Set(TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, identity: identity).map(\.lastPathComponent))
+        }
+        XCTAssertEqual(recover(noDevice), ["c.md"],
+                       "no device ID here: another boot may be another machine (a, b, d wait); the same boot with its writer gone is a crash (c)")
+        XCTAssertEqual(recover(Self.here), ["d.md"],
+                       "both IDs known and equal, another boot: this machine's crash (d); the spool without one (a) still waits")
+        for id in ["a", "b"] {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7 * 3600)], ofItemAtPath: spool(id).path)
+        }
+        XCTAssertEqual(recover(noDevice), ["a.md", "b.md"], "idle for hours: recovered either way")
+    }
+
+    /// A crash while claiming the name on FAT or exFAT leaves an empty note: recovery writes into it.
+    func testRecoveryReusesAnEmptyPlaceholder() throws {
+        try writeSpool("ph", [beginRecord("ph", note: "p.md"), line(1, "kept")])
+        try Data().write(to: folder.appendingPathComponent("p.md"))
+        XCTAssertEqual(TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, identity: Self.here)
+            .map(\.lastPathComponent), ["p.md"])
+        XCTAssertTrue(try read(folder.appendingPathComponent("p.md")).contains("kept"))
+        XCTAssertEqual(try names(folder), ["p.md"], "nothing beside it")
+        // Once the note had reached disk, an empty file is the user's doing: never written over.
+        try writeSpool("emptied", [beginRecord("emptied", note: "e.md"), CallSpool.written("e.md").encoded(), line(1, "x")])
+        try Data().write(to: folder.appendingPathComponent("e.md"))
+        XCTAssertEqual(TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, identity: Self.here)
+            .map(\.lastPathComponent), ["e (2).md"])
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("e.md")), Data())
+    }
+
     func testUpkeepReportsWhatItHadToLeave() throws {
         try writeSpool("other", [beginRecord("other", note: "other.md", device: "another-mac"), line(1, "o")])
         let r = TranscriptRecorder(store: FileTranscriptStore(), timeZone: utc, identity: Self.here)
