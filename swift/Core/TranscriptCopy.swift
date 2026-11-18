@@ -8,9 +8,9 @@ public enum TranscriptCopy {
     public static let inVault = "In the Obsidian vault \u{201C}%@\u{201D}."
     public static let notInVault = "Not in an Obsidian vault: notes are plain Markdown files."
     public static let folderUnavailable = "This folder is missing or in the Trash, so nothing is saved. Choose another."
-    public static let unfinishedOne = "1 unfinished transcript: MeetingCard finishes it after a call or at the next launch."
+    public static let unfinishedOne = "1 unfinished transcript: MeetingCard finishes it once it\u{2019}s no longer being written."
     /// %d: how many.
-    public static let unfinishedMany = "%d unfinished transcripts: MeetingCard finishes them after a call or at the next launch."
+    public static let unfinishedMany = "%d unfinished transcripts: MeetingCard finishes them once they\u{2019}re no longer being written."
     public static let fileNameLabel = "File name"
     public static let fileNameHelp = "Use {date}, {time}, {title} and {app}."
     public static let tagsLabel = "Tags"

@@ -43,7 +43,9 @@ final class TranscriptWiringTests: XCTestCase {
         XCTAssertTrue(t.contains("parts.contains(\".Trash\") || parts.contains(\".Trashes\")"))
         let sync = try XCTUnwrap(t.components(separatedBy: "func sync(keyUsable: Bool) {").dropFirst().first?.components(separatedBy: "\n    }\n").first)
         XCTAssertFalse(sync.contains("isDirectory") || sync.contains("refreshFolder"), "no disk check on every refresh")
-        XCTAssertTrue(try read("App/CoachNoteSettings.swift").contains("t.refreshFolder()"), "Settings on screen looks again")
+        let rows = try read("App/CoachNoteSettings.swift")
+        XCTAssertTrue(rows.contains("} else if lookedUp != t.folder.path {\n            t.refreshFolder()"),
+                      "Settings looks again when it opens or the folder changes, not on every update")
         XCTAssertTrue(try read("App/CoachNoteSettings.swift").contains("folderUsable: t.folderUsable"))
     }
 

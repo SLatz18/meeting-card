@@ -71,6 +71,9 @@ final class CoachNoteSettingsRows: NSObject {
     private var dailyNotePathRow = NSStackView()
     private var dailyNoteStyleRow = NSStackView()
     private var lastVault: String?
+    /// The folder last looked up for the open window: looked up again only when the window opens or
+    /// the folder changes, not on every update.
+    private var lookedUp: String?
     /// The rows, in order; the window re-adds them whenever it rebuilds its groups.
     private(set) var views: [NSView] = []
 
@@ -134,13 +137,16 @@ final class CoachNoteSettingsRows: NSObject {
         ]
     }
 
-    /// Shows the stored settings. The vault is looked up only while the window is visible; a field
-    /// being edited keeps what the user is typing.
+    /// Shows the stored settings. The folder and vault are looked up when the window opens and when
+    /// the folder changes; a field being edited keeps what the user is typing.
     func update(visible: Bool) {
         let t = coach.transcript
-        if visible {
+        if !visible {
+            lookedUp = nil
+        } else if lookedUp != t.folder.path {
             t.refreshFolder()
             lastVault = t.vaultName()
+            lookedUp = t.folder.path
         }
         let n = t.note
         let rows = TranscriptSettingsRows(.init(folderPath: (t.folder.path as NSString).abbreviatingWithTildeInPath, vaultName: lastVault,
