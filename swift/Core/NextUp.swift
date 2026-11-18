@@ -42,7 +42,7 @@ public enum NextUp {
     public static func parts(for card: Event, pool: [Event], timeZone: TimeZone = .current) -> Parts? {
         guard let n = next(for: card, pool: pool), let (s, _) = Timing.times(n),
               let (_, ce) = Timing.times(card) else { return nil }
-        // Codex P2 (0ef30ab): newlines/tabs measure narrow but render multiline, hiding the time.
+        // Newlines/tabs measure narrow but render multiline, hiding the time.
         let flat = flatten(n.summary ?? "")
         let title = flat.isEmpty ? "(No title)" : flat
         return Parts(title: title, suffix: " @ \(Timing.formatClock(s, timeZone: timeZone))" + (s < ce ? ", overlaps" : ""))
@@ -77,7 +77,7 @@ public enum NextUp {
         return cut(lo)
     }
 
-    /// Collapse newlines/tabs/runs of spaces (Codex P2, 0ef30ab): they measure narrow but wrap.
+    /// Collapse newlines/tabs/runs of spaces (they measure narrow but wrap).
     public static func flatten(_ s: String) -> String {
         s.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
