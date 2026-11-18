@@ -37,6 +37,15 @@ public struct VadState: Equatable {
     /// Set on the frame where activity is released (time of the last speech frame).
     public var offset: TimeInterval?
     public var dbfs: Double
+
+    /// For drivers that place voice activity themselves (the harness's precision run, tests).
+    public init(raw: Bool, active: Bool, onset: TimeInterval?, offset: TimeInterval?, dbfs: Double) {
+        self.raw = raw
+        self.active = active
+        self.onset = onset
+        self.offset = offset
+        self.dbfs = dbfs
+    }
 }
 
 /// Port of `listen_more/vad.py` `StreamVAD`: WebRTC VAD + energy gate + onset/hangover smoothing.

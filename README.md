@@ -126,7 +126,7 @@ The glow and the coach chip's card ask macOS to leave them out of screen capture
 - `swift/App/`: the AppKit shell (the card panel, drawn provider icons, timers, the call coach UI).
 - `swift/Packages/ListenMoreKit/`: the call coach, a local Swift package and its single source (capture, voice activity, local and transcript rules, OpenAI client, glow). Rule constants live in one place, `DefaultConfig.swift`. It runs in-process: no helper or interpreter.
 - `swift/Packages/ListenMoreHarness/`: a [voice harness](swift/Packages/ListenMoreHarness/README.md) that runs the coach on Linux with synthetic You and Them streams and scores transcription, speaker identification and coaching. Offline in CI; live with OpenAI on demand.
-- `docs/`: [how the coach works](docs/how-it-works.md), the [signing plan](docs/SIGNING_PLAN.md) (unsigned for now), and [Mac demo checks](docs/MAC_DEMO_CHECKS.md) run by hand.
+- `docs/`: [how the coach works](docs/how-it-works.md), the [signing plan](docs/SIGNING_PLAN.md) (unsigned for now), [Mac demo checks](docs/MAC_DEMO_CHECKS.md) run by hand, and the [coaching display proposal](docs/COACHING_DISPLAY.md) (how cues could show on the coach card; a prototype in the test build only).
 - `swift/Tests/`: XCTest bundle for Core (no app host).
 - `swift/project.yml`: xcodegen spec. The `.xcodeproj` is generated and not committed.
 

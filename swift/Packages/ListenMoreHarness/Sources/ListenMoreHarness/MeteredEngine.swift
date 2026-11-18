@@ -28,6 +28,7 @@ public final class MeteredEngine: CoachEngine, @unchecked Sendable {
     private var _stops: [Double] = []
     private var _micMutes: [(t: Double, muted: Bool)] = []
     private var _holds: [Hold] = []
+    private var _snapshots: [GptLayer.Snapshot?] = []
     private var _barrierTimeouts = 0
     /// Call frames the engine has finished (and, offline, the GPT layer has caught up on).
     public let callIngests = AsyncCounter()
@@ -50,13 +51,27 @@ public final class MeteredEngine: CoachEngine, @unchecked Sendable {
     public var stops: [Double] { lock.withLock { _stops } }
     public var micMutes: [(t: Double, muted: Bool)] { lock.withLock { _micMutes } }
     public var holds: [Hold] { lock.withLock { _holds } }
+    /// Each engine run's last GPT layer snapshot (nil for a run without one), in start order.
+    public var snapshots: [GptLayer.Snapshot?] { lock.withLock { _snapshots } }
     public var barrierTimeouts: Int { lock.withLock { _barrierTimeouts } }
 
     public func start(config: ListenMoreConfig, apiKey: APIKey?) {
+        start(config: config, apiKey: apiKey, call: CoachCallContext())
+    }
+
+    public func start(config: ListenMoreConfig, apiKey: APIKey?, call: CoachCallContext) {
+        start(config: config, apiKey: apiKey, keyAvailability: apiKey == nil ? .absent : .present, call: call)
+    }
+
+    public func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability, call: CoachCallContext) {
         collectHolds()
-        inner.start(config: config, apiKey: apiKey)
+        collectSnapshot()
+        inner.start(config: config, apiKey: apiKey, keyAvailability: keyAvailability, call: call)
         let t = clock.now()
-        lock.withLock { _starts.append(t) }
+        lock.withLock {
+            _starts.append(t)
+            _snapshots.append(nil)
+        }
     }
 
     public func ingest(_ stream: AudioStream, samples: [Float], time: TimeInterval) {
@@ -76,6 +91,7 @@ public final class MeteredEngine: CoachEngine, @unchecked Sendable {
 
     public func stop() {
         collectHolds()
+        collectSnapshot()
         inner.stop()
         let t = clock.now()
         lock.withLock { _stops.append(t) }
@@ -96,19 +112,42 @@ public final class MeteredEngine: CoachEngine, @unchecked Sendable {
     /// on that same queue, so nothing changes the engine's GPT layer while the snapshot reads it. The
     /// snapshot runs on the cooperative pool, never on this queue, so the wait can't deadlock.
     private func gptBarrier() {
+        if let snap = snapshotNow() { keep(snap) } else { lock.withLock { _barrierTimeouts += 1 } }
+    }
+
+    /// The running engine's GPT layer counters, before a stop or restart drops the layer. On the engine queue.
+    private func collectSnapshot() {
+        guard inner.isRunning, inner.hasGptLayer, let snap = snapshotNow() else { return }
+        keep(snap)
+    }
+
+    private func keep(_ snap: GptLayer.Snapshot?) {
+        lock.withLock { if !_snapshots.isEmpty { _snapshots[_snapshots.count - 1] = snap } }
+    }
+
+    /// The snapshot, waited for on the cooperative pool (never on this queue, so the wait can't deadlock);
+    /// nil when it timed out.
+    private func snapshotNow() -> GptLayer.Snapshot?? {
         let done = DispatchSemaphore(value: 0)
+        let box = SnapshotBox()
         let engine = inner
         Task.detached {
-            _ = await engine.gptSnapshot()
+            box.set(await engine.gptSnapshot())
             done.signal()
         }
-        if done.wait(timeout: .now() + 10) == .timedOut {
-            lock.withLock { _barrierTimeouts += 1 }
-        }
+        return done.wait(timeout: .now() + 10) == .timedOut ? nil : .some(box.get())
     }
 
     /// Samples of `stream` that reached the engine with run time inside `window`.
     public func samples(_ stream: AudioStream, in window: ClosedRange<Double>) -> Int {
         ingests.filter { $0.stream == stream && window.contains($0.t) }.reduce(0) { $0 + $1.samples }
     }
+}
+
+final class SnapshotBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var snap: GptLayer.Snapshot?
+
+    func set(_ s: GptLayer.Snapshot?) { lock.withLock { snap = s } }
+    func get() -> GptLayer.Snapshot? { lock.withLock { snap } }
 }

@@ -55,18 +55,122 @@ jobs:
           test "$(plutil -extract CFBundleName raw "$app/Contents/Info.plist")" = "MeetingCard (Test)"
           codesign -d --verbose=2 "$app" 2>&1 | grep -x "Identifier=com.slatz.meetingcard.swift.test"
       # The coach's audio debug readout (App/CoachDebugReadout.swift) is compiled into the test build only.
+      # Both gates read each binary twice: `strings -a` (literals and Swift type metadata names) and `nm -a`
+      # (the whole symbol table). macOS strings doesn't read the symbol table's strings, and exported names sit
+      # prefix-compressed in the dyld export trie, so strings alone misses names there; nm -a decodes them, and
+      # -a also lists the linker's debug map (STABS), which names every object file that contributed code.
+      # That is how a test-only file's object once reached the shipping app: empty under its #if, it still
+      # hosted other files' code under whole-module optimization. So Release doesn't compile test-only files at
+      # all (project.yml MEETINGCARD_TEST_ONLY_SOURCES). A wrong count prints the matching lines.
       - name: Debug readout only in the test build
         working-directory: swift
         run: |
+          set -euo pipefail
+          # Every binary must give a symbol table: an nm failure or empty output fails the step. (The runner's
+          # bash is 3.2, without inherit_errexit, so scan returns its own failures explicitly.)
+          scan() {
+            strings -a "$@" || return 1
+            local b syms
+            for b in "$@"; do
+              syms=$(nm -a "$b") || { echo "nm -a failed on $b" >&2; return 1; }
+              [[ -n $syms ]] || { echo "nm -a found no symbols in $b" >&2; return 1; }
+              printf '%s\n' "$syms"
+            done
+          }
           shipping=build/dd/Build/Products/Release/MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift
           testbuild=build/dd-test/Build/Products/Release/MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift
+          # A missing or empty binary has no markers to find: fail rather than count it as clean.
+          for b in "$shipping" "$testbuild"; do
+            test -s "$b" || { echo "missing binary: $b"; exit 1; }
+          done
+          shipping_text=$(scan "$shipping")
+          test_text=$(scan "$testbuild")
           for marker in "MeetingCard audio debug readout" "CoachDebugReadout"; do
-            in_shipping=$(strings -a "$shipping" | grep -c "$marker" || true)
-            in_test=$(strings -a "$testbuild" | grep -c "$marker" || true)
+            in_shipping=$(grep -c -- "$marker" <<<"$shipping_text" || true)
+            in_test=$(grep -c -- "$marker" <<<"$test_text" || true)
             echo "$marker: shipping $in_shipping, test build $in_test"
-            test "$in_shipping" -eq 0
+            [[ $in_shipping -eq 0 ]] || { grep -- "$marker" <<<"$shipping_text" | head -5; exit 1; }
             test "$in_test" -gt 0
           done
+      # The coaching-display prototype (Core/CueDisplay*.swift, App/CoachCueDisplayLab.swift) is compiled into
+      # test builds only: none of it in the shipping app or its Core framework, all of it in the test build.
+      - name: Cue display prototype only in the test build
+        working-directory: swift
+        run: |
+          set -euo pipefail
+          # Every binary must give a symbol table: an nm failure or empty output fails the step. (The runner's
+          # bash is 3.2, without inherit_errexit, so scan returns its own failures explicitly.)
+          scan() {
+            strings -a "$@" || return 1
+            local b syms
+            for b in "$@"; do
+              syms=$(nm -a "$b") || { echo "nm -a failed on $b" >&2; return 1; }
+              [[ -n $syms ]] || { echo "nm -a found no symbols in $b" >&2; return 1; }
+              printf '%s\n' "$syms"
+            done
+          }
+          bins() { echo "$1/Contents/MacOS/MeetingCardSwift" "$1/Contents/Frameworks/MeetingCardCore.framework/MeetingCardCore"; }
+          read -ra shipping <<<"$(bins build/dd/Build/Products/Release/MeetingCardSwift.app)"
+          read -ra testbuild <<<"$(bins build/dd-test/Build/Products/Release/MeetingCardSwift.app)"
+          # A missing or empty binary has no markers to find: fail rather than count it as clean.
+          for b in "${shipping[@]}" "${testbuild[@]}"; do
+            test -s "$b" || { echo "missing binary: $b"; exit 1; }
+          done
+          shipping_strings=$(scan "${shipping[@]}")
+          test_strings=$(scan "${testbuild[@]}")
+          for marker in "MeetingCard cue display prototype" "Cue Display Prototype" "CueDisplayPacer" "CueDisplayLabView" "CueTimeline" "CoachCueDisplayLab" "CueDisplay"; do
+            in_shipping=$(grep -c -- "$marker" <<<"$shipping_strings" || true)
+            in_test=$(grep -c -- "$marker" <<<"$test_strings" || true)
+            echo "$marker: shipping $in_shipping, test build $in_test"
+            [[ $in_shipping -eq 0 ]] || { grep -- "$marker" <<<"$shipping_strings" | head -5; exit 1; }
+            test "$in_test" -gt 0
+          done
+      # The prototype's snapshot tests (Tests/CueDisplaySnapshotTests.swift) wrote one PNG per option, surface and appearance.
+      - name: Cue display snapshots
+        working-directory: swift
+        run: |
+          ls build/cue-display
+          missing=0
+          for o in rotating-line glyph-state caption-anchored; do
+            for a in light dark; do
+              for s in card card-increased-contrast pill burst-card burst-pill before-pacing-card; do
+                f="$s-$o-$a.png"
+                [[ $s == card-increased-contrast ]] && f="card-$o-increased-contrast-$a.png"
+                [[ -s "build/cue-display/$f" ]] || { echo "missing $f"; missing=1; }
+              done
+            done
+          done
+          for a in light dark; do
+            for s in card-glyph-state-hover card-glyph-state-lingering pill-glyph-state-hover glyphs; do
+              [[ -s "build/cue-display/$s-$a.png" ]] || { echo "missing $s-$a.png"; missing=1; }
+            done
+          done
+          [[ $missing == 0 ]]
+      # The doc's copies stay light: each image at most 64 KB, the folder at most 600 KB, and every image
+      # in the folder embedded in docs/COACHING_DISPLAY.md (and every embedded one present).
+      - name: Coaching display doc images
+        run: |
+          set -euo pipefail
+          dir=docs/coaching-display
+          doc=docs/COACHING_DISPLAY.md
+          total=0
+          for f in "$dir"/*.png; do
+            size=$(stat -f%z "$f")
+            echo "$(basename "$f"): $size bytes"
+            (( size <= 64 * 1024 )) || { echo "$f is over 64 KB"; exit 1; }
+            grep -qF "(coaching-display/$(basename "$f"))" "$doc" || { echo "$f is not embedded in $doc"; exit 1; }
+            total=$((total + size))
+          done
+          echo "$dir: $total bytes"
+          (( total <= 600 * 1024 )) || { echo "$dir is over 600 KB"; exit 1; }
+          for ref in $(grep -oE '\(coaching-display/[^)]+\.png\)' "$doc" | tr -d '()'); do
+            test -s "docs/$ref" || { echo "$doc embeds missing docs/$ref"; exit 1; }
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cue-display-snapshots
+          path: swift/build/cue-display/
+          if-no-files-found: error
       - name: Kit test summary
         working-directory: swift
         run: grep -E "Executed [0-9]+ tests" build/kit-test.log | tail -1

@@ -42,10 +42,15 @@ public struct GptTransports: Sendable {
     public var http: HTTPTransport
     public var webSocket: WebSocketConnector
     public var scheduler: GptScheduler
+    /// Where the judges keep a regional host they learn, per key. The process-wide store by default; a test or
+    /// a harness run gives its own, so runs don't share it.
+    public var hosts: LearnedHosts
 
-    public init(http: HTTPTransport, webSocket: WebSocketConnector, scheduler: GptScheduler = SystemGptScheduler()) {
+    public init(http: HTTPTransport, webSocket: WebSocketConnector, scheduler: GptScheduler = SystemGptScheduler(),
+                hosts: LearnedHosts = .shared) {
         self.http = http
         self.webSocket = webSocket
         self.scheduler = scheduler
+        self.hosts = hosts
     }
 }

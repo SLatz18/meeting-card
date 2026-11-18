@@ -31,6 +31,13 @@ settings:
       ONLY_ACTIVE_ARCH: NO
       DEBUG_INFORMATION_FORMAT: dwarf
       STRIP_INSTALLED_PRODUCT: YES
+      # Test-only sources (the coach's audio debug readout, the coaching-display prototype and its lab) are
+      # not compiled into a Release build at all: their #if guards empty them, but with whole-module
+      # optimization the compiler can still place other files' code in such a file's object, and the
+      # linker's debug map then names that object in the shipping binary. scripts/build.sh --test-id clears
+      # MEETINGCARD_TEST_ONLY_SOURCES, so the test build compiles them.
+      MEETINGCARD_TEST_ONLY_SOURCES: "CoachDebugReadout.swift CoachCueDisplayLab.swift CueDisplay.swift CueDisplayLab.swift CueDisplayViews.swift CueTimelines.swift"
+      EXCLUDED_SOURCE_FILE_NAMES: "$(MEETINGCARD_TEST_ONLY_SOURCES)"
 # The call coach (its single source; see Packages/ListenMoreKit/README.md).
 packages:
   ListenMoreKit:

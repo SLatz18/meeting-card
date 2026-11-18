@@ -77,12 +77,17 @@ case "${1:-}" in
     for s in card-idle card-listening card-paused card-muted card-nudge-amber card-nudge-rose card-increased-contrast \
              card-saving card-saving-nudge card-mic-off card-zoom-mute pill-mic-off card-call-mode-tip card-no-mic-notice card-zoom-call-mode-tip card-zoom-no-mic-notice \
              pill-idle pill-listening pill-muted pill-paused pill-nudge-amber pill-nudge-rose \
+             card-cue-linger-amber card-cue-linger-rose card-cue-expired \
+             pill-cue-linger-amber pill-cue-linger-rose pill-cue-expired \
+             card-cue-linger-increased-contrast pill-nudge-increased-contrast pill-cue-linger-increased-contrast \
+             card-cue-paused pill-cue-muted \
              pill-zoom-mute morph-end collapse-end; do
       for a in light dark; do
         [[ -s "$OUT/coach-$s-$a.png" ]] || { echo "missing coach-$s-$a.png" >&2; missing=1; }
       done
     done
-    for s in chip-muted settings settings-call-controls menu-muted menu-waiting menu-mute menu-unmute caption-feed-card caption-feed-card-empty; do
+    for s in chip-muted settings settings-call-controls menu-muted menu-waiting menu-mute menu-unmute caption-feed-card caption-feed-card-empty \
+             self-pivot-notice; do
       for a in light dark; do
         [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
       done
@@ -91,6 +96,9 @@ case "${1:-}" in
     for a in light dark; do
       grep -q "coach check start-toggle-$a before=off open=on reopened=on fresh=on" "$OUT/coach-shots.log" \
         || { echo "Start Coach didn't show in Settings ($a)" >&2; missing=1; }
+      # Settings' Show Notice Again opens the ask-back notice (UISnapshots.selfPivotNoticeCheck).
+      grep -q "coach check self-pivot-reopen-$a before=closed opened=yes title=ok" "$OUT/coach-shots.log" \
+        || { echo "Show Notice Again didn't open the ask-back notice ($a)" >&2; missing=1; }
       # The coach Mute's SF Symbols load on this macOS (UISnapshots.symbolCheck).
       grep -q "coach check symbols-$a waveform=ok waveform.slash=ok" "$OUT/coach-shots.log" \
         || { echo "coach Mute glyphs missing ($a)" >&2; missing=1; }

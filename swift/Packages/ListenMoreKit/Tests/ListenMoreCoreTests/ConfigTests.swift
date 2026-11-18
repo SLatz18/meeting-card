@@ -53,6 +53,14 @@ final class ConfigTests: XCTestCase {
                              "the ended stop is never slower than the Core Audio stop")
     }
 
+    /// No judge question for self_pivot: nothing asks a judge about it.
+    func testNoJudgeQuestionForSelfPivot() throws {
+        let q = try TestConfig.load().judge.typesafe.questions
+        XCTAssertNil(q.question(for: .selfPivot))
+        XCTAssertFalse(q.asked.contains { $0.type == .selfPivot })
+        XCTAssertEqual(q.asked.map(\.type), CueType.judged)
+    }
+
     func testLoadsDefaults() throws {
         let c = try TestConfig.load()
         XCTAssertEqual(c.audio.sampleRate, 24000)
@@ -62,6 +70,9 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.cues.gptMinConfidence, 0.7)
         XCTAssertEqual(c.cues.colors["interrupt"], .red)
         XCTAssertEqual(c.cues.colors["talk_share"], .amber)
+        XCTAssertEqual(c.cues.colors["self_pivot"], .amber)
+        XCTAssertEqual(c.cues.priority, ["talk_over", "interrupt", "missed_question", "aggressive", "monologue", "not_listening", "self_pivot", "talk_share"])
+        XCTAssertEqual(Set(c.cues.colors.keys), Set(CueType.allCases.map(\.rawValue)), "a colour for every cue type")
         XCTAssertEqual(c.meetTitleRegex, #"\bMeet\b"#)
         XCTAssertEqual(c.captureTargets.map(\.bundleId), ["us.zoom.xos", "com.google.Chrome", "company.thebrowser.dia",
                                                          "com.microsoft.teams2", "com.microsoft.teams", "Cisco-Systems.Spark",
@@ -73,12 +84,31 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.local.cutInMinOverlapMs, 600)
         XCTAssertEqual(c.local.monologueSoftS, 60)
         XCTAssertEqual(c.cues.globalCooldownS, 20)
+        XCTAssertEqual(c.cues.onScreenS, 4.5)
         XCTAssertEqual(c.gpt.notListeningMinConfidence, 0.85)
         XCTAssertEqual(c.gpt.judgeModel, "gpt-6-luna")
         XCTAssertEqual(c.gpt.transcribeModel, "gpt-live-transcribe")
         XCTAssertFalse(c.gpt.store)
         XCTAssertEqual(c.gpt.budgetUsdPerCall, 1.0)
         XCTAssertEqual(c.captureTargets.first?.meetingTitlePatterns, ["Zoom Meeting", "Zoom Webinar"])
+    }
+
+    /// The self-pivot judge's shipped limits.
+    func testSelfPivotDefaults() throws {
+        let c = try ListenMoreConfig.builtIn()
+        XCTAssertEqual(c.gpt.selfPivotMinConfidence, 0.85)
+        XCTAssertEqual(c.gpt.selfPivotMaxJudgeCallsPerCall, 20)
+        XCTAssertEqual(c.gpt.selfPivotBudgetUsdPerCall, 0.02)
+        XCTAssertEqual(c.gpt.selfPivotMaxVerdictAgeS, 10)
+        XCTAssertEqual(c.text.pivotRearmS, 180)
+        XCTAssertEqual(c.text.pivotMaxPerCall, 20)
+        XCTAssertFalse(c.cues.disabledTypes.contains(.selfPivot), "on in the generic config")
+        for bad: [String: Any] in [["self_pivot_min_confidence": 1.5], ["self_pivot_max_judge_calls_per_call": -1],
+                                   ["self_pivot_budget_usd_per_call": -0.01], ["self_pivot_max_verdict_age_s": 0]] {
+            XCTAssertThrowsError(try ListenMoreConfig.load(overrides: ["gpt": bad])) { error in
+                XCTAssertEqual(error as? ConfigError, .invalid("bad gpt.self_pivot limits"), "\(bad)")
+            }
+        }
     }
 
     func testOverrideDeepMerges() throws {

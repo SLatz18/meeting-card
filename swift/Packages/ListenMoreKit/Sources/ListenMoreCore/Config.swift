@@ -181,6 +181,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var cooldownS: Double
         /// After any cue.
         public var globalCooldownS: Double
+        /// How long a shown cue stays on screen (the coach card's nudge hold); no other cue shows meanwhile.
+        public var onScreenS: Double
         /// Candidates raised at the same moment are tried in this order (cue type raw values).
         public var priority: [String]
         public var fadeS: Double
@@ -224,6 +226,15 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var store: Bool
         public var pricesUsd: Prices
         public var budgetUsdPerCall: Double?
+        /// The self-pivot judge (`SelfPivotLane`): a verdict under `self_pivot_min_confidence` gives no
+        /// cue; at most `self_pivot_max_judge_calls_per_call` calls and `self_pivot_budget_usd_per_call`
+        /// of spend per call (counted across engine restarts); a verdict later than
+        /// `self_pivot_max_verdict_age_s` after the user's reply ended is dropped. Reaching either cap
+        /// stops self-pivot judging for the rest of the call, nothing else.
+        public var selfPivotMinConfidence: Double
+        public var selfPivotMaxJudgeCallsPerCall: Int
+        public var selfPivotBudgetUsdPerCall: Double
+        public var selfPivotMaxVerdictAgeS: Double
     }
 
     /// Which judge decides the judged cues (`CueType.judged`). `gpt` is the Responses judge above and
@@ -253,7 +264,7 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
                     case .aggressive: aggressive
                     case .notListening: notListening
                     case .missedQuestion: missedQuestion
-                    case .interrupt, .talkOver, .monologue, .talkShare: nil
+                    case .interrupt, .talkOver, .monologue, .talkShare, .selfPivot: nil
                     }
                 }
             }
@@ -359,6 +370,10 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
               text.pivotFirstPersonMinWords > 0, text.pivotOpenerMinFirstPerson > 0, (0...1).contains(text.pivotFirstPersonShare),
               text.pivotTurnEndGapS > 0, text.pivotTranscriptWaitS >= 0, text.pivotRearmS >= 0, text.pivotInviteHoldS >= 0,
               text.pivotMaxPerCall >= 0 else { throw ConfigError.invalid("bad text.pivot limits") }
+        guard (0...1).contains(gpt.selfPivotMinConfidence), gpt.selfPivotMaxJudgeCallsPerCall >= 0,
+              gpt.selfPivotBudgetUsdPerCall >= 0, gpt.selfPivotMaxVerdictAgeS > 0 else {
+            throw ConfigError.invalid("bad gpt.self_pivot limits")
+        }
         guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,
               trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS,
               trigger.callWindowLookbackS > 0 else { throw ConfigError.invalid("bad trigger timing") }

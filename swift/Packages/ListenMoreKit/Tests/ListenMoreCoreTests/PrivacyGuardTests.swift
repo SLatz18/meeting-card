@@ -204,7 +204,9 @@ final class PrivacyGuardTests: XCTestCase {
         for (name, text) in try librarySources() {
             for line in text.components(separatedBy: "\n") where line.contains("key.value") {
                 uses += 1
-                XCTAssertTrue(line.contains("\"Bearer \\(key.value)\"") || line.contains("Data(key.value.utf8)"), "\(name): \(line)")
+                // The third use is the in-memory scope fingerprint: salted SHA-256 of the key, in KeyScope.swift only.
+                let scoped = name == "KeyScope.swift" && line.contains("SHA256.hash(Self.salt + Array(key.value.utf8))")
+                XCTAssertTrue(line.contains("\"Bearer \\(key.value)\"") || line.contains("Data(key.value.utf8)") || scoped, "\(name): \(line)")
             }
         }
         XCTAssertGreaterThanOrEqual(uses, 5, "realtime, Responses, key check, TypeSafe and the Keychain save")
@@ -237,9 +239,13 @@ final class PrivacyGuardTests: XCTestCase {
     func testHostDefaultsAreSettingsOnly() throws {
         let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
                                     "coach.judgeProvider", "coach.cardPosition", "coach.captions", "coach.saveTranscripts",
-                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen", "coach.showInScreenshots"]
+                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen", "coach.showInScreenshots",
+                                    "coach.selfPivot", "coach.selfPivotNoticeSeen"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
-        for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
+        let core = Self.hostAppURL.deletingLastPathComponent().appendingPathComponent("Core")
+        let files = try swiftFiles(in: Self.hostAppURL, prefix: "Coach") + swiftFiles(in: core, prefix: "Coach")
+        if Self.exists(core) { XCTAssertTrue(files.contains { $0.0 == "CoachSelfPivot.swift" }, "the ask-back cue's settings are scanned") }
+        for (name, text) in files {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
                 let key = (text as NSString).substring(with: m.range(at: 1))
                 XCTAssertTrue(allowed.contains(key), "\(name) uses defaults key \(key)")
@@ -453,5 +459,22 @@ final class PrivacyGuardTests: XCTestCase {
         for (name, text) in try appSources() {
             XCTAssertNil(text.range(of: banned[0], options: .regularExpression), "\(name) matches a key pattern")
         }
+    }
+
+    /// The key's in-memory fingerprint (`KeyScope.fingerprint`, a salted one-way hash that scopes learned hosts) is
+    /// read in one file only: no log call, output, report, harness source or app source touches it, and that file
+    /// neither prints, logs nor persists anything.
+    func testKeyFingerprintStaysInsideItsFile() throws {
+        let harness = Self.packageURL.deletingLastPathComponent().appendingPathComponent("ListenMoreHarness")
+        let harnessSources = try ["Sources", "Tests"].flatMap { try swiftFiles(in: harness.appendingPathComponent($0)) }
+        for (name, text) in try allSources() + harnessSources where name != "KeyScope.swift" {
+            XCTAssertFalse(code(text).lowercased().contains("fingerprint"), "\(name) touches the key fingerprint")
+        }
+        let scope = try XCTUnwrap(try librarySources().first { $0.0 == "KeyScope.swift" }).1
+        for banned in ["print(", "NSLog", "os_log", "Logger", "UserDefaults", "write(to", "FileManager", "Keychain", "JSONSerialization"] {
+            XCTAssertFalse(code(scope).contains(banned), "KeyScope.swift uses \(banned)")
+        }
+        XCTAssertTrue(code(scope).contains("UInt8.random"), "the salt is random per process")
+        XCTAssertFalse(code(scope).contains("static let salt: [UInt8] = ["), "the salt is never written into the source")
     }
 }

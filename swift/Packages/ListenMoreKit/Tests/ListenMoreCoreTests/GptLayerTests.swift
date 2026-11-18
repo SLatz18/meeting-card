@@ -101,7 +101,7 @@ final class GptClientTests: XCTestCase {
         let http = FakeHTTP()
         http.queued = [(401, Self.hostError("Use the regional host eu.api.openai.com for this project."))]
         _ = try await LiveJudge(config: config, key: APIKey("sk-test-host")!, http: http, hosts: hosts).judge(prompt: "x")
-        XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl), "https://eu.api.openai.com/v1/responses")
+        XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl, scope: KeyScope(APIKey("sk-test-host")!)), "https://eu.api.openai.com/v1/responses")
         let next = LiveJudge(config: config, key: APIKey("sk-test-host")!, http: http, hosts: hosts)
         XCTAssertEqual(next.currentURL, "https://eu.api.openai.com/v1/responses")
         _ = try await next.judge(prompt: "y")
@@ -109,48 +109,40 @@ final class GptClientTests: XCTestCase {
                        "one failed call in all, not one per judge")
     }
 
-    /// A learned host that stops working (another key) sends the call back to the configured host, and
-    /// is forgotten.
-    func testStaleLearnedHostFallsBackToTheConfiguredHost() async throws {
+    /// A learned host that stops working (another key) answers 401 incorrect_hostname naming the key's host:
+    /// the one resend goes there (the configured host), and the learned host is forgotten.
+    func testStaleLearnedHostIsRedirectedToTheConfiguredHost() async throws {
         let hosts = LearnedHosts()
-        hosts.learn("https://eu.api.openai.com/v1/responses", for: config.gpt.responsesUrl)
+        hosts.learn("https://eu.api.openai.com/v1/responses", for: config.gpt.responsesUrl, scope: KeyScope(APIKey("sk-other")!))
         let http = FakeHTTP()
-        http.queued = [(401, Data(#"{"error":{"code":"invalid_api_key","message":"x"}}"#.utf8))]
+        http.queued = [(401, Self.hostError("Use the regional host api.openai.com for this project."))]
         let judge = LiveJudge(config: config, key: APIKey("sk-other")!, http: http, hosts: hosts)
         _ = try await judge.judge(prompt: "x")
         XCTAssertEqual(http.requests.map { $0.url.host }, ["eu.api.openai.com", "api.openai.com"])
         XCTAssertEqual(judge.currentURL, config.gpt.responsesUrl)
-        XCTAssertNil(hosts.url(for: config.gpt.responsesUrl))
+        XCTAssertNil(hosts.url(for: config.gpt.responsesUrl, scope: KeyScope(APIKey("sk-other")!)))
     }
 
-    /// A learned host answering with a rate limit or an outage is not a key problem: no fallback, and
-    /// the host is kept. A failed fallback to the configured host reports the first error.
-    func testLearnedHostFallsBackOnlyOnAuthAndKeepsTheFirstError() async {
+    /// Only 401 incorrect_hostname resends. Any other reply from a learned host is one post and its own error.
+    /// A non-transient one (a rejected key) forgets the learned host for that key; a rate limit or an outage
+    /// keeps it.
+    func testOnlyIncorrectHostnameResends() async {
         let learned = "https://eu.api.openai.com/v1/responses"
-        for status in [429, 500] {
+        for (status, body, kept) in [(401, Data(#"{"error":{"code":"invalid_api_key","message":"x"}}"#.utf8), false), (403, Data(), false),
+                                     (429, Data(), true), (500, Data(), true)] {
             let hosts = LearnedHosts()
-            hosts.learn(learned, for: config.gpt.responsesUrl)
+            let scope = KeyScope(APIKey("k")!)
+            hosts.learn(learned, for: config.gpt.responsesUrl, scope: scope)
             let http = FakeHTTP()
-            http.queued = [(status, Data())]
+            http.queued = [(status, body)]
             do {
                 _ = try await LiveJudge(config: config, key: APIKey("k")!, http: http, hosts: hosts).judge(prompt: "x")
                 XCTFail("expected error")
             } catch {
                 XCTAssertEqual(error as? GptError, .http(status))
-                XCTAssertEqual(http.requests.count, 1)
-                XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl), learned)
+                XCTAssertEqual(http.requests.count, 1, "HTTP \(status)")
+                XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl, scope: scope), kept ? learned : nil, "HTTP \(status)")
             }
-        }
-        let hosts = LearnedHosts()
-        hosts.learn(learned, for: config.gpt.responsesUrl)
-        let http = FakeHTTP()
-        http.queued = [(403, Data()), (503, Data())]
-        do {
-            _ = try await LiveJudge(config: config, key: APIKey("k")!, http: http, hosts: hosts).judge(prompt: "x")
-            XCTFail("expected error")
-        } catch {
-            XCTAssertEqual(error as? GptError, .http(403), "the learned host's rejection, not the configured host's outage")
-            XCTAssertEqual(http.requests.map { $0.url.host }, ["eu.api.openai.com", "api.openai.com"])
         }
     }
 

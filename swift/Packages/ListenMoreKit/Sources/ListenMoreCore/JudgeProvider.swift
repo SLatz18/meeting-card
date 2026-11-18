@@ -51,6 +51,12 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
     case timeout
     case transport
     case badResponse
+    /// The OpenAI judge was told to use another host that can't be used (not an OpenAI API host): it stops
+    /// judging, with no more posts. Not a TypeSafe failure.
+    case untrustedHost
+    /// The OpenAI judge was redirected to a regional host that was trusted and used, and it didn't work (it
+    /// rejected the key or the request, or named the host just used): the judge stops, no more posts.
+    case hostRejected
 
     public var description: String {
         switch self {
@@ -58,6 +64,8 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
         case .timeout: "timeout"
         case .transport: "transport error"
         case .badResponse: "bad response"
+        case .untrustedHost: "untrusted host"
+        case .hostRejected: "regional host rejected"
         }
     }
 
@@ -75,6 +83,8 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
         case .timeout: return .timeout
         case .transport: return .unreachable
         case .badResponse: return .badReply
+        case .untrustedHost: return .untrustedHost
+        case .hostRejected: return .hostRejected
         }
     }
 
@@ -101,6 +111,10 @@ public enum JudgeFailureKind: String, CaseIterable, Equatable, Sendable {
     case timeout
     case unreachable
     case badReply
+    /// `JudgeFailure.untrustedHost`.
+    case untrustedHost
+    /// `JudgeFailure.hostRejected`.
+    case hostRejected
 }
 
 /// One state-based provider call. Content-free: labels, confidences, counts and the configured price.
@@ -142,6 +156,16 @@ public enum JudgeReply: Sendable {
 public protocol JudgeProvider: Sendable {
     var kind: JudgeProviderKind { get }
     func judge(_ input: JudgeInput) async throws -> JudgeReply
+    /// The same call, counting each HTTP post it makes in `posts`. A provider that posts once per call needs
+    /// nothing more than the default, which counts one.
+    func judge(_ input: JudgeInput, posts: JudgePosts) async throws -> JudgeReply
+}
+
+extension JudgeProvider {
+    public func judge(_ input: JudgeInput, posts: JudgePosts) async throws -> JudgeReply {
+        posts.recordSent()
+        return try await judge(input)
+    }
 }
 
 /// The GPT judge as a provider: the prompt goes to the wrapped `CueJudge` untouched, and its result and
@@ -156,7 +180,11 @@ public struct GptJudgeProvider: JudgeProvider {
     public var kind: JudgeProviderKind { .gpt }
 
     public func judge(_ input: JudgeInput) async throws -> JudgeReply {
-        let (result, usage) = try await cueJudge.judge(prompt: input.prompt)
+        try await judge(input, posts: JudgePosts())
+    }
+
+    public func judge(_ input: JudgeInput, posts: JudgePosts) async throws -> JudgeReply {
+        let (result, usage) = try await cueJudge.judge(prompt: input.prompt, posts: posts)
         return .gpt(result, usage)
     }
 }
@@ -166,13 +194,32 @@ public enum JudgeProviders {
     /// without a TypeSafe key: then nothing is judged, and transcription and the transcript rules keep
     /// running (there is no fallback to another provider).
     public static func make(config: ListenMoreConfig, openAIKey: APIKey, judgeKey: APIKey?, http: HTTPTransport,
-                            scheduler: GptScheduler) -> JudgeProvider? {
+                            scheduler: GptScheduler, hosts: LearnedHosts = .shared) -> JudgeProvider? {
         switch config.judge.provider {
         case .gpt:
-            return GptJudgeProvider(LiveJudge(config: config, key: openAIKey, http: http))
+            return GptJudgeProvider(LiveJudge(config: config, key: openAIKey, http: http, hosts: hosts))
         case .typesafe:
             guard let judgeKey else { return nil }
             return TypeSafeJudge(config: config.judge.typesafe, key: judgeKey, http: http, clock: scheduler)
+        }
+    }
+
+    /// Whether `provider` can ask the self-pivot question. The GPT judge can; TypeSafe has no self_pivot
+    /// question yet, so self-pivot is off while it is selected.
+    public static func judgesSelfPivot(_ provider: JudgeProviderKind) -> Bool {
+        switch provider {
+        case .gpt: true
+        case .typesafe: false
+        }
+    }
+
+    /// The self-pivot judge, on the configured provider only: the GPT judge asks it on the OpenAI key. nil
+    /// when that provider can't ask it (`judgesSelfPivot`): then self-pivot is off. Never another provider's.
+    public static func selfPivotJudge(config: ListenMoreConfig, openAIKey: APIKey, http: HTTPTransport,
+                                      hosts: LearnedHosts = .shared) -> CueJudge? {
+        switch config.judge.provider {
+        case .gpt: LiveJudge(config: config, key: openAIKey, http: http, hosts: hosts, spec: .selfPivot)
+        case .typesafe: nil
         }
     }
 }

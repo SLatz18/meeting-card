@@ -118,6 +118,38 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertEqual(s.capturingBundleIds, ["company.thebrowser.dia"])
     }
 
+    /// Every engine run of one call shares the call's self-pivot ledger, with its start on the call's clock,
+    /// so the self-pivot caps and re-arm hold across Pause; the next call gets a new ledger.
+    func testEngineRunsOfOneCallShareTheSelfPivotLedger() async {
+        let provider = FakeAudioStateProvider()
+        let settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+        let clock = clock
+        let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: AudioActivitySignal(provider: provider),
+                             keys: FakeKeys(key: APIKey("sk-test")), renderer: renderer, settings: settings, wallClock: { clock.now() })
+        provider.zoomCall()
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertEqual(s.indicator, .listening)
+        clock.advance(7)
+        s.setPaused(true)
+        clock.advance(3)
+        s.setPaused(false)
+        s.drainEngineForTesting()
+        let runs = engine.calls
+        XCTAssertEqual(runs.count, 2)
+        XCTAssertTrue(runs[0].selfPivot === runs[1].selfPivot)
+        XCTAssertEqual(runs[0].offset, 0)
+        XCTAssertEqual(runs[1].offset, 10, accuracy: 1e-9)
+
+        s.stopManual()
+        s.startManual()
+        s.drainEngineForTesting()
+        let next = engine.calls
+        XCTAssertGreaterThan(next.count, 2)
+        XCTAssertFalse(next.last!.selfPivot === runs[0].selfPivot, "a new call, a new ledger")
+        XCTAssertEqual(next.last?.offset, 0)
+    }
+
     /// Pause and the call app's mute each restart the engine, whose clock starts again at 0. The session's
     /// cooldowns keep counting in session time across two Pause/Resume cycles and a call-app mute: a cue
     /// inside 20 s of the last one is held, one past it shows, hosts get the suggestion's own times, and

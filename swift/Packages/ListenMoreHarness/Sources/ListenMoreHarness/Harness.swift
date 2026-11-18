@@ -28,6 +28,10 @@ public struct HarnessOptions {
     var ignoredControls: Set<ControlKind>
     /// The offline judge answers not_listening to requests whose transcript has this text.
     var offlineNotListeningOn: String?
+    /// What the offline stub answers every self-pivot judge request (default none).
+    var offlineSelfPivotAnswer: (cue: String, confidence: Double)
+    /// How many of the first self-pivot posts the offline stub answers `401 incorrect_hostname`.
+    var offlineSelfPivotRedirects: Int
     /// The transcript store under the harness's counting wrapper (default: the file store).
     var transcriptStore: TranscriptStore?
     /// Called with the scenario and its run directory when the scenario ends, before the directory is
@@ -47,7 +51,10 @@ public struct HarnessOptions {
     init(mode: Mode = .offline, scenarios: [Scenario] = Scenarios.all, outputDirectory: URL,
          environment: [String: String] = ProcessInfo.processInfo.environment, liveBackend: LiveBackend? = nil,
          ttsModel: String = "gpt-4o-mini-tts", offlineVoices: OfflineVoices = .synthetic, judge: Bool? = nil,
-         engineOverrides: [String: Any] = [:], ignoredControls: Set<ControlKind> = [], offlineNotListeningOn: String? = nil) {
+         engineOverrides: [String: Any] = [:], ignoredControls: Set<ControlKind> = [], offlineNotListeningOn: String? = nil,
+         offlineSelfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9), offlineSelfPivotRedirects: Int = 0) {
+        self.offlineSelfPivotAnswer = offlineSelfPivotAnswer
+        self.offlineSelfPivotRedirects = offlineSelfPivotRedirects
         self.mode = mode
         self.scenarios = scenarios
         self.outputDirectory = outputDirectory
@@ -78,9 +85,10 @@ public struct HarnessSummary {
 
 public enum Harness {
     public static let keyVariable = "OPENAI_API_KEY"
-    /// The config that turns the judge off: GPT decides only not_listening, and with that cue disabled
-    /// `GptCore` makes no judge calls. Transcription and every other rule are unaffected.
-    public static let judgeOff: [String: Any] = ["cues": ["disabled": [CueType.notListening.rawValue]]]
+    /// The config that turns the judges off: the cue judge decides only not_listening and the self-pivot
+    /// judge only self_pivot, and with both disabled `GptCore` makes no judge calls. Transcription and
+    /// every other rule are unaffected.
+    public static let judgeOff: [String: Any] = ["cues": ["disabled": [CueType.notListening.rawValue, CueType.selfPivot.rawValue]]]
 
     /// The key comes from the environment only: an argument that looks like key material is refused.
     public static func checkArguments(_ args: [String], environment: [String: String]) throws {
@@ -135,7 +143,8 @@ public enum Harness {
                 var services: RunServices
                 switch o.mode {
                 case .offline:
-                    services = try offlineServices(scenario, config: config, voices: o.offlineVoices, notListeningOn: o.offlineNotListeningOn)
+                    services = try offlineServices(scenario, config: config, voices: o.offlineVoices, notListeningOn: o.offlineNotListeningOn,
+                                                   selfPivotAnswer: o.offlineSelfPivotAnswer, selfPivotRedirects: o.offlineSelfPivotRedirects)
                 case .live:
                     let built = try await liveServices(scenario, config: config, key: liveKey!, options: o, cache: &clipCache, cost: &cost)
                     services = built.services
@@ -206,11 +215,13 @@ public enum Harness {
     }
 
     static func offlineServices(_ scenario: Scenario, config: ListenMoreConfig, voices: OfflineVoices,
-                                notListeningOn: String? = nil) throws -> RunServices {
+                                notListeningOn: String? = nil,
+                                selfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9),
+                                selfPivotRedirects: Int = 0) throws -> RunServices {
         let clock = HarnessClock(.simulated)
         let sr = config.audio.sampleRate
         let server = ScriptedRealtime(clock: clock, sampleRate: sr)
-        let judge = StubJudgeHTTP(notListeningOn: notListeningOn)
+        let judge = StubJudgeHTTP(notListeningOn: notListeningOn, selfPivotAnswer: selfPivotAnswer, redirectSelfPivot: selfPivotRedirects)
         var clips: [String: [Float]]
         var shapes: [String: ClipShape]
         switch voices {
@@ -227,9 +238,10 @@ public enum Harness {
             }
         }
         return RunServices(mode: .offline, config: config, engineConfig: config, key: scenario.keyless ? nil : APIKey("offline-stub"),
-                           transports: GptTransports(http: judge, webSocket: server, scheduler: InstantScheduler(clock: clock)),
+                           transports: GptTransports(http: judge, webSocket: server, scheduler: InstantScheduler(clock: clock), hosts: LearnedHosts()),
                            clock: clock, sockets: server, offlineServer: server, judgeCalls: { judge.calls },
-                           clips: clips, shapes: shapes)
+                           clips: clips, shapes: shapes, traffic: judge.traffic,
+                           selfPivotYes: selfPivotAnswer.cue == SelfPivotJudgeSpec.label && selfPivotAnswer.confidence >= config.gpt.selfPivotMinConfidence)
     }
 
     static func liveServices(_ scenario: Scenario, config: ListenMoreConfig, key: APIKey, options o: HarnessOptions,
@@ -260,8 +272,9 @@ public enum Harness {
         let http = MeteredHTTP(inner: backend.http, clock: clock)
         let ws = MeteredConnector(inner: backend.webSocket, clock: clock)
         let services = RunServices(mode: .live, config: config, engineConfig: config, key: scenario.keyless ? nil : key,
-                                   transports: GptTransports(http: http, webSocket: ws, scheduler: backend.scheduler),
-                                   clock: clock, sockets: ws, offlineServer: nil, judgeCalls: { http.calls }, clips: clips, shapes: shapes)
+                                   transports: GptTransports(http: http, webSocket: ws, scheduler: backend.scheduler, hosts: LearnedHosts()),
+                                   clock: clock, sockets: ws, offlineServer: nil, judgeCalls: { http.calls }, clips: clips, shapes: shapes,
+                                   traffic: http.traffic)
         return (services, http)
     }
 
@@ -288,6 +301,7 @@ public enum Harness {
             total.transcribeUsd += last.transcribeUsd
             total.judgeUsd += last.judgeUsd
             total.billedAudioS += last.billedAudioS
+            total.selfPivotJudgeUsd += last.selfPivotJudgeUsd
         }
         return total
     }
@@ -300,11 +314,22 @@ public enum Harness {
                                       "engines": Double(record.engineStarts.count),
                                       "usd": meter.transcribeUsd],
                              labels: ["mode": record.mode.rawValue])]
-        var judge: [String: Double] = ["calls": Double(record.judgeCalls), "usd": meter.judgeUsd]
+        // The per-judge split: posts on the wire by schema (self_pivot_calls counts every post; the judge calls
+        // are apart), dollars from each engine's own meter.
+        var judge: [String: Double] = ["calls": Double(record.judgeCalls), "usd": meter.judgeUsd,
+                                       "self_pivot_calls": Double(record.selfPivotPosts),
+                                       "self_pivot_judge_calls": Double(record.selfPivotEngineJudgeCalls),
+                                       "self_pivot_redirects": Double(record.selfPivotRedirects),
+                                       "other_calls": Double(record.judgeCalls - record.selfPivotPosts),
+                                       "self_pivot_usd": meter.selfPivotJudgeUsd, "other_usd": meter.judgeUsd - meter.selfPivotJudgeUsd,
+                                       "self_pivot_candidates": Double(record.pivotCandidates),
+                                       "store_false_violations": Double(record.storeViolations)]
         var labels = ["mode": record.mode.rawValue, "judge": record.judgeOn ? "on" : "off"]
         if let http {
             judge["input_tokens"] = Double(http.tokens.input)
             judge["output_tokens"] = Double(http.tokens.output)
+            judge["self_pivot_input_tokens"] = Double(http.selfPivotTokens.input)
+            judge["self_pivot_output_tokens"] = Double(http.selfPivotTokens.output)
             judge["failed_calls"] = Double(http.failures.count)
             judge["host_redirects"] = Double(http.hostRedirects)
             // A judge call cancelled up to a second after an engine stop is the GPT layer closing on Pause

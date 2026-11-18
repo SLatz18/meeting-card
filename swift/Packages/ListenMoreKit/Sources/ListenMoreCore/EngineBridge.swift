@@ -67,6 +67,12 @@ public protocol CoachEngineDelegate: AnyObject {
     func engine(_ engine: CoachEngine, clearRejected speaker: Speaker)
 }
 
+public extension CoachEngine {
+    func start(config: ListenMoreConfig, apiKey: APIKey?, call: CoachCallContext) {
+        start(config: config, apiKey: apiKey)
+    }
+}
+
 public extension CoachEngineDelegate {
     func engine(_ engine: CoachEngine, gptStopped reason: GptStopReason) {}
     func engine(_ engine: CoachEngine, judgeStopped failure: JudgeFailure) {}
@@ -83,8 +89,11 @@ public protocol CoachEngine: AnyObject {
 
     /// `apiKey` is nil when no key is stored; the engine then runs the local layer only.
     func start(config: ListenMoreConfig, apiKey: APIKey?)
+    /// The same, for a run of `call`: every run of one call shares its context (the self-pivot caps and
+    /// re-arm hold across Pause and the call app's mute). An engine without call-wide state can ignore it.
+    func start(config: ListenMoreConfig, apiKey: APIKey?, call: CoachCallContext)
     /// The same, saying why `apiKey` is nil, so the diagnostics file can tell "no key" from "key rejected".
-    func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability)
+    func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability, call: CoachCallContext)
     /// Mono Float32 PCM at `config.audio.sampleRate`. `time` is seconds since `start`.
     func ingest(_ stream: AudioStream, samples: [Float], time: TimeInterval)
     /// The user's mic went off (true) or came back (false) within the session. While off, mic
@@ -95,8 +104,12 @@ public protocol CoachEngine: AnyObject {
 }
 
 public extension CoachEngine {
+    func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability, call: CoachCallContext) {
+        start(config: config, apiKey: apiKey, call: call)
+    }
+
     func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability) {
-        start(config: config, apiKey: apiKey)
+        start(config: config, apiKey: apiKey, keyAvailability: keyAvailability, call: CoachCallContext())
     }
 }
 

@@ -99,6 +99,10 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
     private var _failures: [String] = []
     private var _hostRedirects = 0
     private var _cancelled: [Double] = []
+    private var _selfPivotInputTokens = 0
+    private var _selfPivotOutputTokens = 0
+    /// Requests per judge, and any without `store: false` (read from the body's schema name and store flag only).
+    public let traffic = JudgeTraffic()
 
     public init(inner: HTTPTransport, clock: HarnessClock? = nil) {
         self.inner = inner
@@ -115,6 +119,8 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
 
     public var calls: Int { lock.withLock { _calls } }
     public var tokens: (input: Int, output: Int) { lock.withLock { (_inputTokens, _outputTokens) } }
+    /// The self-pivot judge's share of `tokens`.
+    public var selfPivotTokens: (input: Int, output: Int) { lock.withLock { (_selfPivotInputTokens, _selfPivotOutputTokens) } }
     /// One class per failed call: `HTTP <status> <error code>` or the thrown error's type (a timeout
     /// shows as its URLError code). Never a body, header or message text.
     public var failures: [String] { lock.withLock { _failures } }
@@ -123,6 +129,7 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
     public var hostRedirects: Int { lock.withLock { _hostRedirects } }
 
     public func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
+        let facts = traffic.record(body)
         let reply: (status: Int, body: Data)
         do {
             reply = try await inner.post(url: url, headers: headers, body: body, timeout: timeout)
@@ -140,10 +147,21 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
             _calls += 1
             if reply.status != 200 {
                 let failure = Self.failureClass(status: reply.status, root: root)
-                if failure == Self.hostRedirect { _hostRedirects += 1 } else { _failures.append(failure) }
+                if failure == Self.hostRedirect {
+                    _hostRedirects += 1
+                    if facts.selfPivot { traffic.recordSelfPivotRedirect() }
+                } else {
+                    _failures.append(failure)
+                }
             }
-            _inputTokens += (usage?["input_tokens"] as? NSNumber)?.intValue ?? 0
-            _outputTokens += (usage?["output_tokens"] as? NSNumber)?.intValue ?? 0
+            let input = (usage?["input_tokens"] as? NSNumber)?.intValue ?? 0
+            let output = (usage?["output_tokens"] as? NSNumber)?.intValue ?? 0
+            _inputTokens += input
+            _outputTokens += output
+            if facts.selfPivot {
+                _selfPivotInputTokens += input
+                _selfPivotOutputTokens += output
+            }
         }
         return reply
     }

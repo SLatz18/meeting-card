@@ -88,7 +88,8 @@ enum UISnapshots {
         }
         func settingsShot() {
             for key in [CoachController.Keys.onboarded, CoachController.Keys.enabled, CoachTranscript.Keys.captions,
-                        CoachTranscript.Keys.saveTranscripts, CoachTranscript.Keys.noticeSeen] { defaults.set(true, forKey: key) }
+                        CoachTranscript.Keys.saveTranscripts, CoachTranscript.Keys.noticeSeen,
+                        CoachSelfPivot.Keys.noticeSeen] { defaults.set(true, forKey: key) }
             // Shot with the other opt-ins at their defaults: Use Zoom/Meet controls off, GPT as the cue judge.
             defaults.set(false, forKey: CoachController.Keys.callControls)
             defaults.set(JudgeProviderKind.gpt.rawValue, forKey: CoachController.Keys.judgeProvider)
@@ -129,6 +130,23 @@ enum UISnapshots {
                     let ok = img.map { Card.writePNG($0, "\(dir)/notice-\(tag).png") } ?? false
                     controller.log("coach shot notice-\(tag) ok=\(ok)")
                     packet("notice", img)
+                    notice.window.orderOut(nil)
+                    selfPivotNoticeShot()
+                }
+            }
+        }
+        /// The ask-back cue's one-time notice, in its own window.
+        func selfPivotNoticeShot() {
+            let notice = CoachNotice(content: .selfPivot) { _ in }
+            notice.window.appearance = NSApp.effectiveAppearance
+            notice.window.center()
+            notice.window.orderFrontRegardless()
+            controller.schedule(0.5, repeats: false) {
+                MainActor.assumeIsolated {
+                    let img = notice.window.contentView.flatMap { layerImage($0, scale: notice.window.backingScaleFactor > 0 ? notice.window.backingScaleFactor : 2) }
+                    let ok = img.map { Card.writePNG($0, "\(dir)/self-pivot-notice-\(tag).png") } ?? false
+                    controller.log("coach shot self-pivot-notice-\(tag) ok=\(ok)")
+                    packet("self-pivot-notice", img)
                     notice.window.orderOut(nil)
                     settingsShot()
                 }
@@ -208,6 +226,7 @@ enum UISnapshots {
                         settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                             transcriptShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                                 startToggleCheck(tag: tag, controller: controller)
+                                selfPivotNoticeCheck(tag: tag, controller: controller)
                                 symbolCheck(tag: tag, controller: controller)
                                 menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
                                 noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
@@ -248,8 +267,9 @@ enum UISnapshots {
     static let roseNudge = CoachNudge(kind: .interrupt, tone: .rose)
 
     static func shotState(_ st: CoachCardState.Status, _ m: MuteControlPresentation, _ n: CoachNudge?, _ mode: CoachCardState.Mode,
-                          ic: Bool = false, saving: Bool = false, callModeTip: Bool = false, noMicNotice: Bool = false) -> CoachCardState {
-        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, coachMicMuted: st == .micOff, nudge: n, mode: mode,
+                          lingering: CoachNudge? = nil, ic: Bool = false, saving: Bool = false, callModeTip: Bool = false,
+                          noMicNotice: Bool = false) -> CoachCardState {
+        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, coachMicMuted: st == .micOff, nudge: n, lingering: lingering, mode: mode,
                        increasedContrast: ic, savingBadge: saving ? CoachCopy.savingNow : nil, callModeTip: callModeTip,
                        noMicNotice: noMicNotice)
     }
@@ -266,6 +286,15 @@ enum UISnapshots {
         ("card-zoom-mute", shotState(.listening, liveMute, nil, .card), nil),
         ("card-nudge-amber", shotState(.listening, noZoomMute, amberNudge, .card), nil),
         ("card-nudge-rose", shotState(.listening, noZoomMute, roseNudge, .card), nil),
+        // After the words: the cue's glyph lingers in the status glyph (held role) until the linger
+        // ends; then the card is back to listening (the expiry state).
+        ("card-cue-linger-amber", shotState(.listening, noZoomMute, nil, .card, lingering: amberNudge), nil),
+        ("card-cue-linger-rose", shotState(.listening, noZoomMute, nil, .card, lingering: roseNudge), nil),
+        ("card-cue-expired", shotState(.listening, noZoomMute, nil, .card), nil),
+        // Increase Contrast: the lingering glyph in the high-contrast held role.
+        ("card-cue-linger-increased-contrast", shotState(.listening, noZoomMute, nil, .card, lingering: amberNudge, ic: true), nil),
+        // Paused with a cue still lingering from before: the cue is gone (a plain paused card).
+        ("card-cue-paused", shotState(.paused, noZoomMute, nil, .card, lingering: roseNudge), nil),
         ("card-increased-contrast", shotState(.listening, noZoomMute, amberNudge, .card, ic: true), nil),
         // Save transcripts on (#13c): the saving badge on the status line, and still there under a nudge.
         ("card-saving", shotState(.listening, noZoomMute, nil, .card, saving: true), nil),
@@ -283,8 +312,18 @@ enum UISnapshots {
         ("pill-mic-off", shotState(.micOff, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.unmuteMic),
         ("pill-zoom-mute", shotState(.listening, liveMute, nil, .pill), CoachMuteCopy.muteTooltip),
         ("pill-paused", shotState(.paused, noZoomMute, nil, .pill), nil),
-        ("pill-nudge-amber", shotState(.listening, noZoomMute, amberNudge, .pill), nil),
-        ("pill-nudge-rose", shotState(.listening, noZoomMute, roseNudge, .pill), nil),
+        // The pill never widens for a cue: the cue's glyph in its tone with the tone's bar while the
+        // nudge holds, then in the held role while it lingers; the words are its tooltip.
+        ("pill-nudge-amber", shotState(.listening, noZoomMute, amberNudge, .pill), amberNudge.words),
+        ("pill-nudge-rose", shotState(.listening, noZoomMute, roseNudge, .pill), roseNudge.words),
+        ("pill-cue-linger-amber", shotState(.listening, noZoomMute, nil, .pill, lingering: amberNudge), amberNudge.words),
+        ("pill-cue-linger-rose", shotState(.listening, noZoomMute, nil, .pill, lingering: roseNudge), roseNudge.words),
+        ("pill-cue-expired", shotState(.listening, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.expand),
+        // Increase Contrast: the cue's bar at full strength, the glyph in the high-contrast tone.
+        ("pill-nudge-increased-contrast", shotState(.listening, noZoomMute, roseNudge, .pill, ic: true), roseNudge.words),
+        ("pill-cue-linger-increased-contrast", shotState(.listening, noZoomMute, nil, .pill, lingering: amberNudge, ic: true), amberNudge.words),
+        // Muted in Zoom with a cue from before: no cue glyph, edge or tooltip (Expand coach).
+        ("pill-cue-muted", shotState(.muted, mutedMute, nil, .pill, lingering: roseNudge), CoachCardCopy.Tooltip.expand),
     ]
 
     /// Every PNG `coachCardShots` writes, per appearance (the CI gate checks for them).
@@ -438,6 +477,30 @@ enum UISnapshots {
             "\(name)=\(NSImage(systemSymbolName: name, accessibilityDescription: nil) == nil ? "missing" : "ok")"
         }
         controller.log("coach check symbols-\(tag) \(found.joined(separator: " "))")
+    }
+
+    /// Settings' Show Notice Again opens the ask-back notice (and nothing had opened it on its own: the coach is
+    /// off, no call is starting).
+    @MainActor
+    static func selfPivotNoticeCheck(tag: String, controller: Controller) {
+        let suite = AppIdentity.current.scoped("self-pivot-check")
+        guard let defaults = UserDefaults(suiteName: suite) else { return }
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set(true, forKey: CoachController.Keys.onboarded)
+        var result = "unavailable"
+        if let coach = try? CoachController(defaults: defaults, keychain: KeychainStore(service: suite, account: "none"), showsStatusItem: false,
+                                            transcriptStore: MemoryTranscriptStore()) {
+            coach.showSettings()
+            let before = coach.selfPivotNotice == nil ? "closed" : "open"
+            coach.settingsWindow?.showNoticeAgainButton.performClick(nil)
+            let opened = coach.selfPivotNotice?.window.isVisible == true ? "yes" : "no"
+            let title = coach.selfPivotNotice?.content.title == CoachSelfPivot.Copy.noticeTitle ? "ok" : "wrong"
+            coach.selfPivotNotice?.close()
+            coach.settingsWindow?.window.orderOut(nil)
+            result = "before=\(before) opened=\(opened) title=\(title)"
+        }
+        defaults.removePersistentDomain(forName: suite)
+        controller.log("coach check self-pivot-reopen-\(tag) \(result)")
     }
 
     @MainActor

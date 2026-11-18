@@ -38,6 +38,28 @@ public enum CoachCardCopy {
         public static let empty = "Captions will show here once someone talks."
     }
 
+    public enum Pill {
+        /// What VoiceOver reads for the pill while a cue's words hold (approved, unchanged).
+        public static func nudgeAccessibilityLabel(status: String, words: String) -> String { "\(status). \(words)" }
+    }
+
+    /// A cue after its words: its glyph lingers in the status glyph (`CardStyle.Coach.cueLinger`).
+    public enum Linger {
+        /// True until a writer approves the string below (draft copy).
+        public static let isDraft = true
+        /// What VoiceOver reads for the card's status line, and the pill, while a cue's glyph lingers.
+        public static func accessibilityLabel(status: String, words: String) -> String { "\(status). Last cue: \(words)." }
+    }
+
+    // MARK: self-pivot cue, the ask-back cue (final copy)
+
+    /// The self-pivot cue's words and VoiceOver line (signed off). Its lingering line is `Linger`'s template.
+    public enum SelfPivot {
+        public static let isDraft = false
+        public static let words = "Ask about them"
+        public static let announcement = "Call coach: ask the other person about what they shared."
+    }
+
     // MARK: call-mode tip (approved copy)
 
     /// The tip under the card when the user's headphones may be in call mode. Generic on purpose: it
@@ -82,6 +104,7 @@ public struct CoachNudge: Equatable, Sendable {
         case talkOver = "talk_over"
         case aggressive
         case notListening = "not_listening"
+        case selfPivot = "self_pivot"
         case missedQuestion = "missed_question"
         case monologue
         case talkShare = "talk_share"
@@ -101,6 +124,7 @@ public struct CoachNudge: Equatable, Sendable {
         case .talkOver: "You're both talking"
         case .aggressive: "Ease the tone"
         case .notListening: "Respond to their point"
+        case .selfPivot: CoachCardCopy.SelfPivot.words
         case .missedQuestion: "Answer their question"
         case .monologue: "Pause and hand over"
         case .talkShare: "Leave room for others"
@@ -114,6 +138,7 @@ public struct CoachNudge: Equatable, Sendable {
         case .talkOver: "Call coach: you're talking over someone."
         case .aggressive: "Call coach: your tone is heating up."
         case .notListening: "Call coach: respond to the point they just made."
+        case .selfPivot: CoachCardCopy.SelfPivot.announcement
         case .missedQuestion: "Call coach: a question went unanswered."
         case .monologue: "Call coach: you've been talking a while. Pause and hand over."
         case .talkShare: "Call coach: you're doing most of the talking."
@@ -121,36 +146,75 @@ public struct CoachNudge: Equatable, Sendable {
     }
 }
 
-/// The nudge on show: the latest cue, for `CardStyle.Coach.nudgeHold` after it arrived. A newer
-/// cue replaces it and restarts the hold.
+/// The cue on show, from when it arrived: its words for `CardStyle.Coach.nudgeHold`, then its glyph
+/// alone (lingering) until `CardStyle.Coach.cueLinger`, then nothing. A newer cue replaces it and
+/// starts both again.
 public struct CoachNudgeHold: Equatable, Sendable {
     public let hold: TimeInterval
+    public let linger: TimeInterval
     public private(set) var nudge: CoachNudge?
-    public private(set) var until: TimeInterval?
+    public private(set) var shownAt: TimeInterval?
 
-    public init(hold: TimeInterval = CardStyle.Coach.nudgeHold) { self.hold = hold }
+    public init(hold: TimeInterval = CardStyle.Coach.nudgeHold, linger: TimeInterval = CardStyle.Coach.cueLinger) {
+        self.hold = hold
+        self.linger = max(hold, linger)
+    }
 
     public mutating func show(_ n: CoachNudge, now: TimeInterval) {
         nudge = n
-        until = now + hold
+        shownAt = now
     }
 
+    /// Shows a cue only if it arrived while the coach was listening; one that arrives otherwise
+    /// (paused, muted, the coach's Mute, no session, no card) is neither shown nor kept. True if shown.
+    @discardableResult
+    public mutating func show(_ n: CoachNudge, now: TimeInterval, status: CoachCardState.Status?) -> Bool {
+        guard status == .listening else { return false }
+        show(n, now: now)
+        return true
+    }
+
+    private func age(_ now: TimeInterval) -> TimeInterval? { shownAt.map { now - $0 } }
+
+    /// The cue whose words show.
     public func active(now: TimeInterval) -> CoachNudge? {
-        guard let until, now < until else { return nil }
+        guard let a = age(now), a < hold else { return nil }
         return nudge
     }
 
-    /// Drops a nudge whose hold is over; true if one was dropped.
+    /// The cue whose glyph lingers after its words.
+    public func lingering(now: TimeInterval) -> CoachNudge? {
+        guard let a = age(now), a >= hold, a < linger else { return nil }
+        return nudge
+    }
+
+    /// Seconds until what shows next changes (words to glyph, glyph to nothing); nil once it's clear.
+    public func nextChange(now: TimeInterval) -> TimeInterval? {
+        guard let a = age(now), a < linger else { return nil }
+        return a < hold ? hold - a : linger - a
+    }
+
+    /// A cue belongs to the listening it came in. Once the coach isn't listening (paused, muted in the
+    /// call app, the coach's own Mute, no session yet, or the card gone: nil) it's dropped, so it never
+    /// comes back as words or a lingering glyph after Resume or unmute. True if one was dropped.
+    @discardableResult
+    public mutating func follow(_ status: CoachCardState.Status?) -> Bool {
+        guard status != .listening, nudge != nil else { return false }
+        clear()
+        return true
+    }
+
+    /// Drops a cue whose linger is over; true if one was dropped.
     @discardableResult
     public mutating func expire(now: TimeInterval) -> Bool {
-        guard let until, now >= until else { return false }
+        guard let a = age(now), a >= linger else { return false }
         clear()
         return true
     }
 
     public mutating func clear() {
         nudge = nil
-        until = nil
+        shownAt = nil
     }
 }
 
@@ -210,7 +274,11 @@ public struct CoachCardState: Equatable, Sendable {
     public var micMuted: Bool
     /// The coach's own Mute is on (it stays on through Pause and Zoom's mute).
     public var coachMicMuted: Bool
+    /// A cue's words (only while listening).
     public var nudge: CoachNudge?
+    /// A cue after its words, whose glyph lingers in the status glyph (never set with `nudge`, and only
+    /// while listening).
+    public var lingering: CoachNudge?
     public var mode: Mode
     public var increasedContrast: Bool
     /// The saving badge's label on the card's status line while a transcript is being written
@@ -222,13 +290,15 @@ public struct CoachCardState: Equatable, Sendable {
     public var noMicNotice: Bool
 
     public init(status: Status, mute: MuteControlPresentation, micMuted: Bool = false, coachMicMuted: Bool = false,
-                nudge: CoachNudge? = nil, mode: Mode = .card, increasedContrast: Bool = false, savingBadge: String? = nil,
+                nudge: CoachNudge? = nil, lingering: CoachNudge? = nil, mode: Mode = .card, increasedContrast: Bool = false, savingBadge: String? = nil,
                 callModeTip: Bool = false, noMicNotice: Bool = false) {
         self.status = status
         self.mute = mute
         self.micMuted = micMuted
         self.coachMicMuted = coachMicMuted
-        self.nudge = nudge
+        let listening = status == .listening
+        self.nudge = listening ? nudge : nil
+        self.lingering = listening && nudge == nil ? lingering : nil
         self.mode = mode
         self.increasedContrast = increasedContrast
         self.savingBadge = savingBadge
@@ -244,6 +314,20 @@ public struct CoachCardState: Equatable, Sendable {
     /// Not capturing: drawn with the held text role, like the paused chip.
     public var held: Bool { status == .paused || status == .muted }
     public var tone: CoachNudge.Tone? { nudge?.tone }
+    /// The cue in the status glyph: during its words, then while it lingers.
+    public var cue: CoachNudge? { nudge ?? lingering }
+
+    /// The status glyph (card and pill): the cue's while one holds or lingers and the coach is
+    /// listening; otherwise the coach's own, or its not-hearing glyph while the coach's Mute is on,
+    /// which a cue never covers.
+    public var statusSymbol: String {
+        let s = Theme.CoachCard.Symbols.self
+        if status == .listening, let cue { return s.cue(cue.kind) }
+        return status == .micOff ? s.micOff : s.status
+    }
+
+    /// What the pill's tooltip shows: the cue's words while one holds or lingers, else Expand.
+    public var pillTooltip: String { cue?.words ?? sizeControl.tooltip }
     /// Mute in Zoom shows only while it can act (Use Zoom/Meet controls on, Accessibility granted, a Zoom call).
     public var showsMute: Bool { mute.visibility != .hidden }
     /// The pill's buttons: the coach's Mute, Mute in Zoom (only while it can act), Pause/Resume, Stop.
@@ -313,10 +397,8 @@ public extension CoachCardState {
         }
     }
 
-    /// The pill's width: wider while a nudge's words show.
-    func pillWidth(wordsWidth: Double) -> Double {
-        Theme.CoachPill.width(wordsWidth: nudge == nil ? nil : wordsWidth, buttons: pillButtons)
-    }
+    /// The pill's width: the same through every cue (the words are in its tooltip).
+    var pillWidth: Double { Theme.CoachPill.width }
 }
 
 // MARK: placement
@@ -404,7 +486,7 @@ public enum CoachTransition: Equatable, Sendable, CaseIterable {
     case glide
     case collapse
     case expand
-    /// The pill widening or narrowing for a nudge.
+    /// The card or pill resizing in place (the tip row, Mute in Zoom coming or going).
     case widen
     /// No card to morph from: the coach card shows at its spot.
     case appear

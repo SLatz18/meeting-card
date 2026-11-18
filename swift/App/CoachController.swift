@@ -7,8 +7,11 @@ import MeetingCardCore
 /// coach status menu) there is no service, no Core Audio polling, no capture and no network. It
 /// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores seven
 /// settings in UserDefaults (never call data; one is where the coach card was dragged), plus the
-/// captions and transcript settings (`CoachTranscript`); the API keys live only in the Keychain. The cue judge
-/// (`coach.judgeProvider`, gpt unless set) applies from the next call.
+/// captions and transcript settings (`CoachTranscript`) and the ask-back cue's two (`CoachSelfPivot`); the API
+/// keys live only in the Keychain. The cue judge (`coach.judgeProvider`, gpt unless set) applies from the next call.
+/// The ask-back cue (the Kit's self_pivot) is on inside the coach with a usable key and a cue judge that can
+/// check it, but sends and shows nothing until its one-time notice has been answered. The notice opens at the
+/// next coach enable or call start, never during a live call; Settings can show it again.
 /// "Use Zoom/Meet controls" (off by default) lets Zoom's meeting controls and an open Meet tab stop
 /// the coach within seconds of a call ending and hold it while Zoom is muted; its Accessibility and
 /// Automation prompts appear only when the user turns it on (or asks again from Settings).
@@ -28,7 +31,8 @@ final class CoachController: NSObject {
         static let showInScreenshots = "coach.showInScreenshots"
     }
 
-    /// MeetingCard's choices on top of the coach's generic config: not_listening nudges are off by default.
+    /// MeetingCard's choices on top of the coach's generic config: not_listening nudges are off by default. The
+    /// ask-back cue ships on; rolling it back for everyone is adding `CueType.selfPivot.rawValue` to this list.
     static let configOverrides: [String: Any] = ["cues": ["disabled": [CueType.notListening.rawValue]]]
 
     /// MeetingCard's Keychain item for the OpenAI key, `<bundle id>.openai` (the Kit's default service is not ours).
@@ -94,6 +98,12 @@ final class CoachController: NSObject {
     private var noMicTracker = OncePerCallNotice()
     /// The coach card is the pill (for the rest of this showing).
     private(set) var minimized = false
+    /// The ask-back cue's one-time notice, while it's up, and whether Settings' Show Notice Again opened it.
+    private(set) var selfPivotNotice: CoachNotice?
+    private var selfPivotNoticeFromSettings = false
+    private var selfPivotNoticeTiming = CoachSelfPivot.NoticeTiming()
+    /// The coach was turned on since the last refresh: one of the notice's moments.
+    private var enabledSinceRefresh = false
 
     /// `coachLogSink` replaces the log file as the destination of coach events: UI snapshot runs pass a discarding sink so
     /// they never write the real log. nil (the app) writes `coachLogFile`.
@@ -174,6 +184,67 @@ final class CoachController: NSObject {
         refresh()
     }
 
+    // MARK: ask-back cue
+
+    var selfPivotOn: Bool { CoachSelfPivot.isOn(defaults) }
+
+    /// What Settings shows for the ask-back switch.
+    var selfPivotState: CoachSelfPivot.State {
+        CoachSelfPivot.state(shipped: !config.cues.disabledTypes.contains(.selfPivot),
+                             judgeSupports: JudgeProviders.judgesSelfPivot(judgeProvider), keyUsable: gptAvailable, on: selfPivotOn)
+    }
+
+    /// The Settings switch: off means no ask-back judge calls from the next step on, even mid-call.
+    func setSelfPivot(_ on: Bool) {
+        defaults.set(on, forKey: CoachSelfPivot.Keys.on)
+        refresh()
+    }
+
+    /// A coach session is running: the call is live (the notice never opens on its own then).
+    nonisolated static func isLiveCall(_ i: CoachIndicator) -> Bool {
+        switch i {
+        case .listening, .paused, .muted, .micOff: true
+        case .hidden, .on: false
+        }
+    }
+
+    /// On every refresh: opens the due ask-back notice (`CoachSelfPivot.noticeDue`) at a coach enable or a call
+    /// start (pre-warmed), never while a call is live, and takes down one that opened on its own when a call goes
+    /// live. Until it's answered the engine's switch stays off.
+    private func updateSelfPivotNotice() {
+        let live = enabled && Self.isLiveCall(indicator)
+        if let open = selfPivotNotice,
+           CoachSelfPivot.NoticeTiming.shouldClose(callLive: live, openedFromSettings: selfPivotNoticeFromSettings) {
+            open.close()
+            selfPivotNotice = nil
+        }
+        let enabledNow = enabledSinceRefresh
+        enabledSinceRefresh = false
+        let due = CoachSelfPivot.noticeDue(coachEnabled: enabled, state: selfPivotState, seen: CoachSelfPivot.noticeSeen(defaults))
+        let open = selfPivotNoticeTiming.shouldOpen(due: due, enabledNow: enabledNow, callStarting: enabled && indicator == .on,
+                                                    callLive: live)
+        if open && selfPivotNotice == nil { showSelfPivotNotice(fromSettings: false) }
+    }
+
+    /// The ask-back notice, at its moment or from Settings' Show Notice Again. Either button answers it; Open
+    /// Settings also opens Settings.
+    func showSelfPivotNotice(fromSettings: Bool = true) {
+        if let open = selfPivotNotice {
+            open.presentAlone()
+            return
+        }
+        let notice = CoachNotice(content: .selfPivot) { [weak self] gotIt in
+            guard let self else { return }
+            self.defaults.set(true, forKey: CoachSelfPivot.Keys.noticeSeen)
+            self.selfPivotNotice = nil
+            if !gotIt { self.showSettings() }
+            self.refresh()
+        }
+        selfPivotNotice = notice
+        selfPivotNoticeFromSettings = fromSettings
+        notice.presentAlone()
+    }
+
     /// The user's allowlist, or nil for the shipped call apps.
     var allowlist: [String]? { defaults.stringArray(forKey: Keys.allowlist) }
     var effectiveAllowlist: [String] { allowlist ?? config.captureTargets.map(\.bundleId) }
@@ -199,6 +270,7 @@ final class CoachController: NSObject {
         }
         if let service { service.setEnabled(true) } else { makeService() }
         keyProblem = nil
+        enabledSinceRefresh = true
         refresh()
         checkStoredKey(completion: completion)
     }
@@ -287,7 +359,8 @@ final class CoachController: NSObject {
     private func makeService() {
         let defaults = defaults
         let engine = LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,
-                                      judgeProvider: { Self.storedJudgeProvider(defaults) })
+                                      judgeProvider: { Self.storedJudgeProvider(defaults) },
+                                      selfPivotEnabled: { CoachSelfPivot.allowed(defaults) })
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
                              allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine,
                              callWindows: callWindows)
@@ -417,15 +490,32 @@ final class CoachController: NSObject {
         refresh()
     }
 
+    /// A cue that arrives while the coach isn't listening is neither shown nor announced.
     private func showNudge(_ cue: Cue) {
-        guard let n = CoachNudge(cue) else { return }
-        nudges.show(n, now: ProcessInfo.processInfo.systemUptime)
+        let status = enabled ? CoachCardState.Status(indicator) : nil
+        guard let n = CoachNudge(cue), nudges.show(n, now: ProcessInfo.processInfo.systemUptime, status: status) else { return }
         CoachCardPresenter.announce(n.announcement)
-        nudgeTimer?.invalidate()
-        let t = Timer(timeInterval: nudges.hold, repeats: false) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
+        scheduleNudgeStep()
+        refresh()
+    }
+
+    /// Redraws when a cue's words give way to its lingering glyph, and again when the glyph clears.
+    private func scheduleNudgeStep() {
+        stopNudgeTimer()
+        guard let wait = nudges.nextChange(now: ProcessInfo.processInfo.systemUptime) else { return }
+        let t = Timer(timeInterval: wait, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refresh()
+                self?.scheduleNudgeStep()
+            }
+        }
         RunLoop.main.add(t, forMode: .common)
         nudgeTimer = t
-        refresh()
+    }
+
+    private func stopNudgeTimer() {
+        nudgeTimer?.invalidate()
+        nudgeTimer = nil
     }
 
     func showSettings() {
@@ -448,6 +538,7 @@ final class CoachController: NSObject {
         updateCoachCard(card)
         updateStatusItem()
         settingsWindow?.refresh()
+        updateSelfPivotNotice()
     }
 
     /// The captions and saving settings, with whether they can run, logged when any of them changes.
@@ -466,11 +557,13 @@ final class CoachController: NSObject {
                                callMode: listening && ((service?.mic as? MicCapture)?.headphonesInCallMode() ?? false))
         noMicTracker.update(call: service?.session.session?.startedAt,
                             callMode: listening && ((service?.mic as? MicCapture)?.noMicStatus ?? false))
-        guard enabled, let status = CoachCardState.Status(indicator) else { return nil }
+        let status = enabled ? CoachCardState.Status(indicator) : nil
+        if nudges.follow(status) { stopNudgeTimer() }
+        guard let status else { return nil }
         let now = ProcessInfo.processInfo.systemUptime
         nudges.expire(now: now)
         var state = CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
-                                   nudge: nudges.active(now: now),
+                                   nudge: nudges.active(now: now), lingering: nudges.lingering(now: now),
                                    mode: minimized ? .pill : .card,
                                    increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
                                    savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
@@ -486,10 +579,11 @@ final class CoachController: NSObject {
 
     private func updateCoachCard(_ s: CoachCardState?) {
         guard let s else {
+            nudges.clear()
+            stopNudgeTimer()
             guard let c = coachCard, c.isShown else { return }
             let card = c.hide()
             minimized = false
-            nudges.clear()
             if let card, visibleCards().contains(where: { $0 === card }) { card.panel.orderFrontRegardless() }
             return
         }
@@ -546,6 +640,7 @@ final class CoachController: NSObject {
             menu.addItem(menuItem(entry))
             #if MEETINGCARD_TEST_ID
             if entry == .settings { menu.addItem(CoachDebugReadout.shared.menuItem()) }
+            if entry == .settings { menu.addItem(CoachCueDisplayLab.shared.menuItem()) }
             if case .status = entry { menu.addItem(CoachDebugReadout.shared.statusMenuItem()) }
             #endif
         }

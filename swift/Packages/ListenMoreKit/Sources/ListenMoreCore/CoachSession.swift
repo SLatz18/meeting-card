@@ -126,6 +126,8 @@ public final class CoachSession {
     /// cue policy compares engine times shifted by `engineOffset`: cooldowns carry across a restart.
     private var sessionCaptureStart: TimeInterval?
     private var engineOffset: TimeInterval = 0
+    /// This call's self-pivot state, shared by its engine runs; a new call starts a new one.
+    private var selfPivotLedger = SelfPivotLedger()
     /// Which engine start is running (counted here and on the engine queue in the same order): a
     /// suggestion the previous engine raised but that reaches the main thread after a restart carries
     /// the old number and is dropped.
@@ -386,6 +388,7 @@ public final class CoachSession {
                 // A new session never inherits the previous one's engine (or OpenAI sessions).
                 stopCapture()
                 cuePolicy.reset()
+                selfPivotLedger = SelfPivotLedger()
                 shownAt.removeAll()
                 sessionCaptureStart = nil
                 engineOffset = 0
@@ -468,7 +471,8 @@ public final class CoachSession {
             sessionCaptureStart = start
             engineOffset = now - start
             engineGeneration += 1
-            engine.start(config: config, apiKey: key, keyAvailability: availability)
+            engine.start(config: config, apiKey: key, keyAvailability: availability,
+                         call: CoachCallContext(selfPivot: selfPivotLedger, offset: engineOffset))
             // Muted before it starts (the user's Mute or a pending call end), so the device never
             // opens even briefly; the gate stays closed until `setMicDevice(on: true)` reopens it.
             micDeviceOff = micShouldBeOff
@@ -761,10 +765,12 @@ public final class EngineQueue: @unchecked Sendable {
         set { queue.sync { engine.delegate = newValue } }
     }
 
-    public func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability) {
+    public func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability? = nil,
+                      call: CoachCallContext = CoachCallContext()) {
+        let availability = keyAvailability ?? (apiKey == nil ? .absent : .present)
         queue.async {
             self.generationLock.withLock { self.startCount += 1 }
-            self.engine.start(config: config, apiKey: apiKey, keyAvailability: keyAvailability)
+            self.engine.start(config: config, apiKey: apiKey, keyAvailability: availability, call: call)
         }
     }
 

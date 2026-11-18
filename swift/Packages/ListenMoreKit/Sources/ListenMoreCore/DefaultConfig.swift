@@ -117,12 +117,13 @@ public enum DefaultConfig {
   "cues": {
     "cooldown_s": 20,
     "global_cooldown_s": 20,
-    "priority": ["talk_over", "interrupt", "missed_question", "aggressive", "monologue", "not_listening", "talk_share"],
+    "on_screen_s": 4.5,
+    "priority": ["talk_over", "interrupt", "missed_question", "aggressive", "monologue", "not_listening", "self_pivot", "talk_share"],
     "fade_s": 3,
     "gpt_min_confidence": 0.7,
     "colors": {
       "interrupt": "red", "talk_over": "red", "aggressive": "red",
-      "not_listening": "amber", "missed_question": "amber",
+      "not_listening": "amber", "self_pivot": "amber", "missed_question": "amber",
       "monologue": "amber", "talk_share": "amber"
     }
   },
@@ -150,7 +151,11 @@ public enum DefaultConfig {
       "judge_cached_input_per_mtok": 0.01,
       "judge_output_per_mtok": 0.50
     },
-    "budget_usd_per_call": 1.00
+    "budget_usd_per_call": 1.00,
+    "self_pivot_min_confidence": 0.85,
+    "self_pivot_max_judge_calls_per_call": 20,
+    "self_pivot_budget_usd_per_call": 0.02,
+    "self_pivot_max_verdict_age_s": 10
   },
   "judge": {
     "provider": "gpt",

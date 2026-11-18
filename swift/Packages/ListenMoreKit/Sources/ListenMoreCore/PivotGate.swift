@@ -1,9 +1,9 @@
 import Foundation
 
 /// The self-pivot gate: right after the other side shares something personal, the user answers at
-/// length about themselves and asks nothing back. It only counts candidates (shadow): nothing is
-/// shown and nothing is judged. `GptCore` drives it, so it exists only with a key. All of these hold
-/// for a candidate (`text.pivot_*`):
+/// length about themselves and asks nothing back. It finds candidates only: the self-pivot judge
+/// (`SelfPivotLane`) decides whether one becomes a cue, and when that judge is off the gate just counts.
+/// `GptCore` drives it, so it exists only with a key. All of these hold for a candidate (`text.pivot_*`):
 /// 1. Their turn has at least `pivot_share_min_words`, a share marker ("i just", "we finally") and a
 ///    share word (a feeling, a life event or a personal topic), no invitation to share (`pivot_invites`,
 ///    `question_open_invites`) and no question at its end. An invitation the user answered with less
@@ -45,9 +45,10 @@ import Foundation
 /// while a short reaction ("wow, congrats!") doesn't; any voice's invitation in the turn holds
 /// the candidate back; and any voice starting to talk while the user is quiet ends the user's turn.
 ///
-/// The counters, the re-arm and the cap are per engine run, not per call: Pause and the call app's
-/// mute stop the engine, and the next start builds a new `GptCore` with a new gate. A count for the
-/// whole call is the sum over its engine runs.
+/// The counters are per engine run: Pause and the call app's mute stop the engine, and the next start
+/// builds a new `GptCore` with a new gate, so a count for the whole call is the sum over its runs. The
+/// re-arm and the cap hold for the whole call: each run starts from the call's `Seed`
+/// (`SelfPivotLedger`).
 ///
 /// Known limits: by design, a reply with only 2 first-person words and no pivot opener isn't a
 /// candidate (`pivot_first_person_min_words` is 3). "we should all go sometime, i did that trail last
@@ -57,7 +58,7 @@ import Foundation
 /// Voice activity places the turns (times are VAD onsets and offsets, and a transcript's reference
 /// time is the offset its commit was made at); transcripts arrive later and decide. Segment text stays
 /// in RAM for at most 120 s (pruned on every frame), is dropped by `clear()` and is never logged.
-/// Candidates carry times only.
+/// Candidates carry times only; the two turns behind the latest one go to the judge once (`takeSnippet`).
 final class PivotGate {
     struct Candidate: Equatable, Sendable {
         /// Their last speech before the reply ended.
@@ -70,6 +71,25 @@ final class PivotGate {
         /// The turn end, or the arrival of the last transcript it waited for.
         var decidedAt: TimeInterval
     }
+
+    /// What a run starts from: the call's candidates before it, and the last one's turn end on this
+    /// run's clock (negative when it came before the run started). The cap and the re-arm then hold for
+    /// the whole call, across the engine restarts of Pause and the call app's mute.
+    struct Seed: Equatable, Sendable {
+        var candidates = 0
+        var lastCandidateTurnEnd: TimeInterval?
+    }
+
+    /// The two turns a candidate was decided on (their last lines, the user's reply), lower-cased, for
+    /// the self-pivot judge. RAM only: handed over once by `takeSnippet()`, dropped by `clear()`, never
+    /// kept with the candidate.
+    struct Snippet: Equatable, Sendable {
+        var theirs: [String]
+        var mine: [String]
+    }
+
+    /// Their lines a snippet keeps, newest last.
+    static let snippetTheirLines = 6
 
     /// Per engine run.
     struct Counters: Equatable, Sendable {
@@ -139,11 +159,16 @@ final class PivotGate {
     /// are still an invitation.
     private var invitedAt: TimeInterval?
     private var lastCandidateTurnEnd: TimeInterval?
+    /// Candidates earlier in the call, before this run.
+    private let seedCandidates: Int
+    private var snippet: Snippet?
     private(set) var counters = Counters()
     private(set) var candidates: [Candidate] = []
 
-    init(config: ListenMoreConfig) {
+    init(config: ListenMoreConfig, seed: Seed = Seed()) {
         x = config.text
+        seedCandidates = seed.candidates
+        lastCandidateTurnEnd = seed.lastCandidateTurnEnd
         invites = x.pivotInvites + x.questionOpenInvites
         moveOn = x.pivotMoveOn + x.updateHandoffPhrases
         leadIns = x.pivotLeadIns.filter { !$0.isEmpty }
@@ -225,6 +250,13 @@ final class PivotGate {
         reply = nil
         ended = nil
         invitedAt = nil
+        snippet = nil
+    }
+
+    /// The latest candidate's two turns, once.
+    func takeSnippet() -> Snippet? {
+        defer { snippet = nil }
+        return snippet
     }
 
     // MARK: turns
@@ -280,10 +312,11 @@ final class PivotGate {
             return nil
         }
         invitedAt = mine.reduce(0, { $0 + TextRules.tokens($1.text).count }) < x.pivotReplyMinWords ? t.invitedAt : nil
+        let theirs = them.filter { Elapsed.span($0.end - boundary) > 0 && Elapsed.span($0.end - e.reply.themEnd) <= 0 }
         finish(e)
         guard !t.invited, pivots(mine) else { return nil }
         let rearmed = lastCandidateTurnEnd.map { Elapsed.span(e.at - $0) >= x.pivotRearmS } ?? true
-        guard rearmed && counters.candidates < x.pivotMaxPerCall else {
+        guard rearmed && seedCandidates + counters.candidates < x.pivotMaxPerCall else {
             counters.rateLimited += 1
             return nil
         }
@@ -291,6 +324,7 @@ final class PivotGate {
         counters.candidates += 1
         lastCandidateTurnEnd = e.at
         candidates.append(c)
+        snippet = Snippet(theirs: theirs.suffix(Self.snippetTheirLines).map(\.text), mine: mine.map(\.text))
         return c
     }
 

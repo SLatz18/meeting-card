@@ -1,17 +1,36 @@
 import AppKit
 import MeetingCardCore
 
-/// The one-time notice before captions or saved transcripts first turn on: a card-shaped sheet on
-/// the Settings window (card width, surface, insets, title and body type, and the card's two
-/// buttons). Turning the feature on waits for the answer; "Not Now" leaves it off. The copy is
-/// CoachCopy's draft strings, marked as a draft on the sheet until copy review.
+/// A one-time notice, card-shaped (card width, surface, insets, title and body type, and the card's two
+/// buttons): before captions or saved transcripts first turn on (a sheet on the Settings window; turning the
+/// feature on waits for the answer and "Not Now" leaves it off; CoachCopy's draft strings, marked as a draft
+/// until copy review), and before the ask-back cue first runs (a window of its own; final copy).
 @MainActor
 final class CoachNotice: NSObject {
+    struct Content {
+        var title: String
+        var body: String
+        var confirm: String
+        var secondary: String
+        /// The secondary button answers Escape too.
+        var secondaryIsCancel: Bool
+        var isDraft: Bool
+
+        static let transcript = Content(title: CoachCopy.noticeTitle, body: CoachCopy.noticeBody, confirm: CoachCopy.noticeConfirm,
+                                        secondary: CoachCopy.noticeCancel, secondaryIsCancel: true, isDraft: CoachCopy.transcriptCopyIsDraft)
+        static let selfPivot = Content(title: CoachSelfPivot.Copy.noticeTitle, body: CoachSelfPivot.Copy.noticeBody,
+                                       confirm: CoachSelfPivot.Copy.noticeConfirm, secondary: CoachSelfPivot.Copy.noticeOpenSettings,
+                                       secondaryIsCancel: false, isDraft: false)
+    }
+
     let window: NSWindow
+    let content: Content
     private let onChoice: (Bool) -> Void
     private var buttons: [CardButton] = []
 
-    init(onChoice: @escaping (Bool) -> Void) {
+    /// `onChoice(true)` for the confirm button, false for the secondary one.
+    init(content: Content = .transcript, onChoice: @escaping (Bool) -> Void) {
+        self.content = content
         self.onChoice = onChoice
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Theme.Notice.width, height: Theme.Metrics.cardHeight),
                           styleMask: [.titled], backing: .buffered, defer: false)
@@ -22,6 +41,14 @@ final class CoachNotice: NSObject {
 
     func present(on parent: NSWindow) {
         parent.beginSheet(window) { _ in }
+    }
+
+    /// A window of its own, centred and in front (the ask-back notice can be due with no Settings window).
+    func presentAlone() {
+        window.level = .floating
+        window.center()
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
     }
 
     private var style: CardStyle { Theme.style(dark: CoachTranscript.isDark(window.effectiveAppearance)) }
@@ -64,11 +91,11 @@ final class CoachNotice: NSObject {
         let width = Theme.cg(n.width)
         let inner = width - 2 * Theme.cg(n.padding.h)
         var texts: [(NSTextField, Double)] = []
-        if CoachCopy.transcriptCopyIsDraft {
+        if content.isDraft {
             texts.append((wrapping(CoachCopy.noticeDraftMarker, n.draftFont, n.draft, width: inner), n.spacing))
         }
-        texts.append((wrapping(CoachCopy.noticeTitle, n.titleFont, .primary, width: inner), n.spacing))
-        texts.append((wrapping(CoachCopy.noticeBody, n.bodyFont, n.body, width: inner), n.padding.v))
+        texts.append((wrapping(content.title, n.titleFont, .primary, width: inner), n.spacing))
+        texts.append((wrapping(content.body, n.bodyFont, n.body, width: inner), n.padding.v))
         let pad = Theme.cg(n.padding.v), buttonH = Theme.cg(n.buttonHeight)
         let height = pad + texts.reduce(CGFloat(0)) { $0 + $1.0.frame.height + Theme.cg($1.1) } + buttonH + pad
         let root = NoticeView(frame: NSRect(x: 0, y: 0, width: width, height: height))
@@ -78,10 +105,10 @@ final class CoachNotice: NSObject {
             root.addSubview(field)
             top -= field.frame.height + Theme.cg(gap)
         }
-        let confirmButton = button(CoachCopy.noticeConfirm, .join, #selector(CoachNotice.confirm(_:)))
+        let confirmButton = button(content.confirm, .join, #selector(CoachNotice.confirm(_:)))
         confirmButton.keyEquivalent = "\r"
-        let cancelButton = button(CoachCopy.noticeCancel, .ignore, #selector(CoachNotice.cancel(_:)))
-        cancelButton.keyEquivalent = "\u{1b}"
+        let cancelButton = button(content.secondary, .ignore, #selector(CoachNotice.cancel(_:)))
+        if content.secondaryIsCancel { cancelButton.keyEquivalent = "\u{1b}" }
         var x = width - Theme.cg(n.padding.h)
         for b in [confirmButton, cancelButton] {
             x -= b.frame.width
@@ -107,9 +134,14 @@ final class CoachNotice: NSObject {
     @objc private func cancel(_ sender: Any?) { finish(false) }
 
     private func finish(_ ok: Bool) {
+        close()
+        onChoice(ok)
+    }
+
+    /// Takes the notice down without an answer.
+    func close() {
         if let parent = window.sheetParent { parent.endSheet(window) }
         window.orderOut(nil)
-        onChoice(ok)
     }
 
     final class NoticeView: NSView {

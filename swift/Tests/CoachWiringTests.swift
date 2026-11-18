@@ -81,7 +81,8 @@ final class CoachWiringTests: XCTestCase {
             XCTAssertFalse(text.contains(".typesafe\"") || text.contains("scoped(\"typesafe"), "\(file) builds a TypeSafe service string")
         }
         XCTAssertTrue(src.contains("LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,"))
-        XCTAssertTrue(src.contains("judgeProvider: { Self.storedJudgeProvider(defaults) })"))
+        XCTAssertTrue(src.contains("judgeProvider: { Self.storedJudgeProvider(defaults) },\n                                      selfPivotEnabled: { CoachSelfPivot.allowed(defaults) })"),
+                      "the engine reads the ask-back switch and its notice before every self-pivot step")
         XCTAssertTrue(src.contains("keys: keyGate, callState: callControls, engine: engine"))
         let kitDefaults = try read("Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift")
         XCTAssertTrue(kitDefaults.contains("\"provider\": \"gpt\""), "GPT stays the default judge")
@@ -132,6 +133,37 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertTrue(body.contains("if case .http(let status) = failure"))
         XCTAssertFalse(body.contains("description") || body.contains(".value"), "only the kind and the status code reach the text")
         XCTAssertTrue(try read("App/CoachController.swift").contains("var judgeStopped: JudgeFailure? { previewJudgeStop ?? service?.judgeStopped }"))
+    }
+
+    /// Each redirect-path stop reason has its own copy key, and the note returns that key's text whole (not
+    /// inside the TypeSafe-style wrapper). The reason-to-key mapping is read from the `judgeStopped` switch; the
+    /// text from each key's declaration.
+    func testRedirectStopReasonsMapToTheirOwnCopyKeys() throws {
+        let copy = try read("App/CoachCopy.swift")
+        let body = try XCTUnwrap(copy.components(separatedBy: "static func judgeStopped(_ failure: JudgeFailure) -> String {").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        let mapping = try NSRegularExpression(pattern: #"case \.(\w+): return (\w+)\b"#)
+        var keyForReason: [String: String] = [:]
+        for m in mapping.matches(in: body, range: NSRange(body.startIndex..., in: body)) {
+            keyForReason[String(body[Range(m.range(at: 1), in: body)!])] = String(body[Range(m.range(at: 2), in: body)!])
+        }
+        XCTAssertEqual(keyForReason["untrustedHost"], "judgeUntrustedHost")
+        XCTAssertEqual(keyForReason["hostRejected"], "judgeHostRejected")
+        XCTAssertNotEqual(keyForReason["untrustedHost"], keyForReason["hostRejected"], "separate reasons, separate copy")
+
+        let declaration = try NSRegularExpression(pattern: #"static let (\w+) = "([^"\n]*)""#)
+        var text: [String: String] = [:]
+        for m in declaration.matches(in: copy, range: NSRange(copy.startIndex..., in: copy)) {
+            text[String(copy[Range(m.range(at: 1), in: copy)!])] = String(copy[Range(m.range(at: 2), in: copy)!])
+        }
+        XCTAssertEqual(text["judgeUntrustedHost"],
+                       "AI cues are off for this call. The AI provider sent a web address that isn't on the allowed list. Captions keep running.")
+        XCTAssertEqual(text["judgeHostRejected"],
+                       "AI cues are off for this call. The AI provider's server didn't respond correctly. Captions keep running.")
+        for key in ["judgeUntrustedHost", "judgeHostRejected"] {
+            let line = try XCTUnwrap(text[key])
+            XCTAssertFalse(line.contains("TypeSafe") || line.contains("HTTP") || line.lowercased().contains("key"), key)
+        }
     }
 
     /// Local-only: turning on never waits for or requires a key; a stored key is checked afterwards.

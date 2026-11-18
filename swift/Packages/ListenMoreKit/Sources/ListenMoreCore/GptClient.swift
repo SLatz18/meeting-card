@@ -31,6 +31,44 @@ public struct TranscriberCounters: Equatable, Sendable {
 
 public protocol CueJudge: Sendable {
     func judge(prompt: String) async throws -> (JudgeResult, JudgeUsage)
+    /// The same call, counting each HTTP post it makes in `posts` (a judge that posts once per call needs
+    /// nothing more than the default, which counts one).
+    func judge(prompt: String, posts: JudgePosts) async throws -> (JudgeResult, JudgeUsage)
+}
+
+extension CueJudge {
+    public func judge(prompt: String, posts: JudgePosts) async throws -> (JudgeResult, JudgeUsage) {
+        posts.recordSent()
+        return try await judge(prompt: prompt)
+    }
+}
+
+/// The HTTP posts one judge call made. Both judges follow one rule: a call posts once, and may post a second
+/// time only after `401 incorrect_hostname`, to a validated OpenAI host, if the call's owner allows it
+/// (`resendGate`, read on the judge's task: the self-pivot lane checks its caps and counts the post, and
+/// both judges check that the layer is still on). Never a third. Counts only.
+public final class JudgePosts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _sent = 0
+    private let resendGate: @Sendable () -> Bool
+    private let onSent: (@Sendable () -> Void)?
+
+    /// `onSent` runs as each post goes out (so an owner's count doesn't wait for the call to finish).
+    public init(resendGate: @escaping @Sendable () -> Bool = { true }, onSent: (@Sendable () -> Void)? = nil) {
+        self.resendGate = resendGate
+        self.onSent = onSent
+    }
+
+    /// Posts made so far (counted as each goes out, even one that then fails or is cancelled).
+    public var sent: Int { lock.withLock { _sent } }
+
+    public func recordSent() {
+        lock.withLock { _sent += 1 }
+        onSent?()
+    }
+
+    /// Whether the call's owner lets it post once more.
+    func mayResend() -> Bool { resendGate() }
 }
 
 public enum TranscriptEvent: Sendable {
@@ -211,38 +249,46 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
 }
 
 /// Port of `LiveJudge`: POST /v1/responses with the configured model alias, store=false and a strict
-/// JSON schema. On `401 incorrect_hostname` it retries once on the regional OpenAI host the error names
-/// and keeps that host for the rest of the call. The prompt and the reply stay in memory.
+/// JSON schema. One judge call is one post. Only on `401 incorrect_hostname` may it post once more, to the
+/// regional OpenAI host the error names (https, `api.openai.com` or `<label>.api.openai.com`, nothing else),
+/// and only if the call's owner allows it; the host is then kept, for this key only, for the rest of the call.
+/// A second 401, or any other reply, ends the call: never a third post. The prompt and the reply stay in memory.
 public final class LiveJudge: CueJudge, @unchecked Sendable {
     private let gpt: ListenMoreConfig.Gpt
     private let key: APIKey
     private let http: HTTPTransport
     private let hosts: LearnedHosts
+    private let scope: KeyScope
+    public let spec: JudgeSpec
     private let lock = NSLock()
     private var url: String
-    private var fallbackTried = false
 
-    /// `hosts`: where a regional Responses URL learned by an earlier judge is kept (each engine start
-    /// builds a new judge; sharing it means only the first call after launch pays for the fallback).
-    public init(config: ListenMoreConfig, key: APIKey, http: HTTPTransport, hosts: LearnedHosts = .shared) {
+    /// `hosts`: where a regional Responses URL learned by an earlier judge is kept, for the key that learned it
+    /// (each engine start builds a new judge; sharing it means only the first call after launch pays for the
+    /// resend, and a different key starts on the configured host). `spec`: the question this judge asks (the
+    /// cue judge's by default; `JudgeSpec.selfPivot` for the self-pivot judge). Every request sends
+    /// `store: gpt.store`, which config validation keeps false.
+    public init(config: ListenMoreConfig, key: APIKey, http: HTTPTransport, hosts: LearnedHosts = .shared, spec: JudgeSpec = .cue) {
         gpt = config.gpt
         self.key = key
         self.http = http
         self.hosts = hosts
-        url = hosts.url(for: config.gpt.responsesUrl) ?? config.gpt.responsesUrl
+        self.spec = spec
+        scope = KeyScope(key)
+        url = hosts.url(for: config.gpt.responsesUrl, scope: scope) ?? config.gpt.responsesUrl
     }
 
-    /// The Responses URL in use (the regional one after a fallback).
+    /// The Responses URL in use (the regional one after a resend).
     public var currentURL: String { lock.withLock { url } }
 
-    public static func requestBody(gpt: ListenMoreConfig.Gpt, prompt: String) -> [String: Any] {
+    public static func requestBody(gpt: ListenMoreConfig.Gpt, prompt: String, spec: JudgeSpec = .cue) -> [String: Any] {
         var body: [String: Any] = [
             "model": gpt.judgeModel,
-            "instructions": GptJudgeSpec.instructions,
+            "instructions": spec.instructions,
             "input": prompt,
             "store": gpt.store,
             "max_output_tokens": 200,
-            "text": ["format": ["type": "json_schema", "name": "listen_more_cue", "strict": true, "schema": GptJudgeSpec.schema]],
+            "text": ["format": ["type": "json_schema", "name": spec.name, "strict": true, "schema": spec.schema]],
         ]
         if let effort = gpt.judgeReasoningEffort, !effort.isEmpty {
             body["reasoning"] = ["effort": effort]
@@ -250,57 +296,114 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
         return body
     }
 
-    /// Statuses that say a learned host doesn't take this key (another key's region), as opposed to
-    /// a rate limit or an outage, which a fallback wouldn't fix.
-    static let learnedHostRejections: Set<Int> = [401, 403]
-
-    /// One fallback per judge: to the regional host a `401 incorrect_hostname` names, or, when a learned
-    /// host rejects the key (another key), back to the configured host. A failed fallback to the
-    /// configured host reports the first error.
     public func judge(prompt: String) async throws -> (JudgeResult, JudgeUsage) {
-        let body = try JSONSerialization.data(withJSONObject: Self.requestBody(gpt: gpt, prompt: prompt))
+        try await judge(prompt: prompt, posts: JudgePosts())
+    }
+
+    /// At most two posts: the first, and one more after a `401 incorrect_hostname` that names a trusted host,
+    /// other than the one just used, which the owner lets this call use. A non-transient failure from a learned
+    /// host forgets it (for this key) and resets to the configured host, with no resend. That includes a resend
+    /// the owner refused (`resendRefused`, for the self-pivot lane the switch or a cap): the learned host just
+    /// answered 401 incorrect_hostname, so it is forgotten even though the lane itself goes on.
+    public func judge(prompt: String, posts: JudgePosts) async throws -> (JudgeResult, JudgeUsage) {
+        let body = try JSONSerialization.data(withJSONObject: Self.requestBody(gpt: gpt, prompt: prompt, spec: spec))
         let configured = gpt.responsesUrl
-        let (first, tried) = lock.withLock { (url, fallbackTried) }
-        let (status, data) = try await post(first, body)
-        if status == 200 { return try Self.parse(data) }
-        guard !tried else { throw GptError.http(status) }
-        let regional = Self.regionalHost(status: status, body: data)
-        let backToConfigured = first != configured && Self.learnedHostRejections.contains(status)
-        guard let alt = regional.flatMap({ Self.withHost(first, $0) }) ?? (backToConfigured ? configured : nil) else {
-            throw GptError.http(status)
+        let first = lock.withLock { url }
+        do {
+            return try await attempt(first: first, configured: configured, body: body, posts: posts)
+        } catch let error as GptError {
+            if first != configured && error.isHostFault { dropLearnedHost(configured) }
+            throw error
         }
-        lock.withLock { fallbackTried = true }
+    }
+
+    private func attempt(first: String, configured: String, body: Data, posts: JudgePosts) async throws -> (JudgeResult, JudgeUsage) {
+        let (status, data) = try await post(first, body, posts)
+        if status == 200 { return try Self.parse(data) }
+        let currentHost = URLComponents(string: first)?.host
+        let alt: String
+        switch Self.namedHost(status: status, body: data, current: currentHost) {
+        case .none: throw GptError.http(status)
+        case .untrusted: throw GptError.untrustedHost
+        case .sameHost: throw GptError.redirectToSameHost
+        case .trusted(let host):
+            guard let target = Self.withHost(first, host), OpenAIHost.isTrusted(target) else { throw GptError.untrustedHost }
+            guard posts.mayResend() else { throw GptError.resendRefused }
+            alt = target
+        }
         let result: (JudgeResult, JudgeUsage)
         do {
-            let (s2, d2) = try await post(alt, body)
-            guard s2 == 200 else { throw GptError.http(s2) }
+            let (s2, d2) = try await post(alt, body, posts)
+            if s2 != 200 {
+                if GptError.isTransient(GptError.http(s2)) { throw GptError.http(s2) }
+                throw GptError.hostRejected(first: currentHost ?? "?", regional: URLComponents(string: alt)?.host ?? "?", inner: "HTTP \(s2)")
+            }
             result = try Self.parse(d2)
+        } catch let error as GptError {
+            if case .hostRejected = error { throw error }
+            if GptError.isTransient(error) { throw error }
+            throw GptError.hostRejected(first: currentHost ?? "?", regional: URLComponents(string: alt)?.host ?? "?", inner: GptError.safe(error))
         } catch {
-            guard let regional else { throw GptError.http(status) }
-            throw GptError.hostRejected(first: URLComponents(string: first)?.host ?? "?", regional: regional, inner: GptError.safe(error))
+            // A network error or a cancellation stays what it is; anything else (a 200 whose body isn't the
+            // expected JSON throws a Foundation error) is a regional host that didn't work, which stops judging
+            // only, never the layer.
+            if error is URLError || error is CancellationError { throw error }
+            throw GptError.hostRejected(first: currentHost ?? "?", regional: URLComponents(string: alt)?.host ?? "?", inner: GptError.safe(error))
         }
         lock.withLock { url = alt }
-        if alt == configured { hosts.forget(configured) } else { hosts.learn(alt, for: configured) }
+        if alt == configured { hosts.forget(configured, scope: scope) } else { hosts.learn(alt, for: configured, scope: scope) }
         return result
     }
 
-    private func post(_ urlString: String, _ body: Data) async throws -> (status: Int, body: Data) {
+    private func dropLearnedHost(_ configured: String) {
+        hosts.forget(configured, scope: scope)
+        lock.withLock { url = configured }
+    }
+
+    private func post(_ urlString: String, _ body: Data, _ posts: JudgePosts) async throws -> (status: Int, body: Data) {
         guard let url = URL(string: urlString) else { throw GptError.badResponse }
+        posts.recordSent()
         return try await http.post(url: url, headers: ["Authorization": "Bearer \(key.value)", "Content-Type": "application/json"],
                                    body: body, timeout: gpt.judgeTimeoutS)
     }
 
-    /// The host a `401 incorrect_hostname` asks for, if it is an OpenAI API host.
-    static func regionalHost(status: Int, body: Data) -> String? {
+    /// What a `401 incorrect_hostname` reply names.
+    enum NamedHost: Equatable {
+        /// Not that error, or it names no OpenAI API host at all.
+        case none
+        /// The first trusted host it names that isn't the one just used.
+        case trusted(String)
+        /// It names only API-host-looking names that aren't `api.openai.com` or `<label>.api.openai.com`.
+        case untrusted
+        /// It names only the host just used.
+        case sameHost
+    }
+
+    /// The host a `401 incorrect_hostname` asks for: among the host-like names in its message that contain
+    /// `api.openai.com`, the first trusted one other than `current`.
+    static func namedHost(status: Int, body: Data, current: String? = nil) -> NamedHost {
         guard status == 401,
               let root = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               let detail = root["error"] as? [String: Any],
-              detail["code"] as? String == "incorrect_hostname" else { return nil }
+              detail["code"] as? String == "incorrect_hostname" else { return .none }
         let message = detail["message"] as? String ?? ""
-        guard let re = try? NSRegularExpression(pattern: #"\b((?:[a-z0-9-]+\.)?api\.openai\.com)\b"#, options: [.caseInsensitive]),
-              let m = re.firstMatch(in: message, range: NSRange(message.startIndex..., in: message)),
-              let r = Range(m.range(at: 1), in: message) else { return nil }
-        return message[r].lowercased()
+        guard let re = try? NSRegularExpression(pattern: #"[a-z0-9-]+(?:\.[a-z0-9-]+)+"#, options: [.caseInsensitive]) else { return .none }
+        var sawUntrusted = false, sawCurrent = false
+        for m in re.matches(in: message, range: NSRange(message.startIndex..., in: message)) {
+            guard let r = Range(m.range, in: message) else { continue }
+            let name = message[r].lowercased()
+            guard name.contains("api.openai.com") else { continue }
+            guard OpenAIHost.isTrustedHost(name) else {
+                sawUntrusted = true
+                continue
+            }
+            if name == current?.lowercased() {
+                sawCurrent = true
+                continue
+            }
+            return .trusted(name)
+        }
+        return sawUntrusted ? .untrusted : (sawCurrent ? .sameHost : .none)
     }
 
     static func withHost(_ url: String, _ host: String) -> String? {
@@ -331,16 +434,56 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
     }
 }
 
-/// Regional Responses URLs judges learned from `401 incorrect_hostname`, by configured URL, for the
-/// life of the process. URLs only: no key, no content.
+/// Which hosts a judge may send the key to after being redirected, or keep as learned: https, and exactly
+/// `api.openai.com` or one label in front of it (`<label>.api.openai.com`, the label at most 63 characters, as
+/// DNS allows). A deeper subdomain
+/// (`a.b.api.openai.com`), a look-alike (`api.openai.com.example`), another domain, plain http, a port other
+/// than 443 or credentials in the URL are none of those.
+public enum OpenAIHost {
+    static let base = "api.openai.com"
+
+    public static func isTrusted(_ urlString: String) -> Bool {
+        guard let c = URLComponents(string: urlString), c.scheme?.lowercased() == "https", c.user == nil, c.password == nil,
+              c.port == nil || c.port == 443, let host = c.host else { return false }
+        return isTrustedHost(host)
+    }
+
+    public static func isTrustedHost(_ host: String) -> Bool {
+        let h = host.lowercased()
+        if h == base { return true }
+        guard h.hasSuffix("." + base) else { return false }
+        let label = h.dropLast(base.count + 1)
+        return !label.isEmpty && label.count <= 63 && !label.hasPrefix("-") && !label.hasSuffix("-")
+            && label.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") }
+    }
+}
+
+/// Regional Responses URLs judges learned from `401 incorrect_hostname`, by configured URL and the key that
+/// learned them (`KeyScope`, an in-memory fingerprint), for the life of the process. Only a trusted OpenAI host
+/// is kept or returned (`OpenAIHost`). URLs only: no key, no content.
 public final class LearnedHosts: @unchecked Sendable {
     public static let shared = LearnedHosts()
+
+    private struct Entry: Hashable {
+        let configured: String
+        let scope: KeyScope
+    }
+
     private let lock = NSLock()
-    private var urls: [String: String] = [:]
+    private var urls: [Entry: String] = [:]
 
     public init() {}
 
-    public func url(for configured: String) -> String? { lock.withLock { urls[configured] } }
-    func learn(_ url: String, for configured: String) { lock.withLock { urls[configured] = url } }
-    func forget(_ configured: String) { _ = lock.withLock { urls.removeValue(forKey: configured) } }
+    public func url(for configured: String, scope: KeyScope) -> String? {
+        lock.withLock { urls[Entry(configured: configured, scope: scope)] }.flatMap { OpenAIHost.isTrusted($0) ? $0 : nil }
+    }
+
+    func learn(_ url: String, for configured: String, scope: KeyScope) {
+        guard OpenAIHost.isTrusted(url) else { return }
+        lock.withLock { urls[Entry(configured: configured, scope: scope)] = url }
+    }
+
+    func forget(_ configured: String, scope: KeyScope) {
+        _ = lock.withLock { urls.removeValue(forKey: Entry(configured: configured, scope: scope)) }
+    }
 }
