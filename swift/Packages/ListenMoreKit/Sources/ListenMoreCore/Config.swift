@@ -114,6 +114,63 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var heatPersonal: [String]
         public var closingPhrases: [String]
         public var closingQuietS: Double
+        /// Self-pivot gate (`PivotGate`, shadow counters only). Their turn shares something personal: at
+        /// least `pivot_share_min_words`, a share marker, and a share word (a feeling, a life event or a
+        /// personal topic; not `heat_personal`, whose small talk such as the weather isn't a share),
+        /// with no invitation for the user to share and no question at its end. Across their lines, only
+        /// sentences shorter than `pivot_share_min_words` may follow the share, and no `pivot_move_on`
+        /// or `update_handoff_phrases` phrase from the share on: moving on to the agenda ends it.
+        public var pivotShareMinWords: Int
+        public var pivotShareMarkers: [String]
+        public var pivotShareWords: [String]
+        public var pivotMoveOn: [String]
+        /// Phrases that hand the floor to the other person, anywhere in a turn (with `question_open_invites`):
+        /// in their turn an invitation to share, in the user's reply a question back.
+        public var pivotInvites: [String]
+        /// An invitation the user answered with less than `pivot_reply_min_words` still holds for
+        /// their turns ending within this long of it.
+        public var pivotInviteHoldS: Double
+        /// The user's reply starts within this long of their last speech, runs at least
+        /// `pivot_reply_min_words`, and is about the user: first-person words are at least
+        /// `pivot_first_person_share` of first-person plus `pivot_other_person` words, and a sentence
+        /// opens with a pivot opener or there are at least `pivot_first_person_min_words` first-person
+        /// words. A reply opening with a `pivot_sympathy` phrase is judged on the text after it, where
+        /// `pivot_first_person_plural` ("we", "our", "us") counts as first person too when that text
+        /// also has a singular first-person word or a share marker. A reply with a `pivot_help_offers`
+        /// phrase (help, accommodation such as "no stress", or well-wishes such as "in my thoughts")
+        /// is about them.
+        public var pivotReplyMaxStartS: Double
+        public var pivotReplyMinWords: Int
+        /// Includes the user's own family at a sentence start ("my dad", "my kids"): a story of theirs.
+        public var pivotOpeners: [String]
+        public var pivotFirstPerson: [String]
+        public var pivotOtherPerson: [String]
+        /// Reactions to their news ("that sounds", "love that") and messages passed on to them ("my mom
+        /// says hi", "asked about"); each counts as one `pivot_other_person` word.
+        public var pivotAboutThem: [String]
+        public var pivotFirstPersonMinWords: Int
+        /// With a pivot opener, this many first-person words are enough.
+        public var pivotOpenerMinFirstPerson: Int
+        public var pivotFirstPersonShare: Double
+        public var pivotSympathy: [String]
+        public var pivotFirstPersonPlural: [String]
+        /// After sympathy, these make "we" the group, not the user's household ("we should all go out to
+        /// celebrate, I will book us a table"): the plurals don't count as the user.
+        public var pivotPluralTeam: [String]
+        public var pivotHelpOffers: [String]
+        /// A sentence or clause starting with one of these (after any lead-in word) asks a question.
+        public var pivotQuestionOpeners: [String]
+        /// A sentence ending with one of these words ("…, right", "…, you know") asks a question.
+        public var pivotTagQuestions: [String]
+        /// Words skipped at the start of a sentence or clause before an opener is matched ("oh nice,").
+        public var pivotLeadIns: [String]
+        /// The turn ends when they start talking or the user is quiet this long; the user's last
+        /// transcript gets `pivot_transcript_wait_s` past the turn end to arrive.
+        public var pivotTurnEndGapS: Double
+        public var pivotTranscriptWaitS: Double
+        /// No candidate within `pivot_rearm_s` of the last one, and at most `pivot_max_per_call` per call.
+        public var pivotRearmS: Double
+        public var pivotMaxPerCall: Int
         public var confirmWords: [String]
         public var numberWords: [String]
         public var stopwords: [String]
@@ -298,6 +355,10 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         guard audio.sampleRate * audio.frameMs % 1000 == 0 else { throw ConfigError.invalid("frame_ms must divide sample_rate") }
         guard gpt.store == false else { throw ConfigError.invalid("gpt.store must be false") }
         try judge.typesafe.validate()
+        guard text.pivotShareMinWords > 0, text.pivotReplyMinWords > 0, text.pivotReplyMaxStartS >= 0,
+              text.pivotFirstPersonMinWords > 0, text.pivotOpenerMinFirstPerson > 0, (0...1).contains(text.pivotFirstPersonShare),
+              text.pivotTurnEndGapS > 0, text.pivotTranscriptWaitS >= 0, text.pivotRearmS >= 0, text.pivotInviteHoldS >= 0,
+              text.pivotMaxPerCall >= 0 else { throw ConfigError.invalid("bad text.pivot limits") }
         guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,
               trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS,
               trigger.callWindowLookbackS > 0 else { throw ConfigError.invalid("bad trigger timing") }
