@@ -540,9 +540,9 @@ final class CoachCardTests: XCTestCase {
     /// pill's tooltip, and nothing in any status but listening.
     func testSelfPivotCueIsShownLikeAnyOther() {
         let c = CoachCardCopy.SelfPivot.self
-        XCTAssertTrue(c.isDraft, "placeholder copy until a writer approves it")
+        XCTAssertTrue(c.isDraft, "the VoiceOver line is still a placeholder")
         XCTAssertEqual(c.words, "Ask how they feel")
-        XCTAssertEqual(c.announcement, "Call coach: ask how they feel about it.", "placeholder, pending VP copy")
+        XCTAssertEqual(c.announcement, "Call coach: ask how they feel about it.", "placeholder, pending final copy")
         XCTAssertEqual(CoachNudge.Kind.selfPivot.rawValue, "self_pivot", "the Kit's CueType raw value")
         let n = CoachNudge(kind: .selfPivot, tone: .amber)
         XCTAssertEqual(n.words, c.words)

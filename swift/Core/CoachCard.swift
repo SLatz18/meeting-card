@@ -55,11 +55,12 @@ public enum CoachCardCopy {
 
     /// The self-pivot cue's words and VoiceOver line. Its lingering line is `Linger`'s template.
     public enum SelfPivot {
-        /// True until a writer approves the strings below.
+        /// True until the VoiceOver line below has its final copy.
         public static let isDraft = true
-        /// PLACEHOLDER: not approved design.
+        /// The approved placeholder words.
         public static let words = "Ask how they feel"
-        /// PLACEHOLDER, pending VP copy: not approved design. Replace it, and set `isDraft` to false, with the approved line.
+        /// PLACEHOLDER, pending final copy: the only string here outside the approved design. Replace it, and set
+        /// `isDraft` to false, with the final line.
         public static let announcement = "Call coach: ask how they feel about it."
     }
 
