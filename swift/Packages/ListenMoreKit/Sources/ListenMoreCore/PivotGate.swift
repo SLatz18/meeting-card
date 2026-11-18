@@ -21,11 +21,16 @@ import Foundation
 ///    `pivot_turn_end_gap_s`. The last transcripts of both turns get `pivot_transcript_wait_s` past
 ///    the turn end to arrive; a turn still missing one is dropped.
 /// 5. Nothing within `pivot_rearm_s` of the last candidate's turn end, at most `pivot_max_per_call`,
-///    nothing while muted. Mute and Unmute drop the turn in progress; Pause restarts the engine.
+///    nothing while muted. Mute and Unmute drop the turn in progress.
+///
+/// The counters, the re-arm and the cap are per engine run, not per call: Pause and the call app's
+/// mute stop the engine, and the next start builds a new `GptCore` with a new gate. A count for the
+/// whole call is the sum over its engine runs.
 ///
 /// Voice activity places the turns (times are VAD onsets and offsets, and a transcript's reference
 /// time is the offset its commit was made at); transcripts arrive later and decide. Segment text stays
-/// in RAM, is dropped by `clear()` and is never logged. Candidates carry times only.
+/// in RAM for at most 120 s (pruned on every frame), is dropped by `clear()` and is never logged.
+/// Candidates carry times only.
 final class PivotGate {
     struct Candidate: Equatable, Sendable {
         /// Their last speech before the reply ended.
@@ -39,11 +44,13 @@ final class PivotGate {
         var decidedAt: TimeInterval
     }
 
+    /// Per engine run.
     struct Counters: Equatable, Sendable {
         var candidates = 0
         /// Candidates held back by the re-arm or the per-call cap.
         var rateLimited = 0
-        /// Turns after a personal share dropped because a transcript missed the wait.
+        /// Ended turns dropped because a transcript missed the wait: their last one, or the user's
+        /// when their turn was a share or held an invitation (a plain turn of theirs ends at once).
         var lateTranscripts = 0
     }
 
@@ -113,6 +120,7 @@ final class PivotGate {
     /// One frame of one stream's voice activity at audio time `now`.
     func onVad(_ speaker: Speaker, _ vad: VadState, now: TimeInterval) -> Candidate? {
         guard !muted else { return nil }
+        prune(now: now)
         switch speaker {
         case .me:
             if let on = vad.onset { meOnset = on }
@@ -146,9 +154,16 @@ final class PivotGate {
         case .me: me.append(line)
         case .others: them.append(line)
         }
+        prune(now: now)
+        return decide(now: now)
+    }
+
+    /// Lines of text held in RAM.
+    var heldLines: Int { them.count + me.count }
+
+    private func prune(now: TimeInterval) {
         me.removeAll { Elapsed.span(now - $0.end) > Self.keepS }
         them.removeAll { Elapsed.span(now - $0.end) > Self.keepS }
-        return decide(now: now)
     }
 
     /// The user's mic went off (true) or came back: the turn in progress and its text are dropped, and

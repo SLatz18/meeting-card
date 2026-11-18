@@ -346,6 +346,20 @@ final class PivotGateTests: XCTestCase {
         XCTAssertEqual(gate.counters, PivotGate.Counters())
     }
 
+    /// No transcript arrives during a long silence, and still no line is kept past 120 s.
+    func testNoLineIsHeldPast120SOfSilence() {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        let gate = PivotGate(config: config)
+        var heldAt: [Int: Int] = [:]
+        s.play(into: gate, until: 130) { t in
+            for mark in [100, 125.5, 126] where abs(t - mark) < 1e-9 { heldAt[Int(mark * 10)] = gate.heldLines }
+        }
+        XCTAssertEqual(heldAt[1000], 1)
+        XCTAssertEqual(heldAt[1255], 1, "exactly 120 s after the line's end")
+        XCTAssertEqual(heldAt[1260], 0)
+    }
+
     // MARK: transcript wait
 
     func testALateTranscriptInsideTheWaitIsDecidedWhenItLands() throws {

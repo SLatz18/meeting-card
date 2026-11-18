@@ -74,7 +74,9 @@ public final class GptCore {
         /// Engine audio time of the latest frame: how long this call has been coached.
         public var callSeconds: Double
         /// Self-pivot gate counters (shadow; no cue, no judge call): candidates, candidates held by
-        /// the re-arm or the per-call cap, and turns dropped because a transcript came too late.
+        /// the re-arm or the per-call cap, and turns dropped because a transcript came too late. Per
+        /// engine run, like the re-arm and the cap: Pause and the call app's mute start a new
+        /// `GptCore` at 0, so a whole call is the sum over its runs.
         public var pivotCandidates: Int
         public var pivotRateLimited: Int
         public var pivotLateTranscripts: Int
