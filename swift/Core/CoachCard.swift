@@ -57,7 +57,9 @@ public enum CoachCardCopy {
     public enum SelfPivot {
         /// True until a writer approves the strings below.
         public static let isDraft = true
+        /// PLACEHOLDER: not approved design.
         public static let words = "Ask how they feel"
+        /// PLACEHOLDER, pending VP copy: not approved design. Replace it, and set `isDraft` to false, with the approved line.
         public static let announcement = "Call coach: ask how they feel about it."
     }
 

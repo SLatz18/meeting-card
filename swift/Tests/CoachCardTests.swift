@@ -542,7 +542,7 @@ final class CoachCardTests: XCTestCase {
         let c = CoachCardCopy.SelfPivot.self
         XCTAssertTrue(c.isDraft, "placeholder copy until a writer approves it")
         XCTAssertEqual(c.words, "Ask how they feel")
-        XCTAssertEqual(c.announcement, "Call coach: ask how they feel about it.")
+        XCTAssertEqual(c.announcement, "Call coach: ask how they feel about it.", "placeholder, pending VP copy")
         XCTAssertEqual(CoachNudge.Kind.selfPivot.rawValue, "self_pivot", "the Kit's CueType raw value")
         let n = CoachNudge(kind: .selfPivot, tone: .amber)
         XCTAssertEqual(n.words, c.words)
