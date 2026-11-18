@@ -115,7 +115,10 @@ final class GuardTests: XCTestCase {
         let triggers = Self.topLevelBlock("on", in: live).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
         let keys = triggers.filter { $0.hasPrefix("  ") && !$0.hasPrefix("   ") }.map { $0.trimmingCharacters(in: .whitespaces) }
         XCTAssertEqual(keys, ["workflow_dispatch:"], "the live workflow triggers on manual dispatch only")
-        XCTAssertTrue(live.contains("if: github.actor == github.repository_owner && github.triggering_actor == github.repository_owner"))
+        let ownerOnly = "if: github.actor == github.repository_owner && github.triggering_actor == github.repository_owner"
+        XCTAssertTrue(live.contains(ownerOnly))
+        let openAILive = try String(contentsOf: wf.appendingPathComponent("live-openai.yml"), encoding: .utf8)
+        XCTAssertTrue(openAILive.contains(ownerOnly), "the other paid workflow is owner-only on re-runs too")
         XCTAssertTrue(live.contains("environment: openai-live"))
         XCTAssertTrue(live.contains("--live"))
         XCTAssertTrue(live.contains("--no-judge"), "0 judge calls unless the judge input is set")
