@@ -118,9 +118,10 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         /// Phrases that hand the floor to the other person, anywhere in a turn (with `question_open_invites`):
         /// in their turn an invitation to share, in the user's reply a question back.
         public var pivotInvites: [String]
-        /// The user's reply starts within this long of their last speech and runs at least
-        /// `pivot_reply_min_words`, with a pivot opener or mostly first person: at least
-        /// `pivot_first_person_min_words` first-person words, and that share of first- plus second-person words.
+        /// The user's reply starts within this long of their last speech, runs at least
+        /// `pivot_reply_min_words`, and is about the user: first-person words are at least
+        /// `pivot_first_person_share` of first- plus second-person words, and a sentence opens with a
+        /// pivot opener or there are at least `pivot_first_person_min_words` first-person words.
         public var pivotReplyMaxStartS: Double
         public var pivotReplyMinWords: Int
         public var pivotOpeners: [String]
@@ -130,7 +131,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var pivotFirstPersonShare: Double
         /// A sentence or clause starting with one of these (after any lead-in word) asks a question.
         public var pivotQuestionOpeners: [String]
-        public var pivotQuestionLeadIns: [String]
+        /// Words skipped at the start of a sentence or clause before an opener is matched ("oh nice,").
+        public var pivotLeadIns: [String]
         /// The turn ends when they start talking or the user is quiet this long; the user's last
         /// transcript gets `pivot_transcript_wait_s` past the turn end to arrive.
         public var pivotTurnEndGapS: Double

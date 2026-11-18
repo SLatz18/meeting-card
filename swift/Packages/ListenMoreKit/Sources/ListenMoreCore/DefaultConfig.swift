@@ -95,7 +95,7 @@ public enum DefaultConfig {
     "pivot_first_person_min_words": 3,
     "pivot_first_person_share": 0.75,
     "pivot_question_openers": ["how", "what", "why", "where", "who", "which", "whose", "did you", "do you", "does it", "does that", "have you", "has it", "are you", "were you", "was it", "was that", "is it", "is that", "will you", "would you", "could you", "can you", "when did", "when do", "when are", "when is", "when will", "tell me"],
-    "pivot_question_lead_ins": ["and", "so", "but", "anyway", "oh", "well", "okay", "ok"],
+    "pivot_lead_ins": ["and", "so", "but", "anyway", "oh", "ah", "aw", "wow", "well", "okay", "ok", "yeah", "yes", "no", "nice", "great", "cool", "hey", "honestly"],
     "pivot_turn_end_gap_s": 2.0,
     "pivot_transcript_wait_s": 1.5,
     "pivot_rearm_s": 180,

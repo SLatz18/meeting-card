@@ -8,8 +8,14 @@ enum PivotLines {
     static let mostlyMe = "Oh nice, I did a long charity ride last spring and I was so tired, my legs were sore for a week and I slept all weekend."
     static let empathy = "That is amazing, you must be so proud of yourself, I bet your family was cheering for you the whole way."
     static let moved = "We just moved into a new apartment and I am still unpacking boxes every evening."
-    static let relateThenAskMark = "Same thing happened to me last year, it took weeks. You must be so tired of boxes by now?"
-    static let relateThenAskNoMark = "Same thing happened to me last year, it took weeks. How did you find the movers"
+    static let relateThenAskMark = "Same thing happened to me last year, it took me weeks. The boxes must be everywhere by now?"
+    static let relateThenAskNoMark = "Same thing happened to me last year, it took me weeks. How did the move go in the end"
+    static let openerOneFirstPerson = "Same thing happened to me last spring, it took weeks and weeks before the whole place finally felt settled again."
+    static let openerMidSentence = "The long ride last spring left all of us sore, the same thing happened to me on the hills and the wind."
+    static let worried = "My dad has been in the hospital all week and I have been so worried about him."
+    static let engaged = "We just got engaged last weekend and I am still so excited about it."
+    static let rememberAboutThem = "Oh no, I remember you said he had surgery last spring, that sounds really hard on your whole family, sending all of you good thoughts."
+    static let meTooMidSentence = "That is wonderful news, congratulations to you both, your sister told me too and she was so thrilled for you."
     static let brief = "Me too, same here."
     static let release = "The release is scheduled for Thursday and the test plan is signed off."
     static let releaseReply = "Great, I will update the checklist and send the release notes to the team after lunch, then I will close my tickets."
@@ -158,6 +164,26 @@ final class PivotGateTests: XCTestCase {
 
     func testMostlyFirstPersonWithoutAnOpenerIsACandidate() {
         XCTAssertEqual(run(pivot(reply: PivotLines.mostlyMe), until: 30).counters.candidates, 1)
+    }
+
+    /// A sentence opening with a pivot opener needs only the first-person share, not the word count.
+    func testAnOpenerAtASentenceStartNeedsOneFirstPersonWord() {
+        XCTAssertEqual(run(pivot(reply: PivotLines.openerOneFirstPerson), until: 30).counters.candidates, 1)
+    }
+
+    // MARK: openers
+
+    func testAnOpenerInsideASentenceDoesNotCount() {
+        assertNoCandidate(pivot(reply: PivotLines.openerMidSentence))
+    }
+
+    /// "I remember" opens the sentence, but the reply is about them (you, he, your).
+    func testAnOpenerInAReplyAboutThemIsNone() {
+        assertNoCandidate(pivot(reply: PivotLines.rememberAboutThem, share: PivotLines.worried))
+    }
+
+    func testMeTooInsideASentenceIsNone() {
+        assertNoCandidate(pivot(reply: PivotLines.meTooMidSentence, share: PivotLines.engaged))
     }
 
     /// At these frames the raw differences of frame times land a hair past 5 s (2, 11888) or short of

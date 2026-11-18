@@ -8,7 +8,9 @@ import Foundation
 ///    share word or a `heat_personal` topic, no invitation to share (`pivot_invites`,
 ///    `question_open_invites`) and no question at its end.
 /// 2. The user starts within `pivot_reply_max_start_s` of their last speech and says at least
-///    `pivot_reply_min_words`, with a pivot opener or mostly first person.
+///    `pivot_reply_min_words` about themselves: first-person words make up `pivot_first_person_share`
+///    of the person words, and either a sentence opens with a pivot opener or there are at least
+///    `pivot_first_person_min_words` of them.
 /// 3. No question back anywhere in the reply: no "?", no sentence or clause that opens like a
 ///    question, no invitation.
 /// 4. The turn is over: they start talking (while the user is quiet), or the user is quiet for
@@ -85,7 +87,7 @@ final class PivotGate {
     init(config: ListenMoreConfig) {
         x = config.text
         invites = x.pivotInvites + x.questionOpenInvites
-        leadIns = x.pivotQuestionLeadIns.filter { !$0.isEmpty }
+        leadIns = x.pivotLeadIns.filter { !$0.isEmpty }
         firstPerson = Set(x.pivotFirstPerson)
         secondPerson = Set(x.pivotSecondPerson)
     }
@@ -228,9 +230,19 @@ final class PivotGate {
         let words = lines.flatMap { TextRules.tokens($0.text) }
         guard words.count >= x.pivotReplyMinWords,
               !lines.contains(where: { line in has(line.text, invites) || pieces(line.text).contains(where: asks) }) else { return false }
-        if lines.contains(where: { has($0.text, x.pivotOpeners) }) { return true }
         let first = words.filter(firstPerson.contains).count, second = words.filter(secondPerson.contains).count
-        return first >= x.pivotFirstPersonMinWords && Double(first) >= x.pivotFirstPersonShare * Double(first + second)
+        let aboutMe = first > 0 && Double(first) >= x.pivotFirstPersonShare * Double(first + second)
+        if aboutMe && lines.contains(where: opensWithPivot) { return true }
+        return aboutMe && first >= x.pivotFirstPersonMinWords
+    }
+
+    /// A sentence of the line starts with a pivot opener, after any lead-in words ("oh nice, that
+    /// reminds me"). An opener inside a sentence ("she told me too") doesn't count.
+    private func opensWithPivot(_ line: Line) -> Bool {
+        TextRules.sentences(line.text).contains { sentence in
+            let rest = strippingLeadIns(sentence)
+            return x.pivotOpeners.contains { TextRules.startsWith(rest, $0) }
+        }
     }
 
     /// Each sentence and each clause in it. Every transcript starts a sentence, so a question that
@@ -245,11 +257,16 @@ final class PivotGate {
 
     private func asks(_ piece: String) -> Bool {
         if piece.contains("?") { return true }
+        let rest = strippingLeadIns(piece)
+        return x.pivotQuestionOpeners.contains { TextRules.startsWith(rest, $0) }
+    }
+
+    private func strippingLeadIns(_ piece: String) -> String {
         var rest = piece
         while let lead = leadIns.first(where: { TextRules.startsWith(rest, $0) }) {
             rest = String(rest.dropFirst(lead.count)).trimmingCharacters(in: CharacterSet(charactersIn: " ,"))
         }
-        return x.pivotQuestionOpeners.contains { TextRules.startsWith(rest, $0) }
+        return rest
     }
 
     private func has(_ text: String, _ phrases: [String]) -> Bool {
