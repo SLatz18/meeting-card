@@ -92,7 +92,7 @@ public enum Scenarios {
     /// engine; a cut-in after Resume gives a second interrupt, though the engine restarted at Resume
     /// with its clock back at 0 (cooldowns count in session time). Both scored cut-ins start in an
     /// unpunctuated stretch of Them's line and break into a second sentence: a TTS take pauses at a
-    /// comma, or for a breath, for 0.2-0.4 s, past the 0.16 s a cut-in's opening overlap allows, and
+    /// comma, or for a breath, for 0.2-0.5 s, which can run past the 0.3 s a cut-in's opening overlap allows, and
     /// You's second onset, with about 2 s of Them still to come, makes the cut-in if the first didn't.
     /// y1's first sentence is four words, so that second onset comes early. a2 starts 18 s after y1, so
     /// the paused y2 cut-in is past the cooldown of a pre-Pause cue even at the late end of its window.

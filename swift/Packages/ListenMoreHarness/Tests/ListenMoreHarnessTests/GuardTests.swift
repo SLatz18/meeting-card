@@ -63,7 +63,7 @@ final class GuardTests: XCTestCase {
     }
 
     /// Every cut-in the oracle expects starts in an unpunctuated stretch of Them's line: a TTS take
-    /// pauses at a comma for 0.2-0.4 s, past the 0.16 s a cut-in's opening overlap allows, so a cut-in
+    /// pauses at a comma for 0.2-0.5 s, which can run past the 0.3 s a cut-in's opening overlap allows, so a cut-in
     /// there may or may not count. Checked from 0.3 s before You start to the end of Them's line at a
     /// fast 3.4 words/s.
     func testExpectedCutInsStartInUnpunctuatedThemSpeech() throws {
