@@ -276,12 +276,14 @@ public extension CoachCardState {
     }
 
     /// The card's and pill's Mute: the coach's own (it stops the coach hearing the user's mic, never
-    /// Zoom's mute), with the coach menu's symbols; nothing to mute before a session starts.
+    /// Zoom's mute). Its glyph shows the coach's state: hearing, or slashed while not hearing the user.
+    /// Nothing to mute before a session starts.
     var coachMuteControl: CoachControl {
-        let s = Theme.Coach.menuSymbols
+        let s = Theme.CoachCard.Symbols.self
         let off = coachMicMuted || status == .micOff
         let text = off ? CoachCardCopy.Tooltip.unmuteMic : CoachCardCopy.Tooltip.muteMic
-        return CoachControl(symbol: off ? s.unmute : s.mute, tooltip: text, accessibilityLabel: text, enabled: status != .idle)
+        return CoachControl(symbol: off ? s.coachNotHearing : s.coachHearing, tooltip: text, accessibilityLabel: text,
+                            enabled: status != .idle)
     }
 
     /// Pause while listening, muted or mic off, Resume while paused; nothing to pause before a session starts.

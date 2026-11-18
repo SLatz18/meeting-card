@@ -208,6 +208,7 @@ enum UISnapshots {
                         settingsShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                             transcriptShots(dir: dir, tag: tag, controller: controller, packet: packet) {
                                 startToggleCheck(tag: tag, controller: controller)
+                                symbolCheck(tag: tag, controller: controller)
                                 menuShots(dir: dir, tag: tag, controller: controller, packet: packet)
                                 noticeShot(dir: dir, tag: tag, controller: controller, packet: packet) { NSApp.terminate(nil) }
                             }
@@ -428,6 +429,17 @@ enum UISnapshots {
     /// Start Coach while the coach is off must show in Settings at once: with Settings already open
     /// (and still after reopening it), and with Settings opened after Start. Writes one fixture log
     /// line that snapshots.sh gates on; the coach is switched off again and nothing is kept.
+    /// The coach Mute's glyphs load as SF Symbols on this macOS (a missing name draws nothing). One
+    /// fixture log line that snapshots.sh gates on.
+    @MainActor
+    static func symbolCheck(tag: String, controller: Controller) {
+        let s = Theme.CoachCard.Symbols.self
+        let found = [s.coachHearing, s.coachNotHearing].map { name in
+            "\(name)=\(NSImage(systemSymbolName: name, accessibilityDescription: nil) == nil ? "missing" : "ok")"
+        }
+        controller.log("coach check symbols-\(tag) \(found.joined(separator: " "))")
+    }
+
     @MainActor
     static func startToggleCheck(tag: String, controller: Controller) {
         let suite = AppIdentity.current.scoped("start-check")

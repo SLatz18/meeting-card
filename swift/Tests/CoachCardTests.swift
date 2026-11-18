@@ -305,6 +305,30 @@ final class CoachCardTests: XCTestCase {
         }
     }
 
+    /// The coach's Mute shows the coach's state and is never a mic (that's Zoom's): waveform while the
+    /// coach hears the user, the same waveform slashed while it doesn't, on the card, the pill and the
+    /// menu's Mute/Unmute items, in every state.
+    func testCoachMuteGlyphIsNeverAMic() {
+        let s = Theme.CoachCard.Symbols.self, m = Theme.Coach.menuSymbols
+        XCTAssertEqual(s.coachHearing, "waveform")
+        XCTAssertEqual(s.coachNotHearing, s.coachHearing + ".slash", "the same glyph, slashed")
+        XCTAssertEqual([m.mute, m.unmute], [s.coachHearing, s.coachNotHearing], "the menu items use the same tokens")
+        for status in CoachCardState.Status.allCases {
+            for coachMuted in [false, true] {
+                for mode in [CoachCardState.Mode.card, .pill] {
+                    for zoom in [Self.live, Self.muted, CoachMuteCopy.presentation(reason: .toggleOff, isMuted: false)] {
+                        let glyph = CoachCardState(status: status, mute: zoom, coachMicMuted: coachMuted, mode: mode).coachMuteControl.symbol
+                        XCTAssertFalse(glyph.hasPrefix("mic"), "\(status) \(coachMuted) \(mode): \(glyph)")
+                        let off = coachMuted || status == .micOff
+                        XCTAssertEqual(glyph, off ? s.coachNotHearing : s.coachHearing, "\(status) \(coachMuted) \(mode)")
+                    }
+                }
+            }
+        }
+        for glyph in [m.mute, m.unmute] { XCTAssertFalse(glyph.hasPrefix("mic"), glyph) }
+        XCTAssertTrue(s.mute.hasPrefix("mic") && s.unmute.hasPrefix("mic"), "Mute in Zoom keeps Zoom's mic, so the two never look alike")
+    }
+
     func testCopy() {
         XCTAssertEqual(CoachCardCopy.Button.stop, "Stop Coach", "the same casing as the menu's Stop Coach")
         XCTAssertEqual(CoachCardCopy.A11y.skipped, "Call coach is off for the rest of this call.")

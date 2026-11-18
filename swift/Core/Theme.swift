@@ -279,14 +279,20 @@ public enum Theme {
         public static let symbol = "ear.badge.waveform"
         public static let pauseSymbol = "pause.fill"
         public static let resumeSymbol = "play.fill"
-        /// The coach's own Mute: the glyph on the chip, the card's status line and the menu.
+        /// The coach's own Mute: the glyph on the chip, the card's status line and the menu's status line.
         public static let micOffSymbol = "mic.slash"
+        /// The coach's Mute button (card, pill and the menu's Mute/Unmute items) shows the coach's state,
+        /// never the action and never a mic, so it can't pass for Zoom's mic: a waveform (the coach's
+        /// glyph is an ear with one) while the coach hears the user, the same waveform slashed while it
+        /// doesn't. SF Symbols has no slashed ear.
+        public static let hearingSymbol = "waveform"
+        public static let notHearingSymbol = "waveform.slash"
         /// SF Symbols for the coach status menu, drawn at the body font size like a native menu.
         public static let menuSymbols = (start: resumeSymbol, stop: CoachCard.Symbols.stop,
                                          pause: pauseSymbol, resume: resumeSymbol,
                                          gptOffNoKey: "key", gptOffRejected: "exclamationmark.triangle",
                                          settings: "gearshape", feedback: "bubble.left",
-                                         mute: micOffSymbol, unmute: "mic")
+                                         mute: hearingSymbol, unmute: notHearingSymbol)
         public static let menuSymbolSize = CardStyle.Typography.body.size
         /// The status bar glyph, at the button font size and weight.
         public static let statusSymbolFont = CardStyle.Typography.button
@@ -459,6 +465,9 @@ public enum Theme {
             public static let mute = "mic.fill"
             public static let unmute = "mic.slash.fill"
             public static let micOff = Coach.micOffSymbol
+            /// The coach's Mute button, by the coach's state (`Coach.hearingSymbol`).
+            public static let coachHearing = Coach.hearingSymbol
+            public static let coachNotHearing = Coach.notHearingSymbol
             public static let pause = Coach.pauseSymbol
             public static let resume = Coach.resumeSymbol
             public static let stop = "stop.fill"

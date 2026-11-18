@@ -91,6 +91,9 @@ case "${1:-}" in
     for a in light dark; do
       grep -q "coach check start-toggle-$a before=off open=on reopened=on fresh=on" "$OUT/coach-shots.log" \
         || { echo "Start Coach didn't show in Settings ($a)" >&2; missing=1; }
+      # The coach Mute's SF Symbols load on this macOS (UISnapshots.symbolCheck).
+      grep -q "coach check symbols-$a waveform=ok waveform.slash=ok" "$OUT/coach-shots.log" \
+        || { echo "coach Mute glyphs missing ($a)" >&2; missing=1; }
     done
     [[ $missing == 0 ]]
     ;;

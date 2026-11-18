@@ -38,8 +38,8 @@ final class CoachMicMuteTests: XCTestCase {
         XCTAssertEqual(s.micOff, Theme.Coach.micOffSymbol)
         XCTAssertNotEqual(s.micOff, s.unmute, "the card's Mute button shows mic.slash.fill for Zoom's mute")
         XCTAssertNotEqual(s.micOff, s.status)
-        XCTAssertEqual(Theme.Coach.menuSymbols.mute, Theme.Coach.micOffSymbol)
-        XCTAssertEqual(Theme.Coach.menuSymbols.unmute, "mic")
+        XCTAssertEqual(Theme.Coach.menuSymbols.mute, Theme.Coach.hearingSymbol, "the menu's Mute shows the coach hearing")
+        XCTAssertEqual(Theme.Coach.menuSymbols.unmute, Theme.Coach.notHearingSymbol)
     }
 
     /// Every new string lives in CoachCopy, under the draft heading, word for word.
