@@ -268,7 +268,7 @@ final class PivotGate {
         }
         invitedAt = mine.reduce(0, { $0 + TextRules.tokens($1.text).count }) < x.pivotReplyMinWords ? t.invitedAt : nil
         finish(e)
-        guard !t.invited, t.shared, pivots(mine) else { return nil }
+        guard !t.invited, pivots(mine) else { return nil }
         let rearmed = lastCandidateTurnEnd.map { Elapsed.span(e.at - $0) >= x.pivotRearmS } ?? true
         guard rearmed && counters.candidates < x.pivotMaxPerCall else {
             counters.rateLimited += 1
@@ -317,7 +317,7 @@ final class PivotGate {
     /// isn't enough), or there are `pivot_first_person_min_words` of them.
     private func aboutUser(_ words: [String], firstPerson: Set<String>, opens: Bool) -> Bool {
         let first = words.filter(firstPerson.contains).count, other = words.filter(otherPerson.contains).count
-        let aboutMe = first > 0 && Double(first) >= x.pivotFirstPersonShare * Double(first + other)
+        let aboutMe = Double(first) >= x.pivotFirstPersonShare * Double(first + other)
         if aboutMe && opens && first >= x.pivotOpenerMinFirstPerson { return true }
         return aboutMe && first >= x.pivotFirstPersonMinWords
     }
