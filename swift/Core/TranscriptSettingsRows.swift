@@ -7,6 +7,8 @@ public struct TranscriptSettingsRows: Equatable {
         public var folderPath: String
         /// The vault folder's name when the folder is in one.
         public var vaultName: String?
+        /// false: a chosen folder that is gone or in the Trash.
+        public var folderUsable: Bool
         public var keyUsable: Bool
         public var fileNamePattern: String
         public var tags: String
@@ -16,11 +18,12 @@ public struct TranscriptSettingsRows: Equatable {
         public var retentionDays: Int?
         public var canDelete: Bool
 
-        public init(folderPath: String, vaultName: String? = nil, keyUsable: Bool, fileNamePattern: String, tags: String,
+        public init(folderPath: String, vaultName: String? = nil, folderUsable: Bool = true, keyUsable: Bool, fileNamePattern: String, tags: String,
                     dailyNoteOn: Bool = false, dailyNotePath: String, dailyNoteEmbed: Bool = false, retentionDays: Int? = nil,
                     canDelete: Bool = false) {
             self.folderPath = folderPath
             self.vaultName = vaultName
+            self.folderUsable = folderUsable
             self.keyUsable = keyUsable
             self.fileNamePattern = fileNamePattern
             self.tags = tags
@@ -59,7 +62,7 @@ public struct TranscriptSettingsRows: Equatable {
         let retention = Self.retentionChoices.firstIndex { $0 == i.retentionDays } ?? 0
         rows = [
             Row(id: "folder", control: .folder(path: i.folderPath, button: chooseFolder), enabled: on, hidden: false),
-            Row(id: "vault", control: .note(TranscriptCopy.vaultStatus(i.vaultName)), enabled: true, hidden: false),
+            Row(id: "vault", control: .note(TranscriptCopy.vaultStatus(i.vaultName, folderUsable: i.folderUsable)), enabled: true, hidden: false),
             Row(id: "fileName", control: .field(label: TranscriptCopy.fileNameLabel, value: i.fileNamePattern), enabled: on, hidden: false),
             Row(id: "fileNameHelp", control: .note(TranscriptCopy.fileNameHelp), enabled: true, hidden: false),
             Row(id: "tags", control: .field(label: TranscriptCopy.tagsLabel, value: i.tags), enabled: on, hidden: false),

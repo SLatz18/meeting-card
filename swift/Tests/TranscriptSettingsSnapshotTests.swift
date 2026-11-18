@@ -25,7 +25,7 @@ final class TranscriptSettingsSnapshotTests: XCTestCase {
         [dailyNote] Link from the daily note: off
         [dailyNoteHelp] Adds one line to the day’s note. Nothing already in it is changed.
         [retention] Keep transcripts: <Forever> of Forever | 7 days | 30 days | 90 days | 1 year
-        [retentionHelp] Older notes saved by MeetingCard are removed after each call and at launch. Notes you’ve edited since are kept.
+        [retentionHelp] Older notes saved by MeetingCard are removed after each call and at launch. Notes you’ve edited after the call are kept.
         """)
     }
 
@@ -49,9 +49,14 @@ final class TranscriptSettingsSnapshotTests: XCTestCase {
         [dailyNotePath] Daily note path: [Daily/{yyyy}-{MM}-{dd}.md]
         [dailyNoteStyle] Show the call as: <Embed> of Link | Embed
         [retention] Keep transcripts: <30 days> of Forever | 7 days | 30 days | 90 days | 1 year
-        [retentionHelp] Older notes saved by MeetingCard are removed after each call and at launch. Notes you’ve edited since are kept.
+        [retentionHelp] Older notes saved by MeetingCard are removed after each call and at launch. Notes you’ve edited after the call are kept.
         [delete] [Delete This Call’s Transcript]
         """)
+    }
+
+    func testAFolderThatIsGoneSaysSo() {
+        let rows = TranscriptSettingsRows(input { $0.vaultName = "Example Vault"; $0.folderUsable = false }, chooseFolder: choose)
+        XCTAssertEqual(rows.row("vault")?.control, .note("This folder is missing or in the Trash, so nothing is saved. Choose another."))
     }
 
     func testWithoutAUsableKeyTheControlsAreOff() {

@@ -7,6 +7,7 @@ public enum TranscriptCopy {
     /// %@: the vault folder's name.
     public static let inVault = "In the Obsidian vault \u{201C}%@\u{201D}."
     public static let notInVault = "Not in an Obsidian vault: notes are plain Markdown files."
+    public static let folderUnavailable = "This folder is missing or in the Trash, so nothing is saved. Choose another."
     public static let fileNameLabel = "File name"
     public static let fileNameHelp = "Use {date}, {time}, {title} and {app}."
     public static let tagsLabel = "Tags"
@@ -22,13 +23,14 @@ public enum TranscriptCopy {
     public static let retentionYear = "1 year"
     /// %d: a number of days.
     public static let retentionDays = "%d days"
-    public static let retentionHelp = "Older notes saved by MeetingCard are removed after each call and at launch. Notes you\u{2019}ve edited since are kept."
+    public static let retentionHelp = "Older notes saved by MeetingCard are removed after each call and at launch. Notes you\u{2019}ve edited after the call are kept."
     public static let deleteThisCall = "Delete This Call\u{2019}s Transcript"
     public static let deleteThisCallMenu = "Delete This Call\u{2019}s Transcript\u{2026}"
-    public static let deleteConfirmBody = "The note is removed from the folder. A link in the daily note stays. This can\u{2019}t be undone."
+    public static let deleteConfirmBody = "This call\u{2019}s notes are removed from the folder, including one started beside a note you edited during the call. A link in the daily note stays. This can\u{2019}t be undone."
 
-    public static func vaultStatus(_ vaultName: String?) -> String {
-        vaultName.map { String(format: inVault, $0) } ?? notInVault
+    public static func vaultStatus(_ vaultName: String?, folderUsable: Bool = true) -> String {
+        guard folderUsable else { return folderUnavailable }
+        return vaultName.map { String(format: inVault, $0) } ?? notInVault
     }
 
     public static func retention(_ days: Int?) -> String {
