@@ -123,6 +123,9 @@ public final class LocalLayer {
     public private(set) var micMuted = false
     private var unmutePending = false
     private var unmuteGraceUntil: TimeInterval?
+    /// The user's first words back began inside the grace: later onsets of that same utterance (after a
+    /// pause shorter than `cut_in_utterance_gap_ms`, like a comma) settle too.
+    private var settlingRun = false
 
     /// `participants`: people on the call (2 = a 1:1), for the talk-share limit.
     public init(config: ListenMoreConfig, participants: Int = 2, context: LocalTextContext? = nil) {
@@ -175,7 +178,8 @@ public final class LocalLayer {
     /// pending cut-in is dropped and the talk-over switch log starts over, so nothing measured across
     /// the gap can fire. While off, the user's VAD isn't run: they read as silent, which is what the
     /// call heard, so talk share keeps counting the other side and the gap can only lower the user's
-    /// share. Back on, the first `local.unmute_grace_s` seconds open no cut-in and log no switch.
+    /// share. Back on, an utterance that starts in the first `local.unmute_grace_s` seconds opens no
+    /// cut-in and logs no switch, through any pause shorter than `cut_in_utterance_gap_ms`.
     public func setMicMuted(_ muted: Bool) {
         guard muted != micMuted else { return }
         micMuted = muted
@@ -192,6 +196,7 @@ public final class LocalLayer {
         othersSoloSince = nil
         unmutePending = !muted
         unmuteGraceUntil = nil
+        settlingRun = false
     }
 
     public func step(t: TimeInterval, mic: ArraySlice<Float>, call: ArraySlice<Float>) -> (events: [LocalEvent], me: VadState, others: VadState) {
@@ -217,9 +222,11 @@ public final class LocalLayer {
                 ev.append(LocalEvent(kind: .prosody, t: t, onset: off, prosody: p))
             }
         }
+        if settlingRun && !s.active && t - me.lastSpeechT > cutPause { settlingRun = false }
         if let on = s.onset {
             ev.append(LocalEvent(kind: .meOnset, t: t, onset: on))
-            let settling = unmuteGraceUntil.map { on < $0 } ?? false
+            let settling = settlingRun || unmuteGraceUntil.map { on < $0 } ?? false
+            settlingRun = settling
             if !settling { onset(on, .me) }
             let midSpeech = o.active || on - others.lastSpeechT <= cutMidPause
             let afterTalkOver = on - toFiredAt < cutAfterTalkOver

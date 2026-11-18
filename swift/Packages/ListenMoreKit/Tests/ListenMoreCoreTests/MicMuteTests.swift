@@ -728,6 +728,21 @@ final class LocalLayerMicMuteTests: XCTestCase {
         XCTAssertEqual(cues(run(8, me: me, others: others, mutes: [(0, true), (1.0, false)])), [.interrupt], "past the grace second")
     }
 
+    /// The first words back start inside the grace and run on past it with a short pause ("Sorry, I was
+    /// on mute, ..."): the onset after the pause lands past the grace second but is the same utterance,
+    /// so it opens no cut-in either. A pause of `cut_in_utterance_gap_ms` or more ends that utterance.
+    func testFirstWordsBackStaySettledThroughAShortPause() {
+        let others: [(Double, Double)] = [(1.0, 7.5)]
+        let firstWordsBack: [(Double, Double)] = [(3.2, 3.7), (4.05, 7.0)]
+        XCTAssertEqual(cues(run(9, me: firstWordsBack, others: others)), [.interrupt], "control: not muted")
+        let unmuted = run(9, me: firstWordsBack, others: others, mutes: [(0, true), (2.9, false)])
+        XCTAssertEqual(unmuted.filter { $0.kind == .meOnset }.count, 2, "the pause gives a second onset, past the grace")
+        XCTAssertEqual(cues(unmuted), [], "one utterance back from mute: no cut-in")
+        let newUtterance: [(Double, Double)] = [(3.2, 3.7), (4.5, 7.0)]
+        XCTAssertEqual(cues(run(9, me: newUtterance, others: others, mutes: [(0, true), (2.9, false)])), [.interrupt],
+                       "after a 0.8 s pause the next words are a new utterance")
+    }
+
     /// The grace is the rules' `local.unmute_grace_s` (1 s by default), not a constant in the layer.
     func testUnmuteGraceComesFromTheRules() {
         XCTAssertEqual(config.local.unmuteGraceS, 1.0)
