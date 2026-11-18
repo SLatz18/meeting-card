@@ -212,6 +212,36 @@ final class PivotGateTests: XCTestCase {
         }
     }
 
+    /// Sympathy, then the user's own story with no listed opener: judged on what follows the sympathy,
+    /// where "we" counts as the user.
+    func testSympathyThenAStoryWithoutAnOpenerIsACandidate() {
+        let house = "We finally bought our first house last week and I am so excited to move in."
+        for (share, reply) in [
+            (PivotLines.worried, "I'm so sorry. My mom was in the hospital last year and I was there every night, I barely slept for a month."),
+            (house, "Congrats! We just bought a house too, I spent the whole month painting my kitchen and I still have boxes everywhere."),
+            (house, "Congrats! We just bought a house too, we moved in last month and we are still painting every single room in it."),
+            (PivotLines.worried, "So sorry to hear that. Same here, my dad was in for a week in the spring and I was driving there every day after work."),
+        ] {
+            XCTAssertEqual(run(pivot(reply: reply, share: share), until: 30).counters.candidates, 1, reply)
+        }
+    }
+
+    /// "We" counts as the user only after sympathy: elsewhere it is often the team.
+    func testWeCountsAsTheUserOnlyAfterSympathy() {
+        assertNoCandidate(pivot(reply: "Oh nice, we just shipped the new build and we are moving the whole team to it, our rollout starts on Monday."))
+    }
+
+    func testOfferingHelpIsAboutThem() {
+        for reply in [
+            "I am here if I can help, let me know if you need anything",
+            "I am here if I can help, let me know if you need anything at all from me this week.",
+            "I'm so sorry, I hope he's okay. If you need anything I can take your meetings this week, just let me know.",
+            "I am so sorry, that is awful. I can cover my part and yours this week, I will move my calls and I am happy to help.",
+        ] {
+            XCTAssertEqual(run(pivot(reply: reply, share: PivotLines.worried), until: 30).counters.candidates, 0, reply)
+        }
+    }
+
     /// Sympathy and talk about them, with no turn to the user's own experience.
     func testPureCommiserationIsNone() {
         assertNoCandidate(pivot(reply: PivotLines.pureCommiseration, share: PivotLines.worried))

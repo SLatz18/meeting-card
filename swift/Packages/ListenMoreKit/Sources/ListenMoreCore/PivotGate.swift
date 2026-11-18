@@ -17,10 +17,11 @@ import Foundation
 ///    of the person words (`pivot_other_person` counts you, he, she, they and the like against it),
 ///    and either a sentence opens with a pivot opener or there are at least
 ///    `pivot_first_person_min_words` of them. A reply that opens with sympathy (`pivot_sympathy`:
-///    "sorry to hear", "i hope", "congratulations", "that's rough") counts only when it then turns to
-///    the user's own story: a pivot opener in the clause right after the sympathy or at a later
-///    sentence start ("i'm so sorry, that's rough. when my dad had surgery i…"). Sympathy with only
-///    talk about them, or offers of help, is commiseration, not a pivot.
+///    "sorry to hear", "i hope he", "congratulations", "that's rough") is judged on what follows the
+///    sympathy, where "we", "our" and "us" count as the user too (`pivot_first_person_plural`): "i'm
+///    so sorry. my mom was in the hospital last year and i was there every night…" is a pivot, and
+///    sympathy with only talk about them is commiseration. A reply offering help (`pivot_help_offers`:
+///    "let me know", "if you need", "i can help") is about them.
 /// 3. No question back anywhere in the reply: no "?", no sentence or clause that opens like a
 ///    question ("how's", "did your", "are they"), no sentence ending in a tag ("…, right"), no
 ///    invitation.
@@ -101,6 +102,9 @@ final class PivotGate {
     private let leadIns: [String]
     private let tags: [[String]]
     private let firstPerson: Set<String>
+    /// With "we", "our" and "us": in the text after a sympathy opening the user's own story often
+    /// starts with their household ("congrats! we just bought a house too").
+    private let firstPersonAfterSympathy: Set<String>
     private let otherPerson: Set<String>
     private var them: [Line] = []
     private var me: [Line] = []
@@ -128,6 +132,7 @@ final class PivotGate {
         leadIns = x.pivotLeadIns.filter { !$0.isEmpty }
         tags = x.pivotTagQuestions.map(TextRules.tokens).filter { !$0.isEmpty }
         firstPerson = Set(x.pivotFirstPerson)
+        firstPersonAfterSympathy = firstPerson.union(x.pivotFirstPersonPlural)
         otherPerson = Set(x.pivotOtherPerson)
     }
 
@@ -292,50 +297,71 @@ final class PivotGate {
               !lines.contains(where: { line in
                   has(line.text, invites) || pieces(line.text).contains(where: asks)
                       || TextRules.sentences(line.text).contains(where: endsWithTag)
-              }) else { return false }
-        let first = words.filter(firstPerson.contains).count, other = words.filter(otherPerson.contains).count
-        let aboutMe = first > 0 && Double(first) >= x.pivotFirstPersonShare * Double(first + other)
+              }),
+              !lines.contains(where: { has($0.text, x.pivotHelpOffers) }) else { return false }
         let opening = sympathyOpening(lines)
         if opening.led {
-            let story = opening.next.map { next in x.pivotOpeners.contains { TextRules.startsWith(strippingLeadIns(next), $0) } } ?? false
-            return aboutMe && (story || lines.contains(where: opensWithPivot))
+            return aboutUser(opening.rest.flatMap(TextRules.tokens), firstPerson: firstPersonAfterSympathy,
+                             opens: opening.starts.contains(where: opensWithOpener))
         }
-        if aboutMe && lines.contains(where: opensWithPivot) { return true }
+        return aboutUser(words, firstPerson: firstPerson, opens: lines.contains(where: opensWithPivot))
+    }
+
+    /// First-person words are `pivot_first_person_share` of the person words, and either the text
+    /// opens with a pivot opener or there are `pivot_first_person_min_words` of them.
+    private func aboutUser(_ words: [String], firstPerson: Set<String>, opens: Bool) -> Bool {
+        let first = words.filter(firstPerson.contains).count, other = words.filter(otherPerson.contains).count
+        let aboutMe = first > 0 && Double(first) >= x.pivotFirstPersonShare * Double(first + other)
+        if aboutMe && opens { return true }
         return aboutMe && first >= x.pivotFirstPersonMinWords
     }
 
     /// Does the reply open with sympathy for them ("oh no, i'm so sorry, that's rough")? If so, the
-    /// clause right after it, where a turn to the user's own story would start.
-    private func sympathyOpening(_ lines: [Line]) -> (led: Bool, next: String?) {
-        var led = false
-        for piece in lines.flatMap({ pieces($0.text) }) {
-            if TextRules.tokens(strippingLeadIns(piece)).isEmpty { continue }
-            if has(piece, x.pivotSympathy) {
-                led = true
-                continue
+    /// clauses after it, and those of them that start a sentence or the rest of the reply.
+    private func sympathyOpening(_ lines: [Line]) -> (led: Bool, rest: [String], starts: [String]) {
+        var led = false, leading = true
+        var rest: [String] = [], starts: [String] = []
+        for sentence in lines.flatMap({ TextRules.sentences($0.text) }) {
+            for (i, piece) in clauses(sentence).enumerated() {
+                if leading {
+                    if TextRules.tokens(strippingLeadIns(piece)).isEmpty { continue }
+                    if has(piece, x.pivotSympathy) {
+                        led = true
+                        continue
+                    }
+                    guard led else { return (false, [], []) }
+                    leading = false
+                    starts.append(piece)
+                } else if i == 0 {
+                    starts.append(piece)
+                }
+                rest.append(piece)
             }
-            return (led, led ? piece : nil)
         }
-        return (led, nil)
+        return (led, rest, starts)
     }
 
     /// A sentence of the line starts with a pivot opener, after any lead-in words ("oh nice, that
     /// reminds me"). An opener inside a sentence ("she told me too") doesn't count.
     private func opensWithPivot(_ line: Line) -> Bool {
-        TextRules.sentences(line.text).contains { sentence in
-            let rest = strippingLeadIns(sentence)
-            return x.pivotOpeners.contains { TextRules.startsWith(rest, $0) }
-        }
+        TextRules.sentences(line.text).contains(where: opensWithOpener)
+    }
+
+    private func opensWithOpener(_ piece: String) -> Bool {
+        let rest = strippingLeadIns(piece)
+        return x.pivotOpeners.contains { TextRules.startsWith(rest, $0) }
     }
 
     /// Each sentence and each clause in it. Every transcript starts a sentence, so a question that
     /// follows a pause still starts one when the transcriber joined it without punctuation.
     private func pieces(_ text: String) -> [String] {
-        TextRules.sentences(text).flatMap { sentence in
-            sentence.split(whereSeparator: { ",;\u{2014}".contains($0) })
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }
+        TextRules.sentences(text).flatMap(clauses)
+    }
+
+    private func clauses(_ sentence: String) -> [String] {
+        sentence.split(whereSeparator: { ",;\u{2014}".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private func asks(_ piece: String) -> Bool {
