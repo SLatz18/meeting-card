@@ -11,6 +11,8 @@ public struct ExpectedCue: Sendable {
     public var reason: String
     /// Another cue the rules allow instead, in its own window.
     public var alternative: (type: CueType, window: ClosedRange<Double>)?
+    /// A cut-in: the You line that cuts in and the Them line it cuts in on.
+    public var cutIn: (you: String, them: String)? = nil
 
     public func accepts(_ c: CueRecord) -> Bool {
         if c.type == type && (level == nil || c.level == level) && window.contains(c.t) { return true }
@@ -133,6 +135,7 @@ public enum CueOracle {
                 let window = live ? (u.start + 0.6)...(fire + 2.0) : (fire - 0.25)...(fire + 0.5)
                 var e = ExpectedCue(type: .interrupt, level: nil, window: window, optional: false,
                                     reason: "\(u.line.id) cuts in on \(th.line.id): overlap \(fmt(overlap)) s, they continue \(fmt(othersAfter)) s")
+                e.cutIn = (u.line.id, th.line.id)
                 // The cut-in needs Them to keep talking until its opening overlap (cut_in_min_overlap_ms of
                 // both speaking) has built up: LocalLayer drops it when Them's speech stops for longer than
                 // `cutInMaxOthersGapS` before then. Where Them's own audio pauses longer in that span (word
