@@ -308,6 +308,19 @@ final class PivotGateTests: XCTestCase {
         }
     }
 
+    /// Passing on a message from family ("my mom says hi", "my son asked about the race") is about them,
+    /// though the sentence opens with family.
+    func testPassingOnAMessageFromFamilyIsNone() {
+        let house = "We finally bought our first house last week and I am so excited to move in."
+        for (share, reply) in [
+            (PivotLines.share, "My mom says hi, I mentioned the race when we spoke on Sunday and the whole family was impressed by the time."),
+            (PivotLines.share, "My son asked about the race this morning, I said the time was amazing and the whole team should be proud."),
+            (house, "Congrats! My mom says hi, I mentioned the house when we spoke on Sunday and the whole family was excited."),
+        ] {
+            XCTAssertEqual(run(pivot(reply: reply, share: share), until: 30).counters.candidates, 0, reply)
+        }
+    }
+
     /// Family words that open a sentence about them, not a story of the user's own.
     func testFamilyWordsInTalkAboutThemAreNone() {
         let house = "We finally bought our first house last week and I am so excited to move in."

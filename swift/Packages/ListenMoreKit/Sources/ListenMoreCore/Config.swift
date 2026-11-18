@@ -140,7 +140,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var pivotOpeners: [String]
         public var pivotFirstPerson: [String]
         public var pivotOtherPerson: [String]
-        /// Reactions to their news ("that sounds", "love that"); each counts as one `pivot_other_person` word.
+        /// Reactions to their news ("that sounds", "love that") and messages passed on to them ("my mom
+        /// says hi", "asked about"); each counts as one `pivot_other_person` word.
         public var pivotAboutThem: [String]
         public var pivotFirstPersonMinWords: Int
         /// With a pivot opener, this many first-person words are enough.
