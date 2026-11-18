@@ -372,11 +372,23 @@ final class CoachController: NSObject {
         guard let n = CoachNudge(cue) else { return }
         nudges.show(n, now: ProcessInfo.processInfo.systemUptime)
         CoachCardPresenter.announce(n.announcement)
+        scheduleNudgeStep()
+        refresh()
+    }
+
+    /// Redraws when a cue's words give way to its lingering glyph, and again when the glyph clears.
+    private func scheduleNudgeStep() {
         nudgeTimer?.invalidate()
-        let t = Timer(timeInterval: nudges.hold, repeats: false) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
+        nudgeTimer = nil
+        guard let wait = nudges.nextChange(now: ProcessInfo.processInfo.systemUptime) else { return }
+        let t = Timer(timeInterval: wait, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refresh()
+                self?.scheduleNudgeStep()
+            }
+        }
         RunLoop.main.add(t, forMode: .common)
         nudgeTimer = t
-        refresh()
     }
 
     func showSettings() {
@@ -411,7 +423,7 @@ final class CoachController: NSObject {
         let now = ProcessInfo.processInfo.systemUptime
         nudges.expire(now: now)
         var state = CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
-                                   nudge: nudges.active(now: now),
+                                   nudge: nudges.active(now: now), lingering: nudges.lingering(now: now),
                                    mode: minimized ? .pill : .card,
                                    increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
                                    savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)

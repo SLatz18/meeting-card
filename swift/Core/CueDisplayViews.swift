@@ -323,11 +323,11 @@ struct CuePillMock: View {
                     CueGlyph(symbol: glyph, size: p.glyphSize, weight: Theme.CoachCard.iconGlyph.weight, style: glyphStyle)
                     if let words {
                         Text(words.words)
-                            .font(p.wordsFont.swiftUI)
+                            .font(d.pillWordsFont.swiftUI)
                             .foregroundStyle(Theme.CoachCard.nudgeText.shapeStyle(style))
                             .lineLimit(1)
                             .fixedSize()
-                            .padding(.horizontal, p.wordsInset)
+                            .padding(.horizontal, d.pillWordsInset)
                     }
                     Spacer(minLength: CardStyle.Spacing.control)
                     HStack(spacing: p.buttonGap) {
@@ -344,7 +344,7 @@ struct CuePillMock: View {
                 .frame(maxHeight: .infinity)
                 .padding(.top, p.grabberTop + p.grabber.height)
             }
-            .frame(minWidth: p.width, maxWidth: p.maxWidth)
+            .frame(minWidth: p.width, maxWidth: d.pillMaxWidth)
             .fixedSize(horizontal: true, vertical: false)
             .frame(height: p.height)
             .background(shape.fill(style.surface.swiftUI))

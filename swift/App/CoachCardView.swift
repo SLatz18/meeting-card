@@ -39,9 +39,6 @@ extension CoachCardState.Status {
         case .micOff: CoachCopy.coachMicOff
         }
     }
-
-    /// The status glyph: the coach's, or the mic-off glyph while the coach's own Mute is on.
-    var symbol: String { self == .micOff ? Theme.CoachCard.Symbols.micOff : Theme.CoachCard.Symbols.status }
 }
 
 extension CoachNudge {
@@ -199,9 +196,17 @@ class CoachSurfaceView: NSView {
                              weight: Theme.weight(Theme.CoachCard.iconGlyph), label: label)
     }
 
-    /// The coach glyph's tint: live while listening, otherwise the line's own color.
+    /// The status glyph's tint: a lingering cue's in the held role; live while listening; otherwise
+    /// the line's own color (with a nudge's words, the words' color).
     func glyphTint(_ line: NSColor) -> NSColor {
-        state.live && state.nudge == nil ? Theme.ns(Theme.Coach.live(style: style)) : line
+        if state.status == .listening, state.lingering != nil { return Theme.text(Theme.CoachCard.lingerGlyphText, style) }
+        return state.live && state.nudge == nil ? Theme.ns(Theme.Coach.live(style: style)) : line
+    }
+
+    /// What VoiceOver reads for the status: with a lingering cue, its words after the status.
+    func statusLabel(_ s: CoachCardState) -> String {
+        guard s.status == .listening, let cue = s.lingering else { return s.status.text }
+        return CoachCardCopy.Linger.accessibilityLabel(status: s.status.text, words: cue.words)
     }
 
     /// Status line (or nudge words) color.
@@ -356,9 +361,9 @@ final class CoachFullCardView: CoachSurfaceView {
         let h = line.intrinsicContentSize.height
         line.frame.origin.y = (band.frame.height - h) / 2
         line.frame.size.height = h
-        glyph.image = Self.glyphImage(text, symbol: s.status.symbol)
+        glyph.image = Self.glyphImage(text, symbol: s.statusSymbol)
         glyph.contentTintColor = glyphTint(fg)
-        band.setAccessibilityLabel([text, s.savingBadge].compactMap { $0 }.joined(separator: ", "))
+        band.setAccessibilityLabel([s.nudge?.words ?? statusLabel(s), s.savingBadge].compactMap { $0 }.joined(separator: ", "))
         applyNudge(s.nudge, box: band, bar: bar)
         applyBadge(s.savingBadge)
 
@@ -429,14 +434,15 @@ final class CoachFullCardView: CoachSurfaceView {
     }
 }
 
-/// The minimized coach: grabber, coach glyph (and the nudge words while one holds), then the coach's
-/// own Mute, Mute in Zoom (only while it can act), Pause/Resume and Stop. A click on the pill (or
-/// VoiceOver's press on the grabber) expands it.
+/// The minimized coach: grabber, status glyph, then the coach's own Mute, Mute in Zoom (only while it
+/// can act), Pause/Resume and Stop. Its width never changes for a cue: while a nudge holds, the glyph
+/// is the cue's in its tone, with the tone's leading bar; while the cue lingers, the cue's glyph in
+/// the held role. The cue's words are its tooltip and part of its VoiceOver label. A click on the
+/// pill (or VoiceOver's press on the grabber) expands it.
 final class CoachPillView: CoachSurfaceView {
     private let bar = CoachSurfaceView.layerView()
     private let grabber = CoachGrabber()
     private let glyph = NSImageView()
-    private let words = CoachSurfaceView.label()
     private(set) var micMute: CardButton!
     private(set) var mute: CardButton!
     private(set) var pause: CardButton!
@@ -446,14 +452,7 @@ final class CoachPillView: CoachSurfaceView {
 
     override var surfaceRadius: Double { Theme.CoachPill.radius }
 
-    /// The words' label width: the text plus the text field's inset each side, so they never clip.
-    static func wordsWidth(_ nudge: CoachNudge?) -> Double {
-        guard let nudge else { return 0 }
-        let text = (nudge.words as NSString).size(withAttributes: [.font: Theme.font(Theme.CoachPill.wordsFont)]).width
-        return Double(text.rounded(.up)) + 2 * Theme.CoachPill.wordsInset
-    }
-
-    static func width(for s: CoachCardState) -> Double { s.pillWidth(wordsWidth: wordsWidth(s.nudge)) }
+    static func width(for s: CoachCardState) -> Double { s.pillWidth }
 
     init(state: CoachCardState, actions: CoachCardActions) {
         let p = Theme.CoachPill.self
@@ -475,9 +474,6 @@ final class CoachPillView: CoachSurfaceView {
         glyph.frame = NSRect(x: p.glyphX, y: p.rowMidY - p.glyphSize / 2, width: p.glyphSize, height: p.glyphSize)
         glyph.setAccessibilityElement(false)
         addSubview(glyph)
-        let wx = p.glyphX + p.glyphSize + p.glyphGap
-        words.frame = NSRect(x: wx, y: p.rowMidY, width: p.wordsRoom(pillWidth: w, buttons: buttons), height: 0)
-        addSubview(words)
 
         micMute = button(radius: p.buttonRadius, action: #selector(muteMicPressed(_:)))
         mute = button(radius: p.buttonRadius, action: #selector(mutePressed(_:)))
@@ -499,26 +495,28 @@ final class CoachPillView: CoachSurfaceView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    /// While a nudge holds: the tone's leading bar only, no tint and no outline.
+    private func applyCueBar(_ nudge: CoachNudge?) {
+        guard let nudge else {
+            bar.isHidden = true
+            return
+        }
+        bar.isHidden = false
+        bar.layer?.backgroundColor = cg(nudge.color, alpha: CardStyle.Coach.nudgeEdgeAlpha(dark: dark, increasedContrast: state.increasedContrast))
+    }
+
     override func apply(_ s: CoachCardState) {
         super.apply(s)
         let p = Theme.CoachPill.self
-        let fg = lineColor
-        applyNudge(s.nudge, box: self, bar: bar)
+        applyCueBar(s.nudge)
         grabber.layer?.backgroundColor = cg(Theme.text(p.grabberColor, style))
         let size = s.sizeControl
         grabber.toolTip = size.tooltip
         grabber.setAccessibilityLabel(size.accessibilityLabel)
-        toolTip = size.tooltip
-        glyph.image = Self.glyphImage(s.status.text, symbol: s.status.symbol)
-        glyph.contentTintColor = glyphTint(fg)
-        words.isHidden = s.nudge == nil
-        words.font = Theme.font(p.wordsFont)
-        words.textColor = fg
-        words.stringValue = s.nudge?.words ?? ""
-        let h = words.intrinsicContentSize.height
-        words.frame.origin.y = p.rowMidY - h / 2
-        words.frame.size.height = h
-        setAccessibilityLabel(s.nudge.map { "\(s.status.text). \($0.words)" } ?? s.status.text)
+        toolTip = s.pillTooltip
+        glyph.image = Self.glyphImage(s.status.text, symbol: s.statusSymbol)
+        glyph.contentTintColor = s.status == .listening ? (s.nudge?.color ?? glyphTint(lineColor)) : glyphTint(lineColor)
+        setAccessibilityLabel(s.nudge.map { "\(s.status.text). \($0.words)" } ?? statusLabel(s))
         set(micMute, s.coachMuteControl, glyph: p.buttonGlyph)
         set(mute, s.muteControl, glyph: p.buttonGlyph)
         set(pause, s.pauseControl, glyph: p.buttonGlyph)

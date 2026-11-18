@@ -132,13 +132,17 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(comment.contains("UNVERIFIED") && comment.contains("Mac hand check"), comment)
     }
 
-    /// Nudges tint and widen the pill for `nudgeHold` and are announced to VoiceOver.
-    func testNudgesAreAnnouncedAndExpire() throws {
+    /// Nudges are announced to VoiceOver (unchanged), show their words for `nudgeHold`, then linger
+    /// as a glyph until `cueLinger`: a timer redraws at each step.
+    func testNudgesAreAnnouncedLingerAndExpire() throws {
         let controller = try read("App/CoachController.swift")
         XCTAssertTrue(controller.contains("s.onCue = { [weak self] cue in self?.showNudge(cue) }"))
         XCTAssertTrue(controller.contains("CoachCardPresenter.announce(n.announcement)"))
-        XCTAssertTrue(controller.contains("Timer(timeInterval: nudges.hold, repeats: false)"))
-        XCTAssertTrue(controller.contains("nudge: nudges.active(now: now)"))
+        XCTAssertEqual(controller.components(separatedBy: "CoachCardPresenter.announce(").count - 1, 3,
+                       "the nudge, Stop and the coach's Mute only: the linger announces nothing")
+        XCTAssertTrue(controller.contains("guard let wait = nudges.nextChange(now: ProcessInfo.processInfo.systemUptime) else { return }"))
+        XCTAssertTrue(controller.contains("Timer(timeInterval: wait, repeats: false)"))
+        XCTAssertTrue(controller.contains("nudge: nudges.active(now: now), lingering: nudges.lingering(now: now)"))
         XCTAssertTrue(try read("App/CoachCardPanel.swift").contains("notification: .announcementRequested"))
     }
 

@@ -44,7 +44,7 @@ final class CoachRootView: NSView {
 
 /// Shows the coach card: morphs it out of the reminder card in place and glides it to its spot
 /// (Reduce Motion: fades out and back in there), collapses it to the pill and expands it back,
-/// widens the pill for a nudge's words, and follows the call to its display. The spot is
+/// resizes in place for the tip row or Mute in Zoom (never for a cue), and follows the call to its display. The spot is
 /// `CoachPlacement`'s; a drag moves it, is kept inside the visible frame, and is remembered.
 @MainActor
 final class CoachCardPresenter {

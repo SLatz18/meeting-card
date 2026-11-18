@@ -158,7 +158,8 @@ final class CoachCardTests: XCTestCase {
         XCTAssertEqual(k.statusRow.y, k.captions.maxY + CardStyle.Spacing.control, accuracy: 1e-9)
         XCTAssertEqual(k.statusRow.maxY + CardStyle.Spacing.controlBottom, k.height, accuracy: 1e-9)
         XCTAssertEqual(p.button, Theme.Coach.pauseButtonSize)
-        XCTAssertEqual(p.wordsInset, Theme.Coach.glyphGap)
+        XCTAssertEqual(p.lingerGlyphText, Theme.CoachCard.lingerGlyphText)
+        XCTAssertGreaterThanOrEqual(p.glyphRoom(pillWidth: p.width, buttons: 4), 0, "the fullest pill fits its width: it never widens")
         XCTAssertEqual(p.buttonRadius, Theme.Coach.pauseButtonRadius)
         let xs = p.buttonXs(pillWidth: p.width)
         XCTAssertEqual(xs.count, 3, "the coach's Mute, Pause/Resume, Stop")
@@ -265,15 +266,16 @@ final class CoachCardTests: XCTestCase {
         var card = st(.listening); card.mode = .card
         XCTAssertEqual(card.sizeControl.tooltip, "Minimize coach")
         XCTAssertEqual(card.sizeControl.accessibilityLabel, "Minimize call coach card")
-        // A nudge tints and widens; the words are always there, so color is never the only cue.
+        // A cue never widens the pill: its glyph carries it, and its words are the tooltip and part of
+        // the VoiceOver label, so color is never the only cue.
         let amber = st(.listening, Self.live, CoachNudge(kind: .missedQuestion, tone: .amber))
         XCTAssertEqual(amber.tone, .amber)
         XCTAssertEqual(st(.listening, Self.live, CoachNudge(kind: .interrupt, tone: .rose)).tone, .rose)
         XCTAssertNil(st(.listening).tone)
-        XCTAssertEqual(st(.listening).pillWidth(wordsWidth: 150), Theme.CoachPill.width, "no nudge: the pill's width")
-        XCTAssertGreaterThan(amber.pillWidth(wordsWidth: 150), Theme.CoachPill.width)
-        XCTAssertEqual(amber.pillWidth(wordsWidth: 2000), CardLayout.W, "never wider than the card")
-        XCTAssertGreaterThanOrEqual(Theme.CoachPill.wordsRoom(pillWidth: amber.pillWidth(wordsWidth: 150)), 150 - 1e-9)
+        XCTAssertEqual(st(.listening).pillWidth, Theme.CoachPill.width)
+        XCTAssertEqual(amber.pillWidth, Theme.CoachPill.width, "the same width with a cue")
+        XCTAssertEqual(amber.pillTooltip, "Answer their question")
+        XCTAssertEqual(st(.listening).pillTooltip, "Expand coach", "no cue: the pill's Expand")
         for kind in CoachNudge.Kind.allCases {
             XCTAssertFalse(CoachNudge(kind: kind, tone: .amber).words.isEmpty)
             XCTAssertTrue(CoachNudge(kind: kind, tone: .amber).announcement.hasPrefix("Call coach: "))
@@ -337,8 +339,8 @@ final class CoachCardTests: XCTestCase {
         }
         let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
         func read(_ f: String) throws -> String { try String(contentsOf: app.appendingPathComponent(f), encoding: .utf8) }
-        XCTAssertTrue(try read("CoachCardView.swift").contains("self == .micOff ? Theme.CoachCard.Symbols.micOff : Theme.CoachCard.Symbols.status"),
-                      "the card's status line")
+        XCTAssertTrue(try read("CoachCardView.swift").contains("glyph.image = Self.glyphImage(text, symbol: s.statusSymbol)"),
+                      "the card's status line (statusSymbol keeps micOff's glyph)")
         XCTAssertTrue(try read("CoachChip.swift").contains("mode == .micOff ? Theme.Coach.micOffSymbol : Theme.Coach.symbol"), "the chip")
         XCTAssertTrue(try read("CoachController.swift").contains("case .micOff: m = note(CoachCopy.coachMicOff, Theme.Coach.micOffSymbol)"),
                       "the menu's status line")
@@ -370,22 +372,106 @@ final class CoachCardTests: XCTestCase {
 
     // MARK: nudges
 
-    func testNudgeHoldsForFourAndAHalfSeconds() {
+    /// Words for 4.5 s, then the glyph alone until 20 s after the cue arrived, then nothing.
+    func testNudgeHoldsForFourAndAHalfSecondsThenLingersUntilTwenty() {
         var h = CoachNudgeHold()
         XCTAssertEqual(h.hold, CardStyle.Coach.nudgeHold)
-        let a = CoachNudge(kind: .monologue, tone: .amber), r = CoachNudge(kind: .talkOver, tone: .rose)
+        XCTAssertEqual(h.linger, CardStyle.Coach.cueLinger)
+        XCTAssertEqual(CardStyle.Coach.nudgeHold, 4.5)
+        XCTAssertEqual(CardStyle.Coach.cueLinger, 20)
+        let a = CoachNudge(kind: .monologue, tone: .amber)
         XCTAssertNil(h.active(now: 0))
+        XCTAssertNil(h.lingering(now: 0))
+        XCTAssertNil(h.nextChange(now: 0), "nothing to change")
         h.show(a, now: 10)
         XCTAssertEqual(h.active(now: 10), a)
+        XCTAssertNil(h.lingering(now: 10), "words first, never both")
+        XCTAssertEqual(h.nextChange(now: 10), 4.5)
         XCTAssertEqual(h.active(now: 14.49), a)
-        XCTAssertNil(h.active(now: 14.5), "gone after nudgeHold")
-        XCTAssertFalse(h.expire(now: 14.4))
-        h.show(r, now: 13)
-        XCTAssertEqual(h.active(now: 17.4), r, "a newer nudge replaces it and restarts the hold")
-        XCTAssertNil(h.active(now: 17.5))
-        XCTAssertTrue(h.expire(now: 17.5))
+        XCTAssertNil(h.active(now: 14.5), "the words go after nudgeHold")
+        XCTAssertEqual(h.lingering(now: 14.5), a, "then the glyph lingers")
+        XCTAssertEqual(h.nextChange(now: 14.5) ?? 0, 15.5, accuracy: 1e-9)
+        XCTAssertEqual(h.lingering(now: 29.99), a)
+        XCTAssertFalse(h.expire(now: 29.99), "still lingering")
+        XCTAssertNil(h.lingering(now: 30), "gone 20 s after it arrived")
+        XCTAssertNil(h.active(now: 30))
+        XCTAssertNil(h.nextChange(now: 30))
+        XCTAssertTrue(h.expire(now: 30))
         XCTAssertNil(h.nudge)
-        XCTAssertFalse(h.expire(now: 30), "nothing left to drop")
+        XCTAssertFalse(h.expire(now: 40), "nothing left to drop")
+    }
+
+    /// A newer cue replaces the one on show, in its words or its linger, and starts both again.
+    func testANewerCueReplacesTheOneOnShow() {
+        var h = CoachNudgeHold()
+        let a = CoachNudge(kind: .monologue, tone: .amber), r = CoachNudge(kind: .talkOver, tone: .rose)
+        h.show(a, now: 10)
+        h.show(r, now: 13)
+        XCTAssertEqual(h.active(now: 17.4), r, "during the words: replaced, the hold restarts")
+        XCTAssertNil(h.active(now: 17.5))
+        XCTAssertEqual(h.lingering(now: 17.5), r, "the newer cue's glyph lingers, not the older one's")
+        h.show(a, now: 25)
+        XCTAssertEqual(h.active(now: 25), a, "during the linger: replaced by the newer cue's words")
+        XCTAssertNil(h.lingering(now: 25))
+        XCTAssertEqual(h.lingering(now: 44.9), a, "its own 20 s")
+        XCTAssertNil(h.lingering(now: 45))
+        var short = CoachNudgeHold(hold: 4.5, linger: 1)
+        short.show(a, now: 0)
+        XCTAssertEqual(short.linger, 4.5, "a linger never ends before the words")
+        XCTAssertNil(short.lingering(now: 5))
+    }
+
+    /// The status glyph: the cue's while it holds or lingers and the coach is listening; the coach's
+    /// not-hearing glyph is never covered; the card's state carries words or a linger, never both.
+    func testStatusGlyphFollowsTheCue() {
+        let s = Theme.CoachCard.Symbols.self
+        let r = CoachNudge(kind: .interrupt, tone: .rose)
+        func state(_ status: CoachCardState.Status, nudge: CoachNudge? = nil, lingering: CoachNudge? = nil) -> CoachCardState {
+            CoachCardState(status: status, mute: Self.live, coachMicMuted: status == .micOff, nudge: nudge, lingering: lingering)
+        }
+        XCTAssertEqual(state(.listening).statusSymbol, s.status)
+        XCTAssertEqual(state(.listening, nudge: r).statusSymbol, s.cue(.interrupt), "with the words")
+        XCTAssertEqual(state(.listening, lingering: r).statusSymbol, s.cue(.interrupt), "after them")
+        XCTAssertEqual(state(.micOff, lingering: r).statusSymbol, s.micOff, "the coach's Mute keeps its glyph")
+        XCTAssertEqual(state(.micOff, nudge: r).statusSymbol, s.micOff)
+        for status in [CoachCardState.Status.idle, .paused, .muted] {
+            XCTAssertEqual(state(status, lingering: r).statusSymbol, s.status, "\(status)")
+        }
+        let both = state(.listening, nudge: r, lingering: CoachNudge(kind: .monologue, tone: .amber))
+        XCTAssertNil(both.lingering, "words win; never both")
+        XCTAssertEqual(both.cue, r)
+        XCTAssertEqual(state(.listening, lingering: r).cue, r)
+        XCTAssertNil(state(.listening, lingering: r).nudge, "a linger isn't a nudge: no band, no tint")
+    }
+
+    /// Cue glyphs: one per cue type, all different, and never a mic (Mute in Zoom's), a waveform (the
+    /// coach's hearing state) or an ear (the coach); the prototype shows the same ones.
+    func testCueGlyphsKeepTheHearingGlyphRule() {
+        let glyphs = CoachNudge.Kind.allCases.map(Theme.CoachCard.Symbols.cue)
+        XCTAssertEqual(Set(glyphs).count, glyphs.count)
+        for g in glyphs {
+            for reserved in ["mic", "waveform", "ear"] { XCTAssertFalse(g.hasPrefix(reserved), g) }
+        }
+        XCTAssertEqual(CoachNudge.Kind.allCases.map(Theme.CueDisplay.glyph), glyphs, "the prototype shows the shipped glyphs")
+        // That each is a real SF Symbol on the runner's macOS: CueDisplaySnapshotTests.testGlyphVocabulary.
+    }
+
+    /// The lingering cue's VoiceOver label (draft copy until a writer approves it).
+    func testLingerCopy() {
+        XCTAssertTrue(CoachCardCopy.Linger.isDraft)
+        XCTAssertEqual(CoachCardCopy.Linger.accessibilityLabel(status: "Coach on, listening", words: "Let them finish"),
+                       "Coach on, listening. Last cue: Let them finish.")
+    }
+
+    /// The pill's cue glyph in its tone stays visible on the pill's surface (3:1 for graphics) in
+    /// light and dark.
+    func testCueGlyphToneContrastOnThePill() {
+        for dark in [false, true] {
+            for tone in [CoachNudge.Tone.rose, .amber] {
+                let ratio = RGBA.contrast(CoachNudgeColors.tone(tone, dark: dark), CardStyle.for(dark: dark).surface)
+                XCTAssertGreaterThanOrEqual(ratio, 3, "\(tone) dark=\(dark): \(ratio)")
+            }
+        }
     }
 
     /// Nudge words keep 4.5:1 on the tint in light and dark, standard and Increase Contrast. The
