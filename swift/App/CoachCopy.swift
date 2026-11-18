@@ -61,9 +61,9 @@ enum CoachCopy {
     /// The judge was told to use an address that isn't on the allowed list (`JudgeFailure.untrustedHost`). Not tied
     /// to one provider; shown whole, not inside the TypeSafe-style note below.
     static let judgeUntrustedHost = "AI cues are off for this call. The AI provider sent a web address that isn't on the allowed list. Captions keep running."
-    /// DRAFT (placeholder, pending copy review): the regional address was on the allowed list and was used, and it
-    /// didn't work (`JudgeFailure.hostRejected`).
-    static let judgeHostRejected = "AI cues are off for this call. The AI provider's regional address didn't work. Captions keep running."
+    /// The provider's regional address was on the allowed list and was used, and it didn't work, or the provider
+    /// named only the address just used (`JudgeFailure.hostRejected`).
+    static let judgeHostRejected = "AI cues are off for this call. The AI provider's server didn't respond correctly. Captions keep running."
 
     /// Why judging stopped: the failure's kind and status code only, never key text.
     static func judgeStopped(_ failure: JudgeFailure) -> String {

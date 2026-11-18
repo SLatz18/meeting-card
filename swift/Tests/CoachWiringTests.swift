@@ -159,7 +159,7 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertEqual(text["judgeUntrustedHost"],
                        "AI cues are off for this call. The AI provider sent a web address that isn't on the allowed list. Captions keep running.")
         XCTAssertEqual(text["judgeHostRejected"],
-                       "AI cues are off for this call. The AI provider's regional address didn't work. Captions keep running.")
+                       "AI cues are off for this call. The AI provider's server didn't respond correctly. Captions keep running.")
         for key in ["judgeUntrustedHost", "judgeHostRejected"] {
             let line = try XCTUnwrap(text[key])
             XCTAssertFalse(line.contains("TypeSafe") || line.contains("HTTP") || line.lowercased().contains("key"), key)

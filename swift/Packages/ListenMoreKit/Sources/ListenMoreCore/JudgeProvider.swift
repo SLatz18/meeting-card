@@ -51,8 +51,8 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
     case timeout
     case transport
     case badResponse
-    /// The OpenAI judge was told to use another host that can't be used (not an OpenAI API host, or the
-    /// redirect failed): it stops judging, with no more posts. Not a TypeSafe failure.
+    /// The OpenAI judge was told to use another host that can't be used (not an OpenAI API host): it stops
+    /// judging, with no more posts. Not a TypeSafe failure.
     case untrustedHost
     /// The OpenAI judge was redirected to a regional host that was trusted and used, and it didn't work (it
     /// rejected the key or the request, or named the host just used): the judge stops, no more posts.
