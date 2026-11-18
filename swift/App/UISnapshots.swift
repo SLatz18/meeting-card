@@ -93,7 +93,7 @@ enum UISnapshots {
             defaults.set(false, forKey: CoachController.Keys.callControls)
             defaults.set(JudgeProviderKind.gpt.rawValue, forKey: CoachController.Keys.judgeProvider)
             let keychain = KeychainStore(service: suite, account: "none")
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false,
+            guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false,
                                                    transcriptStore: MemoryTranscriptStore()) else { return finish() }
             coach.service?.setEnabled(false)
             coach.keyStored = true
@@ -448,7 +448,7 @@ enum UISnapshots {
         func coach() -> CoachController? {
             defaults.removePersistentDomain(forName: suite)
             defaults.set(true, forKey: CoachController.Keys.onboarded)
-            return try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false,
+            return try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false,
                                         transcriptStore: MemoryTranscriptStore())
         }
         func state(_ c: CoachController) -> String { c.settingsWindow?.coachSwitchOn == true ? "on" : "off" }
@@ -486,7 +486,7 @@ enum UISnapshots {
     static func menuShots(dir: String, tag: String, controller: Controller, packet: (String, CGImage?) -> Void) {
         let suite = AppIdentity.current.scoped("snapshots")
         guard let defaults = UserDefaults(suiteName: suite),
-              let coach = try? CoachController(defaults: defaults, keychain: KeychainStore(service: suite, account: "none"),
+              let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: KeychainStore(service: suite, account: "none"),
                                                showsStatusItem: false) else { return }
         defaults.removePersistentDomain(forName: suite)
         let states: [(String, [CoachMenuItem])] = [
@@ -649,29 +649,29 @@ enum UISnapshots {
         typealias Shot = (name: String, atEnd: Bool, make: () -> CoachSettingsWindow?)
         let onboarding: [Shot] = (0..<CoachCopy.onboarding.count).map { i in
             ("onboarding-\(i + 1)", false, {
-                guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+                guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false) else { return nil }
                 return CoachSettingsWindow(coach: coach, onboardingScreen: i)
             })
         }
         let shots: [Shot] = onboarding + [("settings", false, {
             defaults.set(true, forKey: CoachController.Keys.onboarded)
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false) else { return nil }
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
         }), ("settings-scrolls", false, {
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false) else { return nil }
             let w = CoachSettingsWindow(coach: coach, visibleHeightOverride: 480)
             w.update()
             return w
         }), ("settings-feedback", true, {
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false) else { return nil }
             let w = CoachSettingsWindow(coach: coach, visibleHeightOverride: 480)
             w.update()
             return w
         }), ("settings-local-only", false, {
             defaults.set(true, forKey: CoachController.Keys.enabled)
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false) else { return nil }
             coach.service?.setEnabled(false)
             let w = CoachSettingsWindow(coach: coach)
             w.update()
@@ -679,7 +679,7 @@ enum UISnapshots {
         }), ("settings-call-controls", false, {
             defaults.set(false, forKey: CoachController.Keys.enabled)
             defaults.set(true, forKey: CoachController.Keys.callControls)
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false) else { return nil }
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
@@ -687,13 +687,13 @@ enum UISnapshots {
             defaults.set(false, forKey: CoachController.Keys.enabled)
             defaults.set(JudgeProviderKind.typesafe.rawValue, forKey: CoachController.Keys.judgeProvider)
             defaults.set(false, forKey: CoachController.Keys.callControls)
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false) else { return nil }
             let w = CoachSettingsWindow(coach: coach)
             w.update()
             return w
         }), ("settings-judge-stopped", false, {
             defaults.set(JudgeProviderKind.typesafe.rawValue, forKey: CoachController.Keys.judgeProvider)
-            guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false) else { return nil }
+            guard let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: keychain, showsStatusItem: false) else { return nil }
             coach.typeSafeKeyStored = true
             coach.previewJudgeStop = .http(401)
             let w = CoachSettingsWindow(coach: coach)

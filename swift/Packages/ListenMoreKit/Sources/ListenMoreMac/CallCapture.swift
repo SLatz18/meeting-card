@@ -65,7 +65,7 @@ public final class CallCapture: NSObject, CallSource, SCStreamOutput, SCStreamDe
         case .nothingToCapture:
             throw CaptureError.nothingToCapture
         case .processTap(let pids):
-            try startProcessTap(pids: pids, resampler: resampler, handler: handler)
+            try startProcessTap(pids: pids, stage: stage, resampler: resampler, handler: handler)
         case .screenCapture(let pids):
             guard let display = content.displays.first else { throw CaptureError.noDisplay }
             let wanted = Set(pids)
@@ -77,6 +77,7 @@ public final class CallCapture: NSObject, CallSource, SCStreamOutput, SCStreamDe
             }
             try await stream.startCapture()
             lock.withLock { self.stream = stream }
+            CoachLog.record(.callAudioStarted(stage: stage, method: .screenCapture, targets: scApps.count))
             Log.capture.info("call capture started: stage \(stage.rawValue, privacy: .public), apps count \(scApps.count, privacy: .public)")
         }
     }
@@ -108,7 +109,7 @@ public final class CallCapture: NSObject, CallSource, SCStreamOutput, SCStreamDe
         return pids
     }
 
-    private func startProcessTap(pids: [Int32], resampler: MonoResampler, handler: @escaping @Sendable ([Float]) -> Void) throws {
+    private func startProcessTap(pids: [Int32], stage: CaptureStage, resampler: MonoResampler, handler: @escaping @Sendable ([Float]) -> Void) throws {
         guard #available(macOS 14.2, *) else { throw CaptureError.processTapUnavailable }
         // Helpers' audio process objects come and go; the session restarts capture to re-resolve.
         let objects = pids.compactMap { CoreAudioStateProvider.objectID(forPid: $0) }
@@ -119,6 +120,7 @@ public final class CallCapture: NSObject, CallSource, SCStreamOutput, SCStreamDe
             if !samples.isEmpty { handler(samples) }
         }
         lock.withLock { self.tap = tap }
+        CoachLog.record(.callAudioStarted(stage: stage, method: .processTap, targets: objects.count))
         Log.capture.info("call capture started: process tap, objects count \(objects.count, privacy: .public)")
     }
 
@@ -132,6 +134,7 @@ public final class CallCapture: NSObject, CallSource, SCStreamOutput, SCStreamDe
 
     public func stream(_ stream: SCStream, didStopWithError error: Error) {
         let code = (error as NSError).code
+        CoachLog.record(.callAudioStopped(code: code))
         Log.capture.error("call capture stopped with error code \(code, privacy: .public)")
     }
 }

@@ -73,6 +73,8 @@ public final class CoachSession {
         case callCaptureFailed(stage: CaptureStage)
         case keyUnreadable
         case fallbackEngaged(stage: CaptureStage)
+        /// The call's audio is silent (no buffers, or buffers of zeros): see `AudioFlowMeter`.
+        case callAudioSilent(SilenceKind)
         /// The transcriber refused `input_audio_buffer.clear` after Mute; nothing stopped.
         case transcriberClearRejected
     }
@@ -110,6 +112,14 @@ public final class CoachSession {
     private let micGate = AudioGate()
     private var fallback = CaptureFallbackPolicy()
     private let callLevel = CallLevelMeter()
+    private var captionFinal = 0
+    private var captionPartial = 0
+    private var captionWindowStart: TimeInterval = 0
+    private var detectionThrottle = DetectionLogThrottle()
+    /// What the host knows about the permissions a call needs; shown beside each detection check.
+    public var permissionSummary: () -> PermissionSummary = { .unknown }
+    private let callFlow = AudioFlowMeter(source: .call, watchesSilence: true)
+    private let micFlow = AudioFlowMeter(source: .mic, watchesSilence: false)
     private var shownAt: [CueType: TimeInterval] = [:]
     /// Wall-clock time this session's capture first started, and how long after it the running engine
     /// started. Each engine counts from 0 (Pause and the call app's mute restart it), so the session's
@@ -126,6 +136,15 @@ public final class CoachSession {
     /// The mic device is closed (`MicSource.setMuted(true)`) while capture runs: the session's app
     /// reported its call ended (see `syncMic`).
     public private(set) var micDeviceOff = false
+    /// The session's app, as the diagnostics file names it (the app that started it, or the first one captured).
+    private var loggedApp: LogToken?
+    /// Why capture is held now (for the pause line that releases it).
+    private var heldCause: HoldCause = .none
+
+    private static func holdCause(_ session: TriggerSession?) -> HoldCause {
+        guard let session else { return .none }
+        return session.paused ? .user : session.muted ? .callMuted : .none
+    }
 
     public init(config: ListenMoreConfig, engine: CoachEngine, mic: MicSource, call: CallSource, signal: CallSignal,
                 keys: APIKeyProvider, renderer: CueRenderer, settings: TriggerSettings, enabled: Bool = true,
@@ -176,6 +195,13 @@ public final class CoachSession {
 
     public var isPolling: Bool { timer != nil }
 
+    /// The app is quitting: the session ends with reason `quit`, then capture stops.
+    public func quit() {
+        stopPolling()
+        apply(trigger.quit())
+        stopCapture()
+    }
+
     public func shutdown() {
         stopPolling()
         apply(trigger.setEnabled(false))
@@ -212,6 +238,7 @@ public final class CoachSession {
     public func setMicMuted(_ muted: Bool) {
         guard trigger.session != nil, muted != micMuted else { return }
         micMuted = muted
+        CoachLog.record(.micMuted(muted))
         if isCapturing {
             if muted {
                 syncMic()
@@ -299,19 +326,59 @@ public final class CoachSession {
         let reading = signal.poll(trigger.settings)
         let actions = trigger.tick(liveApps: reading.liveApps, inputRunning: reading.inputRunning, now: wallClock(),
                                    callStates: callState?.callStates() ?? [:])
+        logDetection(actions)
         apply(actions)
         // A manual session adopting the call app changes what to capture without an action.
         let captureChanged = actions.isEmpty && syncCapture()
         let micChanged = syncMic()
         if actions.isEmpty && (captureChanged || micChanged || indicator != before) { changed() }
         checkCallFallback()
+        logAudioFlow()
+    }
+
+    /// One detection check, logged when what was seen or decided changes, else once per ten seconds.
+    private func logDetection(_ actions: [TriggerAction]) {
+        guard let snapshot = signal.detectionSnapshot() else { return }
+        let now = wallClock()
+        let started = actions.contains { if case .start = $0 { return true } else { return false } }
+        let check = DetectionDiagnostics.evaluate(snapshot: snapshot, settings: trigger.settings, enabled: trigger.enabled,
+                                                  inSession: trigger.session != nil, suppressed: trigger.suppressed,
+                                                  startTimers: trigger.startTimers(now: now), started: started,
+                                                  permission: permissionSummary())
+        if detectionThrottle.shouldLog(check, now: now) { CoachLog.record(.detectCheck(check)) }
+    }
+
+    /// Flow lines every ten seconds while capturing, and a note when the call's audio goes silent.
+    private func logAudioFlow() {
+        guard isCapturing else { return }
+        let now = wallClock()
+        if now - captionWindowStart >= AudioFlowMeter.interval { logCaptionsReceived(now: now) }
+        for event in callFlow.tick(now: now) + micFlow.tick(now: now) {
+            CoachLog.record(event)
+            if case .callAudioSilent(_, _, let kind, _) = event {
+                delegate?.coachSession(self, didReport: .callAudioSilent(kind))
+            }
+        }
+    }
+
+    /// Caption events the host got in the last window: counts only, never the text.
+    private func logCaptionsReceived(now: TimeInterval) {
+        CoachLog.record(.captionsReceived(seconds: Int((now - captionWindowStart).rounded()), final: captionFinal, partial: captionPartial))
+        captionFinal = 0
+        captionPartial = 0
+        captionWindowStart = now
     }
 
     private func apply(_ actions: [TriggerAction]) {
         guard !actions.isEmpty else { return }
         for a in actions {
             switch a {
-            case .start:
+            case .start(let started):
+                let app = LogToken.bundleIdOrNil(started.appKey)
+                loggedApp = app
+                if started.reason == .audio { CoachLog.record(.callDetected(bundleId: app)) }
+                heldCause = Self.holdCause(started)
+                CoachLog.record(.sessionStarted(reason: started.reason, bundleId: app, held: started.held, cause: heldCause))
                 // A new session never inherits the previous one's engine (or OpenAI sessions).
                 stopCapture()
                 cuePolicy.reset()
@@ -323,10 +390,16 @@ public final class CoachSession {
                 cuesShown = 0
                 captureProblem = false
                 micMuted = false
-            case .stop:
+            case .stop(let reason):
+                CoachLog.record(.callEnded(bundleId: loggedApp, reason: reason))
+                CoachLog.record(.sessionStopped(reason: reason))
+                loggedApp = nil
                 renderer.clear()
                 micMuted = false
             case .pause(let paused):
+                if paused { heldCause = Self.holdCause(trigger.session) }
+                CoachLog.record(.sessionPaused(paused, cause: heldCause))
+                if !paused { heldCause = .none }
                 cuePolicy.paused = paused
                 if paused { renderer.clear() }
             }
@@ -356,6 +429,7 @@ public final class CoachSession {
 
     private func startCapture(bundleIds: [String], stage: CaptureStage) {
         let isNewSession = capturingBundleIds.isEmpty
+        if loggedApp == nil, bundleIds.count == 1 { loggedApp = LogToken.bundleId(bundleIds[0]) }
         capturingBundleIds = bundleIds
         captureStage = stage
         let engine = engine
@@ -363,12 +437,26 @@ public final class CoachSession {
         if isNewSession {
             fallback.reset()
             callLevel.reset()
+            captionFinal = 0
+            captionPartial = 0
+            captionWindowStart = wallClock()
+            callFlow.start(now: wallClock())
+            micFlow.start(now: wallClock())
             let key: APIKey?
-            do {
-                key = try keys.readKey()
-            } catch {
+            var availability = KeyAvailability.absent
+            if (keys as? KeyGateStateProviding)?.gateState == .rejected {
                 key = nil
-                delegate?.coachSession(self, didReport: .keyUnreadable)
+                availability = .rejected
+            } else {
+                do {
+                    key = try keys.readKey()
+                    availability = key == nil ? .absent : .present
+                    CoachLog.record(.keyRead(key == nil ? .absent : .present, status: nil, at: .call))
+                } catch {
+                    key = nil
+                    CoachLog.record(.keyRead(.unreadable, status: CoachLog.status(of: error), at: .call))
+                    delegate?.coachSession(self, didReport: .keyUnreadable)
+                }
             }
             gateGeneration = gate.openNew()
             let now = wallClock()
@@ -376,7 +464,7 @@ public final class CoachSession {
             sessionCaptureStart = start
             engineOffset = now - start
             engineGeneration += 1
-            engine.start(config: config, apiKey: key)
+            engine.start(config: config, apiKey: key, keyAvailability: availability)
             // Muted before it starts (the user's Mute or a pending call end), so the device never
             // opens even briefly; the gate stays closed until `setMicDevice(on: true)` reopens it.
             micDeviceOff = micShouldBeOff
@@ -386,6 +474,7 @@ public final class CoachSession {
             if micDeviceOff { micGate.pause() }
         }
         let level = callLevel
+        let flow = callFlow
         let call = call
         let rate = config.audio.sampleRate
         let gen = gateGeneration
@@ -399,12 +488,17 @@ public final class CoachSession {
                 try await call.start(bundleIds: bundleIds, stage: stage, sampleRate: rate) { samples in
                     guard gate.admits(gen) else { return }
                     level.record(samples)
+                    flow.record(samples)
                     engine.ingest(.call, samples: samples, time: 0)
                 }
                 if !gate.admits(gen) { await call.stop() }
             } catch {
                 guard let self, gate.admits(gen) else { return }
                 self.captureProblem = true
+                if !(error is LoggedFailure) {
+                    let failure = CoachLog.domainAndCode(error)
+                    CoachLog.record(.callAudioFailed(stage: stage, step: nil, domain: failure.domain, code: failure.code))
+                }
                 self.delegate?.coachSession(self, didReport: .callCaptureFailed(stage: stage))
                 self.changed()
             }
@@ -417,9 +511,13 @@ public final class CoachSession {
         let gen = gateGeneration
         let micGate = micGate
         let micGen = micGate.openNew()
+        let flow = micFlow
         do {
             try mic.start(sampleRate: config.audio.sampleRate) { samples in
-                if gate.admits(gen) && micGate.admits(micGen) { engine.ingest(.mic, samples: samples, time: 0) }
+                if gate.admits(gen) && micGate.admits(micGen) {
+                    flow.record(samples)
+                    engine.ingest(.mic, samples: samples, time: 0)
+                }
             }
         } catch {
             micGate.close()
@@ -449,6 +547,9 @@ public final class CoachSession {
         // Closed first and synchronously: not one buffer reaches the engine (or OpenAI) after this,
         // even while call capture is still stopping asynchronously.
         gate.close()
+        let now = wallClock()
+        for event in callFlow.finish(now: now) + micFlow.finish(now: now) { CoachLog.record(event) }
+        if captionFinal + captionPartial > 0 { logCaptionsReceived(now: now) }
         capturingBundleIds = []
         captureStage = .parentApps
         let previous = callTask
@@ -473,6 +574,7 @@ public final class CoachSession {
         let helpersAudible = signal.helpersAudible(bundleIds: capturingBundleIds)
         let now = wallClock()
         if let next = fallback.observe(callDbfs: callLevel.recentDbfs(now: now), helpersAudible: helpersAudible, now: now) {
+            CoachLog.record(.fallbackEngaged(stage: next))
             delegate?.coachSession(self, didReport: .fallbackEngaged(stage: next))
             startCapture(bundleIds: capturingBundleIds, stage: next)
         }
@@ -505,6 +607,10 @@ public final class CoachSession {
 
     fileprivate func caption(_ event: CaptionEvent) {
         guard isCapturing else { return }
+        switch event {
+        case .final: captionFinal += 1
+        case .partial: captionPartial += 1
+        }
         delegate?.coachSession(self, didCaption: event)
     }
 
@@ -651,10 +757,10 @@ public final class EngineQueue: @unchecked Sendable {
         set { queue.sync { engine.delegate = newValue } }
     }
 
-    public func start(config: ListenMoreConfig, apiKey: APIKey?) {
+    public func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability) {
         queue.async {
             self.generationLock.withLock { self.startCount += 1 }
-            self.engine.start(config: config, apiKey: apiKey)
+            self.engine.start(config: config, apiKey: apiKey, keyAvailability: keyAvailability)
         }
     }
 

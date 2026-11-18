@@ -47,6 +47,8 @@ final class PrivacyGuardTests: XCTestCase {
 
     /// The one source allowed to touch disk: the opt-in saved transcript (text, in the user's folder).
     static let transcriptWriter = "TranscriptFile.swift"
+    /// The other: the coach diagnostics file, which takes `CoachLogEntry` values only (see `testCoachLogWriterTakesEntriesOnly`).
+    static let coachLogWriter = "CoachLogFile.swift"
 
     func testNoDiskWritesOrPersistence() throws {
         // Audio and screen content are never written, by any source.
@@ -56,7 +58,7 @@ final class PrivacyGuardTests: XCTestCase {
         let writerOnly = ["write(to:", "createDirectory(", "removeItem(", "moveItem(", "copyItem(", "setAttributes("]
         for (name, text) in try allSources() {
             for f in neverAnywhere { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
-            guard name != Self.transcriptWriter else { continue }
+            guard name != Self.transcriptWriter, name != Self.coachLogWriter else { continue }
             for f in writerOnly { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
         }
         // A host app may store coach settings (see testHostDefaultsAreSettingsOnly); the libraries store nothing.
@@ -72,6 +74,36 @@ final class PrivacyGuardTests: XCTestCase {
             XCTAssertFalse(writer.contains(f), "\(Self.transcriptWriter) contains \(f)")
         }
         XCTAssertEqual(writer.components(separatedBy: "write(to:").count - 1, 1, "one write call")
+    }
+
+    /// The diagnostics file takes typed entries only: no string, data or audio type reaches it, it is
+    /// created readable by the user only, and nothing else writes it.
+    func testCoachLogWriterTakesEntriesOnly() throws {
+        let writer = try XCTUnwrap(try librarySources().first { $0.0 == Self.coachLogWriter }).1
+        XCTAssertTrue(writer.contains("public func write(_ entry: CoachLogEntry)"))
+        for f in ["[Float]", "AVAudio", "pcm", ".atomic", "NSTemporaryDirectory", "func write(_ text", "func write(_ line", "func write(_ data"] {
+            XCTAssertFalse(writer.contains(f), "\(Self.coachLogWriter) contains \(f)")
+        }
+        XCTAssertTrue(writer.contains("0o600"))
+        for (name, text) in try allSources() where name != Self.coachLogWriter && name != "CoachController.swift" {
+            XCTAssertFalse(text.contains("CoachLogFile("), "\(name) builds the diagnostics file; only the host app's controller installs it")
+        }
+    }
+
+    /// Every `CoachLog.record(` in the sources passes an event case: never a variable or a string, so what is
+    /// logged is always spelled out where it happens.
+    func testCoachLogCallsPassEventCases() throws {
+        var calls = 0
+        let re = try NSRegularExpression(pattern: #"CoachLog\.record\(([^\n]*)"#)
+        for (name, text) in try allSources() where name != "CoachLog.swift" {
+            for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                calls += 1
+                let arg = (text as NSString).substring(with: m.range(at: 1))
+                XCTAssertTrue(arg.hasPrefix(".") || arg.hasPrefix("event"), "\(name): CoachLog.record(\(arg)")
+                XCTAssertFalse(arg.contains("\"") && !arg.contains("LogToken."), "\(name): a string literal outside a LogToken")
+            }
+        }
+        XCTAssertGreaterThanOrEqual(calls, 25)
     }
 
     /// Caption and transcript code never logs: transcript text and keys stay out of every log.
@@ -205,7 +237,7 @@ final class PrivacyGuardTests: XCTestCase {
     func testHostDefaultsAreSettingsOnly() throws {
         let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
                                     "coach.judgeProvider", "coach.cardPosition", "coach.captions", "coach.saveTranscripts",
-                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen"]
+                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen", "coach.showInScreenshots"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
         for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {

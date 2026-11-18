@@ -309,6 +309,98 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertTrue(renderer.rendered.isEmpty)
     }
 
+    /// Flow lines every ten seconds, then silence of the call's zeros is reported to the log and the host.
+    func testCoachLogShowsAudioFlowAndSilentCall() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        let ready = await eventually { self.call.handler != nil && self.mic.handler != nil }
+        XCTAssertTrue(ready)
+        for _ in 0..<20 {
+            clock.advance(1)
+            call.handler?([Float](repeating: 0, count: 480))
+            mic.handler?([Float](repeating: 0.1, count: 480))
+            s.tick()
+        }
+        let lines = sink.lines
+        XCTAssertTrue(lines.contains { $0.hasPrefix("audio.flow source=call seconds=10 buffers=") && $0.hasSuffix("voiced=0 peakDb=-120") }, "\(lines)")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("audio.flow source=mic seconds=10") && $0.hasSuffix("peakDb=-20") }, "\(lines)")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("callAudio.silent source=call") && $0.contains("kind=digitalSilence") }, "\(lines)")
+        XCTAssertFalse(lines.contains { $0.hasPrefix("callAudio.silent source=mic") })
+        XCTAssertEqual(delegate.problems.filter { $0 == .callAudioSilent(.digitalSilence) }.count, 1, "the host hears once")
+        s.stopForThisCall()
+        XCTAssertTrue(sink.lines.contains { $0.hasPrefix("audio.flow source=mic") && $0.contains("seconds=") }, "the last window is logged when capture stops")
+    }
+
+    /// A call that never starts says why in the log, once per change and once per ten seconds otherwise; the
+    /// line when it does start says so, with the timer.
+    func testCoachLogExplainsWhyNoSessionStarts() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let (s, provider) = audioSession()
+        s.permissionSummary = { .notGranted }
+        func detect() -> [String] { sink.lines.filter { $0.hasPrefix("detect.check") } }
+        provider.inputRunning = false
+        for _ in 0..<45 { clock.advance(0.5); s.tick() }
+        XCTAssertEqual(detect().count, 3, "a change, then one heartbeat each ten seconds: \(detect())")
+        XCTAssertTrue(detect().allSatisfy { $0.contains("reason=inputDeviceIdle") && $0.hasSuffix("perm=notGranted") })
+
+        provider.inputRunning = true
+        provider.processes = [AudioProcessState(pid: 50, bundleId: "us.zoom.xos", isRunningInput: true, isRunningOutput: false),
+                              AudioProcessState(pid: 61, bundleId: "com.example.recorder", isRunningInput: true, isRunningOutput: true)]
+        clock.advance(0.5); s.tick()
+        XCTAssertEqual(detect().last, "detect.check micApp=us.zoom.xos callAudio=false result=notMet reason=noCallAudio perm=notGranted")
+
+        provider.processes = [AudioProcessState(pid: 50, bundleId: "us.zoom.xos", isRunningInput: true, isRunningOutput: true)]
+        clock.advance(0.5); s.tick()
+        XCTAssertEqual(detect().last, "detect.check micApp=us.zoom.xos callAudio=true result=notMet reason=startTimer timerS=0 perm=notGranted")
+        poll(s, seconds: 3)
+        XCTAssertEqual(s.indicator, .listening)
+        XCTAssertTrue(detect().contains { $0.contains("result=met reason=started") && $0.contains("timerS=3") }, "\(detect())")
+        clock.advance(0.5); s.tick()
+        XCTAssertTrue(detect().last?.contains("reason=inSession") ?? false)
+        XCTAssertFalse(sink.lines.contains { $0.contains("sk-") })
+    }
+
+    /// Caption events the host receives are counted per ten seconds, final and partial apart; the words never reach the log.
+    func testCoachLogCountsCaptionsReceived() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        _ = await eventually { self.engine.isRunning }
+        for _ in 0..<3 { s.deliverCaptionForTesting(.final(.others, text: "confidential budget figures")) }
+        for _ in 0..<2 { s.deliverCaptionForTesting(.partial(.me, item: "i1", text: "private remark")) }
+        clock.advance(10)
+        s.tick()
+        XCTAssertTrue(sink.lines.contains("captions.received seconds=10 final=3 partial=2"), "\(sink.lines)")
+        clock.advance(10)
+        s.tick()
+        XCTAssertTrue(sink.lines.contains("captions.received seconds=10 final=0 partial=0"), "a quiet window is logged too")
+        for line in sink.lines { XCTAssertFalse(line.contains("confidential") || line.contains("private") || line.contains("budget"), line) }
+    }
+
+    func testCoachLogRecordsTheFallback() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        _ = await eventually { self.call.starts.count == 1 }
+        for _ in 0..<5 {
+            clock.advance(1)
+            s.tick()
+        }
+        XCTAssertTrue(sink.lines.contains("callAudio.fallbackEngaged stage=helperApps"), "\(sink.lines)")
+    }
+
     func testHelperFallbackEscalates() async {
         let s = makeSession()
         meetInDia()
@@ -450,6 +542,49 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertNil(s.session, "no restart while the app stays ended")
     }
 
+    /// A session that starts with the call app already muted says so, and why it pauses and resumes; quitting ends it with
+    /// reason quit.
+    func testCoachLogSaysWhyASessionIsHeldAndHowItEnds() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let provider = FakeAudioStateProvider()
+        let calls = FakeCallState()
+        let settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+        let clock = clock
+        let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: AudioActivitySignal(provider: provider),
+                             keys: FakeKeys(key: nil), renderer: renderer, settings: settings, callState: calls, wallClock: { clock.now() })
+        provider.zoomCall()
+        calls.states = ["us.zoom.xos": .muted]
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertTrue(sink.lines.contains("session.started reason=audio app=us.zoom.xos held=true cause=callMuted"), "\(sink.lines)")
+        calls.states = ["us.zoom.xos": .started]
+        poll(s, seconds: 1)
+        XCTAssertTrue(sink.lines.contains("session.paused on=false cause=callMuted"), "\(sink.lines)")
+        s.setPaused(true)
+        XCTAssertTrue(sink.lines.contains("session.paused on=true cause=user"))
+        s.setPaused(false)
+        XCTAssertTrue(sink.lines.contains("session.paused on=false cause=user"))
+        s.quit()
+        XCTAssertTrue(sink.lines.contains("session.stopped reason=quit"), "\(sink.lines)")
+        XCTAssertTrue(sink.lines.contains { $0.hasPrefix("call.ended") && $0.hasSuffix("reason=quit") })
+        XCTAssertNil(s.session)
+        XCTAssertFalse(sink.lines.contains("session.stopped reason=disabled"))
+    }
+
+    /// An unmuted call starts unheld.
+    func testCoachLogSessionStartedUnheld() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let (s, provider) = audioSession()
+        provider.zoomCall()
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertTrue(sink.lines.contains("session.started reason=audio app=us.zoom.xos held=false cause=none"), "\(sink.lines)")
+    }
+
     /// Local-only: with no key the session still captures and runs local cues; only GPT is off.
     func testNoKeyStillCoachesLocally() async {
         let (s, provider) = audioSession()
@@ -460,6 +595,125 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertEqual(mic.started, 1)
         let started = await eventually { self.engine.startedWithKey == [false] }
         XCTAssertTrue(started, "the engine runs without a key (no GPT layer)")
+    }
+
+    /// The key is read once, when capture starts. A key saved while the call runs is not handed to the
+    /// running engine (swapping it would restart the GPT layer and drop the call's state), so a host
+    /// tells the user it applies from the next call (`KeyNotice.savedForNextCall`).
+    func testKeySavedMidCallIsNotReadUntilCaptureStartsAgain() async {
+        final class MutableKeys: APIKeyProvider, @unchecked Sendable {
+            var key: APIKey?
+            var reads = 0
+            func readKey() throws -> APIKey? { reads += 1; return key }
+        }
+        let keys = MutableKeys()
+        var settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+        settings.startAfterS = 0
+        settings.stopAfterS = 8
+        let signal = WindowTitleSignal(probe: probe, targets: config.captureTargets, meetTitleRegex: config.meetTitleRegex)
+        let clock = clock
+        let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: signal, keys: keys,
+                             renderer: renderer, settings: settings, wallClock: { clock.now() })
+        meetInDia()
+        s.tick()
+        let started = await eventually { self.engine.startedWithKey == [false] }
+        XCTAssertTrue(started)
+        XCTAssertEqual(keys.reads, 1)
+
+        keys.key = APIKey("sk-test-not-real")
+        s.tick()
+        clock.advance(5)
+        s.tick()
+        XCTAssertEqual(keys.reads, 1, "ticks during the call never read the key")
+        XCTAssertEqual(engine.startedWithKey, [false], "the running engine keeps the key it started with")
+
+        s.setPaused(true)
+        s.setPaused(false)
+        let restarted = await eventually { self.engine.startedWithKey == [false, true] }
+        XCTAssertTrue(restarted, "capture starting again reads the key")
+        XCTAssertEqual(keys.reads, 2)
+    }
+
+    /// A call from detection to its end leaves event names, the app's bundle ID and the key's presence in the coach log:
+    /// never the key.
+    func testCoachLogFollowsACallAndNeverHoldsTheKey() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let s = makeSession(keys: FakeKeys(key: APIKey("sk-test-not-real")))
+        meetInDia()
+        s.tick()
+        let started = await eventually { self.engine.startedWithKey == [true] }
+        XCTAssertTrue(started)
+        s.setMicMuted(true)
+        s.setPaused(true)
+        s.setPaused(false)
+        endMeeting()
+        s.tick()
+        clock.advance(9)
+        s.tick()
+        XCTAssertNil(s.session)
+        let lines = sink.lines
+        XCTAssertEqual(lines.first, "call.detected app=company.thebrowser.dia")
+        XCTAssertTrue(lines.contains("session.started reason=audio app=company.thebrowser.dia held=false cause=none"))
+        XCTAssertTrue(lines.contains("key.read result=present at=call"))
+        XCTAssertTrue(lines.contains("mic.muted on=true"))
+        XCTAssertTrue(lines.contains("session.paused on=true cause=user"))
+        XCTAssertTrue(lines.contains("call.ended app=company.thebrowser.dia reason=audioEnded"))
+        XCTAssertTrue(lines.contains("session.stopped reason=audioEnded"))
+        XCTAssertFalse(lines.contains { $0.contains("sk-") || $0.contains("test-not-real") })
+    }
+
+    /// A Keychain failure is "unreadable" with its OSStatus, never "absent"; a rejected key is withheld and
+    /// the GPT layer's reason says so.
+    func testCoachLogSeparatesUnreadableAbsentAndRejectedKeys() async {
+        struct Failing: APIKeyProvider, StatusCarryingError {
+            var statusCode: Int { -25308 }
+            func readKey() throws -> APIKey? { throw self }
+        }
+        struct Rejected: APIKeyProvider, KeyGateStateProviding {
+            var gateState: KeyGateState { .rejected }
+            func readKey() throws -> APIKey? { nil }
+        }
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        for keys in [Failing() as APIKeyProvider, Rejected()] {
+            engine = RecordingEngine()
+            let settings = { () -> TriggerSettings in
+                var t = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+                t.startAfterS = 0
+                return t
+            }()
+            let signal = WindowTitleSignal(probe: probe, targets: config.captureTargets, meetTitleRegex: config.meetTitleRegex)
+            let clock = clock
+            let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: signal, keys: keys,
+                                 renderer: renderer, settings: settings, wallClock: { clock.now() })
+            meetInDia()
+            s.tick()
+            let started = await eventually { self.engine.startedWithKey == [false] }
+            XCTAssertTrue(started)
+            s.stopForThisCall()
+            endMeeting()
+            s.tick()
+        }
+        XCTAssertEqual(sink.lines.filter { $0.hasPrefix("key.read") }, ["key.read result=unreadable status=-25308 at=call"],
+                       "a rejected key's gate does not read the Keychain, and an unreadable one is not absent")
+    }
+
+    /// A failed call-audio start is logged with its error domain and code.
+    func testCoachLogRecordsACallCaptureFailureCode() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        call.failStages = [.parentApps]
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        let logged = await eventually { sink.lines.contains { $0.hasPrefix("callAudio.failed") } }
+        XCTAssertTrue(logged)
+        XCTAssertTrue(sink.lines.contains("callAudio.failed stage=parentApps step=unknown domain=FakeCall code=2"), "\(sink.lines)")
+        XCTAssertTrue(sink.lines.contains("key.read result=absent at=call"))
     }
 
     func testIndicatorOnWhilePrewarmedThenListening() async {

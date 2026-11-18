@@ -162,7 +162,10 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ n: Notification) { log("exiting") }
+    func applicationWillTerminate(_ n: Notification) {
+        coach?.willQuit()
+        log("exiting")
+    }
 
     /// Reopening the app (Finder, Spotlight, `open -a`) opens the call coach Settings.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

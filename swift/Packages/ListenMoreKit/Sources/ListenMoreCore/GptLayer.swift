@@ -484,6 +484,8 @@ public final class GptLayer: @unchecked Sendable {
     private var stopReported = false
     private var judgeStopReported = false
     private var transcribersClosed = false
+    private let transcribeModel: LogToken
+    private var lastCountsAt: TimeInterval?
 
     /// `transcriberFactory` builds one session per speaker and must route its events to the given callback.
     /// `onStopped` is called once, from the event loop, when the layer turns itself off; `onJudgeStopped`
@@ -497,6 +499,7 @@ public final class GptLayer: @unchecked Sendable {
                 provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
+        transcribeModel = LogToken.model(config.gpt.transcribeModel)
         if provider == nil { core.stopJudging() }
         self.now = now
         self.offer = offer
@@ -581,15 +584,24 @@ public final class GptLayer: @unchecked Sendable {
     private func handle(_ cmd: Command) async -> Bool {
         switch cmd {
         case .start:
+            var connecting: Speaker?
             do {
-                for speaker in Speaker.allCases { try await transcribers[speaker]?.start() }
+                for speaker in Speaker.allCases {
+                    connecting = speaker
+                    try await transcribers[speaker]?.start()
+                    CoachLog.record(.transcriberOpened(speaker: speaker, model: transcribeModel))
+                }
             } catch {
+                let failure = CoachLog.describe(error)
+                CoachLog.record(.transcriberError(speaker: connecting, model: transcribeModel,
+                                                  httpStatus: failure.httpStatus, code: failure.code))
                 core.fail("realtime connect: \(GptError.safe(error))")
             }
         case let .frame(me, meVad, others, othersVad, meRunS):
             core.setMeRun(meRunS)
             await perform(core.feed(.me, frame: me, vad: meVad, now: now()))
             await perform(core.feed(.others, frame: others, vad: othersVad, now: now()))
+            logCountersIfDue()
         case .local(let ev):
             core.onLocal(ev)
         case .micMuted(let muted):
@@ -634,11 +646,13 @@ public final class GptLayer: @unchecked Sendable {
         }
         if let reason = core.stopReason, !stopReported {
             stopReported = true
+            CoachLog.record(.gptStopped(reason: reason))
             onMeter?(core.cost.reading)
             onStopped?(reason)
         }
         if let failure = core.judgeStopReason, !judgeStopReported {
             judgeStopReported = true
+            CoachLog.record(.judgeStopped(kind: failure.kind, httpStatus: { if case .http(let code) = failure { return code } else { return nil } }()))
             onJudgeStopped?(failure)
         }
         return false
@@ -661,6 +675,9 @@ public final class GptLayer: @unchecked Sendable {
                     break
                 }
             } catch {
+                let failure = CoachLog.describe(error)
+                CoachLog.record(.transcriberError(speaker: speaker(of: action), model: transcribeModel,
+                                                  httpStatus: failure.httpStatus, code: failure.code))
                 core.fail("realtime send: \(GptError.safe(error))")
             }
         }
@@ -675,7 +692,41 @@ public final class GptLayer: @unchecked Sendable {
     private func closeTranscribers() async {
         guard !transcribersClosed else { return }
         transcribersClosed = true
-        for t in transcribers.values { await t.close() }
+        logCounters()
+        for (speaker, t) in transcribers {
+            await t.close()
+            CoachLog.record(.transcriberDisconnected(speaker: speaker))
+        }
+    }
+
+    /// Each transcriber's counters every `countersInterval` seconds of audio time, so a session that connects but never
+    /// transcribes shows as appends and commits going up with no acknowledgements or completions.
+    static let countersInterval: TimeInterval = 10
+
+    private func logCountersIfDue() {
+        let t = now()
+        guard let last = lastCountsAt else {
+            lastCountsAt = t
+            return
+        }
+        guard t - last >= Self.countersInterval else { return }
+        lastCountsAt = t
+        logCounters()
+    }
+
+    private func logCounters() {
+        for speaker in Speaker.allCases {
+            guard let c = transcribers[speaker]?.counters else { continue }
+            CoachLog.record(.transcriberCounts(speaker: speaker, counters: c))
+        }
+    }
+
+    private func speaker(of action: GptCore.TxAction) -> Speaker {
+        switch action {
+        case .send(let speaker, _): return speaker
+        case .commit(let speaker, _): return speaker
+        case .clear(let speaker): return speaker
+        }
     }
 
     private func spawn(_ op: @escaping @Sendable () async -> Void) {
