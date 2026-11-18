@@ -52,6 +52,8 @@ final class CallControlsTests: XCTestCase {
         /// Error numbers per bundle ID, for every script, or for scripts containing a marker.
         var failures: [String: Int] = [:]
         var failuresWhenContaining: [String: (marker: String, code: Int)] = [:]
+        /// The script's whole integer (count, window rank and visible windows; `MeetScript.decode`).
+        var raw: [String: Int] = [:]
         private(set) var runs: [(bundleId: String, source: String)] = []
 
         func permission(bundleId: String) -> AutomationPermission { permissions[bundleId] ?? .granted }
@@ -60,7 +62,7 @@ final class CallControlsTests: XCTestCase {
             runs.append((bundleId, source))
             if let code = failures[bundleId] { return .failed(code: code) }
             if let f = failuresWhenContaining[bundleId], source.contains(f.marker) { return .failed(code: f.code) }
-            return .count(meetTabs[bundleId] ?? 0)
+            return .count(raw[bundleId] ?? meetTabs[bundleId] ?? 0)
         }
     }
 
@@ -454,5 +456,149 @@ final class CallControlsTests: XCTestCase {
         q.sync {}
         XCTAssertEqual(ax.presses, 1)
         XCTAssertTrue(model.isMuted)
+    }
+
+    // MARK: the call's window
+
+    func testZoomHomeWindowInFrontNeverReadsAsEnded() throws {
+        var present: Bool? = true
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { present }
+        ax.inMeeting(muted: true)
+        audio.live(Self.zoom)
+        run(0, 5)
+        XCTAssertEqual(provider.callStates()[Self.zoom], .muted)
+        ax.home()                                  // the menu bar follows the home window in front
+        XCTAssertTrue(stops(run(5.5, 30)).isEmpty, "the meeting window is still there: not ended")
+        XCTAssertEqual(provider.callStates()[Self.zoom], .muted, "the last mute reading holds")
+        present = nil                              // the meeting window closed (Leave)
+        XCTAssertEqual(try XCTUnwrap(stops(run(30.5, 40)).first).0, 33.5, accuracy: 1e-9)
+    }
+
+    /// With the home window in front the coach keeps listening on the held reading, but Zoom has no
+    /// ⇧⌘A item to press: Mute in Zoom must not look usable (#26: it shows only when it can act).
+    func testMuteInZoomIsNotActionableOnAHeldReading() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { true }
+        ax.inMeeting(muted: true)
+        _ = provider.callStates()
+        let (model, _) = makeModel(session: Self.zoom)
+        XCTAssertNil(model.muteUnavailableReason, "in the meeting window: Mute can act")
+        XCTAssertFalse(reader.isHeld)
+        ax.home()
+        _ = provider.callStates()
+        XCTAssertEqual(provider.currentStates[Self.zoom], .muted, "the coach still reads the call as on, muted")
+        XCTAssertTrue(reader.isHeld)
+        XCTAssertTrue(model.isMuted, "the held mute reading still shows")
+        XCTAssertEqual(model.muteUnavailableReason, .noZoomCall)
+        XCTAssertFalse(model.canMute)
+        XCTAssertEqual(model.toggleMute(), .unavailable(.noZoomCall))
+        XCTAssertEqual(ax.presses, 0, "no press is attempted without the ⇧⌘A item")
+        ax.inMeeting(muted: true)                  // the meeting window is back in front
+        _ = provider.callStates()
+        XCTAssertFalse(reader.isHeld)
+        XCTAssertNil(model.muteUnavailableReason)
+    }
+
+    func testHeldReadingEndsWhenTheWindowOrAccessIsGone() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        var present: Bool? = true
+        reader.callWindowPresent = { present }
+        ax.inMeeting()
+        _ = reader.read()
+        ax.home()
+        XCTAssertEqual(reader.read(), .inCall(muted: false))
+        XCTAssertTrue(reader.isHeld)
+        present = nil
+        XCTAssertEqual(reader.read(), .noCall)
+        XCTAssertFalse(reader.isHeld)
+        present = true
+        XCTAssertEqual(reader.read(), .inCall(muted: nil), "the muted reading went with the window")
+        ax.isRunning = false
+        XCTAssertEqual(reader.read(), .noCall)
+        XCTAssertFalse(reader.isHeld)
+    }
+
+    /// Turning "Use Zoom/Meet controls" off and on starts from nothing: the held mute reading and
+    /// the held mark don't survive it.
+    func testHeldMuteReadingIsClearedWhenTheProviderResets() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { true }
+        ax.inMeeting(muted: true)
+        _ = provider.callStates()
+        ax.home()
+        _ = provider.callStates()
+        XCTAssertEqual(provider.currentStates[Self.zoom], .muted)
+        XCTAssertTrue(reader.isHeld)
+        provider.isEnabled = false
+        XCTAssertFalse(reader.isHeld)
+        provider.isEnabled = true
+        _ = provider.callStates()
+        XCTAssertEqual(provider.currentStates[Self.zoom], .started, "no stale muted reading after the switch")
+    }
+
+    func testZoomWithoutAWindowSignalKeepsTheMenuRule() {
+        ax.inMeeting()
+        XCTAssertEqual(ZoomControlsReader(ax: ax).read(), .inCall(muted: false))
+        ax.home()
+        let reader = ZoomControlsReader(ax: ax)
+        reader.callWindowPresent = { nil }
+        XCTAssertEqual(reader.read(), .noCall, "nothing bound: the menu shortcuts decide as before")
+    }
+
+    func testMeetReportsWhichWindowHoldsTheCall() {
+        scripts.raw[Self.chrome] = 1 + 1000 * 2 + 1_000_000 * 3
+        _ = provider.callStates()
+        XCTAssertEqual(provider.callStates()["com.google.chrome"], .started)
+        XCTAssertEqual(provider.windowHints["com.google.chrome"], CallWindowHint(rank: 2, visibleWindows: 3))
+        scripts.raw[Self.chrome] = 2 + 1_000_000 * 3              // meeting tabs in two windows
+        _ = provider.callStates()
+        XCTAssertNil(provider.windowHints["com.google.chrome"], "no single window: no hint")
+        XCTAssertEqual(provider.callStates()["com.google.chrome"], .started)
+        provider.isEnabled = false
+        XCTAssertTrue(provider.windowHints.isEmpty)
+    }
+
+    func testMeetScriptReadsOnlyMinimizedFromAWindow() throws {
+        let re = try NSRegularExpression(pattern: #"\b(\w+) of (w|p)\b"#)
+        for reader in [MeetTabReader.chrome(runner: scripts), MeetTabReader.dia(runner: scripts)] {
+            for source in reader.scripts {
+                let reads = Set(re.matches(in: source, range: NSRange(source.startIndex..., in: source))
+                    .map { (source as NSString).substring(with: $0.range(at: 1)) })
+                XCTAssertTrue(reads.isSubset(of: ["minimized", "tabs", "profiles"]), "\(reader.bundleId) reads \(reads)")
+                XCTAssertFalse(source.contains("bounds"), "no window frames")
+                XCTAssertFalse(source.contains("index of"), "the rank is counted, never read")
+            }
+        }
+    }
+
+    /// A bound window only stops a false "ended" (the home window in front): it never keeps the
+    /// coach running. When the mic and call audio go quiet, Core Audio's stop still ends the
+    /// session while the window lingers (a "meeting ended" or post-call window).
+    func testBoundWindowNeverKeepsTheCoachRunning() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { true }                 // a post-call window stays bound
+        ax.inMeeting()
+        audio.live(Self.zoom)
+        run(0, 5)
+        ax.home()                                           // the in-meeting shortcuts are gone
+        audio.live()                                        // mic and call audio quiet
+        let stop = try XCTUnwrap(stops(run(5.5, 60)).first)
+        XCTAssertEqual(stop.1, .audioEnded)
+        XCTAssertEqual(stop.0, 35.5, accuracy: 1e-9, "Core Audio's 30 s stop, with the window still there")
+        XCTAssertFalse(monitor.trigger.isActive)
+        XCTAssertTrue(starts(run(60.5, 120)).isEmpty, "and it doesn't start again on the window alone")
+    }
+
+    func testBoundWindowWithMutedReadingStillStopsOnQuietAudio() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { true }
+        ax.inMeeting(muted: true)
+        audio.live(Self.zoom)
+        run(0, 5)
+        ax.home()
+        audio.live()
+        XCTAssertEqual(provider.callStates()[Self.zoom], .muted, "the held reading")
+        XCTAssertEqual(try XCTUnwrap(stops(run(5.5, 60)).first).0, 35.5, accuracy: 1e-9, "muted never holds a session")
     }
 }
