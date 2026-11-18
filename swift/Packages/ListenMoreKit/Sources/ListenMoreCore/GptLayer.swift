@@ -210,6 +210,9 @@ public final class GptCore {
         clearRetry.insert(speaker)
     }
 
+    /// The least audio, in seconds, the API accepts in one commit.
+    static let minCommitS = 0.1
+
     /// One frame of one stream. The driver performs the returned actions in order.
     public func feed(_ speaker: Speaker, frame: [Float], vad: VadState, now: TimeInterval) -> [TxAction] {
         if now > callSeconds { callSeconds = now }
@@ -246,8 +249,12 @@ public final class GptCore {
         }
         if let due = commitDue[speaker], now >= due - 1e-9 {
             commitDue[speaker] = nil
-            cost.commit(speaker: speaker)
-            out.append(.commit(speaker, refT: commitRef[speaker] ?? 0))
+            // The API refuses a commit with under 100 ms buffered. Audio sent so far stays in the server's
+            // buffer and goes out with the next commit, because `openS` keeps accumulating.
+            if (cost.openS[speaker] ?? 0) >= Self.minCommitS - 1e-9 {
+                cost.commit(speaker: speaker)
+                out.append(.commit(speaker, refT: commitRef[speaker] ?? 0))
+            }
         }
         return out
     }
@@ -609,6 +616,8 @@ public final class GptLayer: @unchecked Sendable {
             onMeter?(core.cost.reading)
         case .transcript(.clearRejected(let speaker)):
             clearRejected(speaker)
+        case .transcript(.commitRejected):
+            break
         case .transcript(.error(let msg)):
             core.fail(msg)
         case .runJudge(let req):

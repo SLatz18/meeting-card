@@ -302,6 +302,52 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertTrue(failed)
     }
 
+    /// The mic's first open failing is reported, but the gate stays open: a retry that opens later
+    /// (`RoutedMic` keeps the handler and retries) reaches the engine.
+    func testAFailedFirstMicOpenDoesNotCloseTheMicGate() async {
+        mic.failNext = true
+        mic.keepsHandlerOnFailedStart = true
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        XCTAssertTrue(delegate.problems.contains(.micUnavailable))
+        XCTAssertTrue(s.captureProblem)
+        mic.handler?([Float](repeating: 0.1, count: 480))
+        s.drainEngineForTesting()
+        XCTAssertEqual(engine.ingested[.mic], 480, "mic audio from the retried open reaches the engine")
+    }
+
+    /// A Zoom-muted reading holds the whole session; on unmute the mic starts again and its audio
+    /// reaches the engine.
+    func testZoomMutedThenUnmutedReopensTheMicAndFeedsTheEngine() async {
+        let provider = FakeAudioStateProvider()
+        provider.zoomCall()
+        let calls = FakeCallState()
+        var settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: nil)
+        settings.startAfterS = 0
+        let clock = clock
+        let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: AudioActivitySignal(provider: provider),
+                             keys: FakeKeys(key: nil), renderer: renderer, settings: settings, callState: calls,
+                             wallClock: { clock.now() })
+        s.delegate = delegate
+        s.tick()
+        XCTAssertEqual(s.indicator, .listening)
+        XCTAssertEqual(mic.started, 1)
+        calls.states = ["us.zoom.xos": .muted]
+        s.tick()
+        XCTAssertEqual(s.indicator, .muted)
+        XCTAssertEqual(mic.stopped, 1, "the hold releases the mic")
+        calls.states = ["us.zoom.xos": .started]
+        s.tick()
+        XCTAssertEqual(s.indicator, .listening)
+        XCTAssertEqual(mic.started, 2, "unmuting in Zoom starts the mic again")
+        XCTAssertTrue(mic.isOpen)
+        mic.handler?([Float](repeating: 0.1, count: 480))
+        s.drainEngineForTesting()
+        XCTAssertEqual(engine.ingested[.mic], 480)
+        s.shutdown()
+    }
+
     func testFaceTimeViaAvconferencedAudio() async {
         let s = makeSession()
         probe.windowList = [WindowInfo(bundleId: "com.apple.FaceTime", title: "FaceTime")]

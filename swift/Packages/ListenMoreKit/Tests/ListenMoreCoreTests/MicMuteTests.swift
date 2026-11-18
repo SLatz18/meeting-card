@@ -303,6 +303,19 @@ final class MicMuteSessionTests: XCTestCase {
         XCTAssertFalse(s.micMuted)
         XCTAssertEqual(s.indicator, .listening)
     }
+
+    /// The unmute's failed reopen is retried by the mic itself, and what it delivers once it opens
+    /// reaches the engine: the gate isn't left closed by the failure.
+    func testAFailedUnmuteReopenLeavesTheGateOpenForTheRetry() async {
+        let s = await listening()
+        s.setMicMuted(true)
+        mic.failNext = true
+        s.setMicMuted(false)
+        XCTAssertTrue(s.captureProblem)
+        mic.handler?(buffer)
+        s.drainEngineForTesting()
+        XCTAssertEqual(engine.ingested[.mic], 480)
+    }
 }
 
 /// "No mic frames reach the transcriber while muted": the real session, audio gates, engine, GPT
@@ -543,6 +556,7 @@ final class GptCoreMicMuteTests: XCTestCase {
         XCTAssertEqual(core.setMeMuted(false), [])
         XCTAssertFalse(core.meMuted)
         _ = core.feed(.me, frame: v, vad: GptFrames.vad(raw: true, onset: 0.2), now: 0.22)
+        for i in 0..<4 { _ = core.feed(.me, frame: v, vad: GptFrames.vad(raw: true), now: 0.24 + Double(i) * 0.02) }
         XCTAssertEqual(commits(core.feed(.me, frame: z, vad: GptFrames.vad(raw: false, offset: 0.22), now: 0.3)), [0.22])
         XCTAssertEqual(core.setMeMuted(true), [], "the segment was already committed")
         XCTAssertEqual(core.setMeMuted(false), [])
@@ -646,6 +660,7 @@ final class GptLayerMicMuteTests: XCTestCase {
         layer.feed(me: v, meVad: GptFrames.vad(raw: true, onset: 1), others: z, othersVad: GptFrames.quiet, meRunS: 0)
         layer.setMicMuted(true)
         layer.feed(me: v, meVad: GptFrames.vad(raw: true), others: v, othersVad: GptFrames.vad(raw: true, onset: 1.1), meRunS: 0)
+        for _ in 0..<5 { layer.feed(me: v, meVad: GptFrames.vad(raw: true), others: v, othersVad: GptFrames.vad(raw: true), meRunS: 0) }
         layer.feed(me: z, meVad: GptFrames.vad(raw: false, offset: 1.2), others: z, othersVad: GptFrames.vad(raw: false, offset: 1.2), meRunS: 0)
         _ = await layer.snapshot()
         let me = try XCTUnwrap(transcribers[.me]), others = try XCTUnwrap(transcribers[.others])
@@ -657,6 +672,7 @@ final class GptLayerMicMuteTests: XCTestCase {
 
         layer.setMicMuted(false)
         layer.feed(me: v, meVad: GptFrames.vad(raw: true, onset: 2), others: z, othersVad: GptFrames.quiet, meRunS: 0)
+        for _ in 0..<5 { layer.feed(me: v, meVad: GptFrames.vad(raw: true), others: z, othersVad: GptFrames.quiet, meRunS: 0) }
         layer.feed(me: z, meVad: GptFrames.vad(raw: false, offset: 2.2), others: z, othersVad: GptFrames.quiet, meRunS: 0)
         let both = await eventually { self.segments.segments.count == 2 }
         XCTAssertTrue(both)

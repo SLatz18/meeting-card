@@ -155,6 +155,69 @@ final class GptClientTests: XCTestCase {
         }
     }
 
+    /// A commit the server refuses for being empty is not a session failure, and the next transcript
+    /// still gets its own reference time.
+    func testARejectedCommitIsNonFatalAndKeepsTranscriptTimesAligned() async throws {
+        let connector = FakeConnector()
+        let events = EventBox()
+        let tx = LiveTranscriber(config: config, key: APIKey("sk-test-rt")!, speaker: .others, connector: connector) { events.append($0) }
+        try await tx.start()
+        let conn = try XCTUnwrap(connector.connections.first)
+
+        try await tx.commit(refT: 1)
+        let sent = try XCTUnwrap(conn.socket.sent.last.flatMap { try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] })
+        XCTAssertEqual(sent["type"] as? String, "input_audio_buffer.commit")
+        let id = try XCTUnwrap(sent["event_id"] as? String, "a commit carries an event_id to match its error")
+        conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty","event_id":"\#(id)"}}"#)
+        let rejected = await eventually { events.commitRejections == [.others] }
+        XCTAssertTrue(rejected)
+        XCTAssertTrue(events.errors.isEmpty, "not a fatal error")
+
+        try await tx.commit(refT: 2)
+        conn.socket.push(#"{"type":"input_audio_buffer.committed","item_id":"i2"}"#)
+        conn.socket.push(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"i2","transcript":"later words"}"#)
+        let gotText = await eventually { events.texts.count == 1 }
+        XCTAssertTrue(gotText)
+        XCTAssertEqual(events.texts.first?.2, 2, "the rejected commit's time is gone, not carried onto this transcript")
+        await tx.close()
+    }
+
+    /// Without an echoed event_id, the commit-empty code is matched to the oldest pending commit.
+    func testACommitEmptyErrorWithoutAnEventIdIsMatchedToTheOldestCommit() async throws {
+        let connector = FakeConnector()
+        let events = EventBox()
+        let tx = LiveTranscriber(config: config, key: APIKey("sk-test-rt")!, speaker: .me, connector: connector) { events.append($0) }
+        try await tx.start()
+        let conn = try XCTUnwrap(connector.connections.first)
+        try await tx.commit(refT: 1)
+        try await tx.commit(refT: 2)
+        conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty"}}"#)
+        let rejected = await eventually { events.commitRejections == [.me] }
+        XCTAssertTrue(rejected)
+        conn.socket.push(#"{"type":"input_audio_buffer.committed","item_id":"i2"}"#)
+        conn.socket.push(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"i2","transcript":"second"}"#)
+        let gotText = await eventually { events.texts.count == 1 }
+        XCTAssertTrue(gotText)
+        XCTAssertEqual(events.texts.first?.2, 2, "the first commit was the rejected one")
+        XCTAssertTrue(events.errors.isEmpty)
+        await tx.close()
+    }
+
+    /// Other server errors stay fatal.
+    func testOtherErrorsDuringACommitStayFatal() async throws {
+        let connector = FakeConnector()
+        let events = EventBox()
+        let tx = LiveTranscriber(config: config, key: APIKey("sk-test-rt")!, speaker: .me, connector: connector) { events.append($0) }
+        try await tx.start()
+        let conn = try XCTUnwrap(connector.connections.first)
+        try await tx.commit(refT: 1)
+        conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"bad_key"}}"#)
+        let failed = await eventually { !events.errors.isEmpty }
+        XCTAssertTrue(failed)
+        XCTAssertTrue(events.commitRejections.isEmpty)
+        await tx.close()
+    }
+
     func testBilledMeterRoundsEachSegmentUpAndPrefersApiSeconds() {
         var c = CostTracker(prices: config.gpt.pricesUsd, budget: nil)
         c.addAudio(seconds: 0.5, speaker: .me)
@@ -196,8 +259,10 @@ final class EventBox: @unchecked Sendable {
     private var _usage: [(Speaker, Double)] = []
     private var _deltas: [(Speaker, String, String)] = []
     private var _clearRejections: [Speaker] = []
+    private var _commitRejections: [Speaker] = []
 
     var clearRejections: [Speaker] { lock.withLock { _clearRejections } }
+    var commitRejections: [Speaker] { lock.withLock { _commitRejections } }
     var texts: [(Speaker, String, TimeInterval)] { lock.withLock { _texts } }
     var deltas: [(Speaker, String, String)] { lock.withLock { _deltas } }
     var errors: [String] { lock.withLock { _errors } }
@@ -210,6 +275,7 @@ final class EventBox: @unchecked Sendable {
             case let .delta(s, t, item): _deltas.append((s, t, item))
             case let .usage(s, sec): _usage.append((s, sec))
             case let .clearRejected(s): _clearRejections.append(s)
+            case let .commitRejected(s): _commitRejections.append(s)
             case let .error(m): _errors.append(m)
             }
         }
@@ -278,10 +344,39 @@ final class GptCoreTests: XCTestCase {
         XCTAssertEqual(core.cost.audioS, Double(3600 + 5 * 480) / 24000, accuracy: 1e-9)
     }
 
+    /// The API refuses a commit under 100 ms of audio. A short segment's audio stays in the server's
+    /// buffer and goes out with the next commit, which is still sent once enough has accumulated.
+    func testSegmentsUnderOneHundredMsAreNotCommitted() {
+        let core = GptCore(config: config)
+        var actions = core.feed(.others, frame: v, vad: GptFrames.vad(raw: true, onset: 0.02), now: 0.02)
+        for i in 0..<9 { actions += core.feed(.others, frame: z, vad: GptFrames.vad(raw: false), now: 0.04 + Double(i) * frameS) }
+        actions += core.feed(.others, frame: z, vad: GptFrames.vad(raw: false, offset: 0.2), now: 0.22)
+        XCTAssertEqual(sent(actions), 480, "one 20 ms frame with no pre-roll")
+        XCTAssertEqual(commits(actions), [], "20 ms is too short to commit")
+        XCTAssertEqual(core.cost.segments, 0)
+
+        actions = core.feed(.others, frame: v, vad: GptFrames.vad(raw: true, onset: 1.0), now: 1.02)
+        for i in 0..<14 { actions += core.feed(.others, frame: v, vad: GptFrames.vad(raw: true), now: 1.04 + Double(i) * frameS) }
+        actions += core.feed(.others, frame: z, vad: GptFrames.vad(raw: false, offset: 1.3), now: 1.4)
+        XCTAssertEqual(commits(actions), [1.3], "the next utterance commits what has accumulated")
+        XCTAssertEqual(core.cost.segments, 1)
+        XCTAssertEqual(GptCore.minCommitS, 0.1)
+    }
+
+    func testExactlyOneHundredMsIsCommitted() {
+        let core = GptCore(config: config)
+        var actions = core.feed(.me, frame: v, vad: GptFrames.vad(raw: true, onset: 0.02), now: 0.02)
+        for i in 0..<4 { actions += core.feed(.me, frame: v, vad: GptFrames.vad(raw: true), now: 0.04 + Double(i) * frameS) }
+        actions += core.feed(.me, frame: z, vad: GptFrames.vad(raw: false, offset: 0.12), now: 0.14)
+        XCTAssertEqual(sent(actions), 5 * 480)
+        XCTAssertEqual(commits(actions), [0.12])
+    }
+
     func testCommitGapSharesOneCommitAcrossCloseUtterances() {
         config.gpt.transcribeCommitGapMs = 300
         let core = GptCore(config: config)
         _ = core.feed(.others, frame: v, vad: GptFrames.vad(raw: true, onset: 0.5), now: 0.52)
+        for i in 0..<4 { _ = core.feed(.others, frame: v, vad: GptFrames.vad(raw: true), now: 0.54 + Double(i) * frameS) }
         XCTAssertEqual(commits(core.feed(.others, frame: z, vad: GptFrames.vad(raw: false, offset: 1.0), now: 1.0)), [])
         XCTAssertEqual(commits(core.feed(.others, frame: z, vad: GptFrames.quiet, now: 1.1)), [])
         _ = core.feed(.others, frame: v, vad: GptFrames.vad(raw: true, onset: 1.2), now: 1.2)
@@ -478,13 +573,16 @@ final class GptLayerTests: XCTestCase {
         return layer
     }
 
+    /// Six voiced frames (120 ms): long enough to commit, since the API refuses a commit under 100 ms.
     func utterance(_ layer: GptLayer, _ speaker: Speaker, onset: TimeInterval, offset: TimeInterval) {
-        let on = GptFrames.vad(raw: true, onset: onset), off = GptFrames.vad(raw: false, offset: offset)
+        let on = GptFrames.vad(raw: true, onset: onset), body = GptFrames.vad(raw: true), off = GptFrames.vad(raw: false, offset: offset)
         if speaker == .me {
             layer.feed(me: v, meVad: on, others: z, othersVad: GptFrames.quiet, meRunS: 0)
+            for _ in 0..<5 { layer.feed(me: v, meVad: body, others: z, othersVad: GptFrames.quiet, meRunS: 0) }
             layer.feed(me: z, meVad: off, others: z, othersVad: GptFrames.quiet, meRunS: 0)
         } else {
             layer.feed(me: z, meVad: GptFrames.quiet, others: v, othersVad: on, meRunS: 0)
+            for _ in 0..<5 { layer.feed(me: z, meVad: GptFrames.quiet, others: v, othersVad: body, meRunS: 0) }
             layer.feed(me: z, meVad: GptFrames.quiet, others: z, othersVad: off, meRunS: 0)
         }
     }
@@ -515,8 +613,47 @@ final class GptLayerTests: XCTestCase {
         utterance(layer, .others, onset: 1, offset: 1.2)
         _ = await layer.snapshot()
         XCTAssertEqual(transcribers[.me]!.bytesSent, 0)
-        XCTAssertEqual(transcribers[.others]!.bytesSent, (5 * 480 + 480) * 2, "pre-roll + the onset frame; the silent offset frame is held")
+        XCTAssertEqual(transcribers[.others]!.bytesSent, (5 * 480 + 6 * 480) * 2, "pre-roll + the voiced frames; the silent offset frame is held")
         XCTAssertEqual(transcribers[.others]!.commits, [1.2])
+        await layer.close()
+    }
+
+    /// The real transcriber under the layer: the server refusing a commit as empty doesn't stop the
+    /// layer, and the next utterance is committed and captioned.
+    func testACommitEmptyErrorFromTheServerKeepsTheLayerRunning() async {
+        let connector = FakeConnector()
+        let segments = segments
+        let layer = GptLayer(config: config, key: APIKey("sk-test-prod")!,
+                             transports: GptTransports(http: FakeHTTP(), webSocket: connector, scheduler: InstantScheduler()),
+                             now: { 0 }, offer: { _, _, _, _ in }, onSegment: { s, t, r, _ in segments.add(s, t, r) })
+        layer.start()
+        let connected = await eventually { connector.connections.count == 2 }
+        XCTAssertTrue(connected)
+        func commitCount() -> Int {
+            connector.connections.flatMap { $0.socket.sent }.filter { $0.contains("\"input_audio_buffer.commit\"") }.count
+        }
+        func committingSocket() -> FakeSocket? {
+            connector.connections.map { $0.socket }.first { $0.sent.contains { $0.contains("\"input_audio_buffer.commit\"") } }
+        }
+
+        utterance(layer, .others, onset: 1, offset: 2)
+        let firstCommit = await eventually { commitCount() == 1 }
+        XCTAssertTrue(firstCommit)
+        let socket = committingSocket()
+        socket?.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty"}}"#)
+
+        utterance(layer, .others, onset: 3, offset: 4)
+        let secondCommit = await eventually { commitCount() == 2 }
+        XCTAssertTrue(secondCommit, "the layer is still sending and committing")
+        socket?.push(#"{"type":"input_audio_buffer.committed","item_id":"i2"}"#)
+        socket?.push(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"i2","transcript":"still here"}"#)
+        let captioned = await eventually { segments.segments.map { $0.1 } == ["still here"] }
+        XCTAssertTrue(captioned)
+        XCTAssertEqual(segments.segments.first?.2, 4, "the second commit's time, not the rejected one's")
+        let snap = await layer.snapshot()
+        XCTAssertTrue(snap.enabled)
+        XCTAssertTrue(snap.errors.isEmpty)
+        XCTAssertTrue(stops.reasons.isEmpty)
         await layer.close()
     }
 
