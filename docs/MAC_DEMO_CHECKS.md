@@ -84,6 +84,12 @@ and is not saved: it resets when the app quits. The shipping app has none of it.
 behavior: voice processing on with other-audio ducking at its minimum, using the system's input (the built-in mic
 instead if the system input is Bluetooth).
 
+### Cue display prototype (test build only)
+The test build's coach menu bar menu also has **Cue Display Prototype…** (under Settings…): a window that plays
+recorded and synthetic cue timelines through the coaching-display options, on the coach card or the pill, so they
+can be compared without a call (check CD1, [COACHING_DISPLAY.md](COACHING_DISPLAY.md)). It plays fixed timelines
+only: no audio, no session, nothing saved. The real app has none of it.
+
 ### Checks table
 | # | App | Check | How | Pass when |
 |---|---|---|---|---|
@@ -137,6 +143,7 @@ instead if the system input is Bluetooth).
 | CC3 | Zoom desktop | Call bar clearance (UNVERIFIED 52 pt) | In a full-screen Zoom meeting with its floating top meeting controls showing, measure the gap between the controls' bottom edge and the coach card's top edge (Screenshot ⇧⌘4, read the pixel distance at 1x) | The card clears Zoom's controls by about 12 pt. Note the measured controls height so `CardStyle.Coach.callBarClearance` (52 pt, an estimate) can be set to it |
 | CC4 | All | Pill and nudges | Minimize the card, then trigger an amber and a red cue, with VoiceOver on | The pill tints amber, then rose, and widens to show the nudge words for about 4.5 s; VoiceOver reads the nudge line; Expand brings the card back |
 | CC5 | Zoom desktop | Hidden in share | Share the full screen in Zoom while the card, the pill, a nudge and a morph (Join) show | The far side never sees the coach card in any state |
+| CD1 | None (no call needed) | Compare the coaching-display options ([COACHING_DISPLAY.md](COACHING_DISPLAY.md)) | On the test build, open the coach menu bar menu and choose **Cue Display Prototype…** (under Settings…). For each option (Rotating line, Glyph state, Caption-anchored), play **Harness: busy call (shipped pacing)** and **Synthetic: burst of five cues in 6 s** at 1×, on Card then Pill, in Light then Dark; turn on **Show hover detail** for Glyph state. Read a paragraph aloud while it plays and glance at the card only between sentences. Once with VoiceOver on (⌘F5): move to the status line and the caption rows. Check the shipping app's coach menu too. Record the macOS version and the build's `git rev-parse HEAD` | Every option draws in both modes with no clipped words, blank glyphs or overlaps, and no flashing; the log under the card never shows two "shown" lines less than 10 s apart, and the burst shows "held", "replaced" and "shown … (waited …)" lines; the Glyph state pill never changes width; VoiceOver reads the status line (with "Last cue: …" in Glyph state) and, in Caption-anchored, the marked row starting with "Cue: …". The shipping app has no Cue Display Prototype… item. Note which option was readable at a glance mid-sentence, and the preferred card and pill option (owner decision, see the doc's open questions) |
 | K3 | All | Nothing read is kept | During ZC2–MD2, `log show --predicate 'subsystem == "com.listenmore.kit"' --last 10m` and the MeetingCard log | No meeting or page titles, names, chat, URLs or menu labels anywhere |
 | K1 | All | Keychain and logs | Inspect the Keychain and `log show --predicate 'subsystem == "com.listenmore.kit"'` | Key only in the Keychain; no transcript text or key in logs; no files written (saving off) |
 | K2 | All | Keychain caveat | Keychain Access → login → the `com.slatz.meetingcard.swift.test.openai` item | Item is in the **login** keychain. Expected until the app is properly signed (see below), not a failure |
