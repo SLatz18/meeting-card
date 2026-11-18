@@ -50,7 +50,8 @@ public enum Checks {
         let oracle = CueOracle.expected(r.timeline, config: r.config,
                                         facts: .init(keyless: s.keyless, gptStopT: r.gptStop?.t, mode: r.mode, judgeOn: r.judgeOn,
                                                      segmentedSpeech: r.segmentedSpeech, callVoiced: r.callVoiced,
-                                                     micVoiced: r.micVoiced, frameS: r.config.frameS))
+                                                     micVoiced: r.micVoiced, frameS: r.config.frameS,
+                                                     selfPivotYes: r.selfPivotYes, selfPivotAfter: s.selfPivotAfter))
         let match = CueOracle.match(expected: oracle.cues, tolerated: oracle.tolerated, actual: r.cues)
         check("coaching", match.passed,
               "expected \(oracle.cues.filter { !$0.optional }.count), matched \(match.outcomes.filter { $0.actual != nil }.count), missed \(match.missed.count), false \(match.falseCues.count)"
@@ -120,8 +121,20 @@ public enum Checks {
               "audio-like files outside the run dir: \(r.diskViolations.count); run dir wiped: \(r.workDirWiped)")
         if !live { check("lockstep", r.barrierTimeouts == 0, "\(r.barrierTimeouts) barrier timeouts") }
         if !r.judgeOn {
-            check("judge off: 0 judge calls", r.judgeCalls == 0, "\(r.judgeCalls) judge calls (not_listening not exercised)")
+            check("judge off: 0 judge calls", r.judgeCalls == 0, "\(r.judgeCalls) judge calls (not_listening and self_pivot not exercised)")
         }
+        // Self-pivot: no candidate, judge call or cue except on the one line a scenario declares; every judge
+        // request sends store false.
+        let declared = s.selfPivotAfter != nil && !s.keyless
+        let judgesSelfPivot = declared && r.judgeOn && !r.config.cues.disabledTypes.contains(.selfPivot)
+            && JudgeProviders.judgesSelfPivot(r.config.judge.provider)
+        let shown = r.cues.filter { $0.type == .selfPivot }.count
+        let wantShown = !live && judgesSelfPivot && r.selfPivotYes ? 1 : 0
+        let selfPivotOK = r.pivotCandidates == (declared ? 1 : 0) && r.selfPivotJudgeCalls == (judgesSelfPivot ? 1 : 0)
+            && r.selfPivotEngineCalls == r.selfPivotJudgeCalls && (live ? shown <= 1 : shown == wantShown)
+        check("self-pivot", selfPivotOK,
+              "candidates \(r.pivotCandidates), judge calls \(r.selfPivotJudgeCalls) (engine \(r.selfPivotEngineCalls)), cues \(shown)")
+        check("judge store false", r.storeViolations == 0, "\(r.storeViolations) judge requests without store false")
         let problems = r.problems.filter { $0 != "transcriberClearRejected" }
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))
 

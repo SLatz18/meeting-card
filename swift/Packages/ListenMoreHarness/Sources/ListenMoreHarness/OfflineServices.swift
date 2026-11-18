@@ -230,18 +230,28 @@ public final class StubJudgeHTTP: HTTPTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls = 0
     private let notListeningOn: String?
+    private let selfPivotAnswer: (cue: String, confidence: Double)
+    /// Requests per judge, and any without `store: false`.
+    public let traffic = JudgeTraffic()
 
-    public init(notListeningOn: String? = nil) {
+    /// `selfPivotAnswer`: what every self-pivot judge request gets (default: none).
+    public init(notListeningOn: String? = nil, selfPivotAnswer: (cue: String, confidence: Double) = ("none", 0.9)) {
         self.notListeningOn = notListeningOn
+        self.selfPivotAnswer = selfPivotAnswer
     }
 
     public var calls: Int { lock.withLock { _calls } }
 
     public func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
         lock.withLock { _calls += 1 }
-        let flagged = notListeningOn.map { String(decoding: body, as: UTF8.self).contains($0) } ?? false
-        let inner = flagged ? #"{"cue":"not_listening","confidence":0.9,"short_reason":"stub"}"#
+        let inner: String
+        if traffic.record(body).selfPivot {
+            inner = #"{"cue":"\#(selfPivotAnswer.cue)","confidence":\#(selfPivotAnswer.confidence),"short_reason":"stub"}"#
+        } else {
+            let flagged = notListeningOn.map { String(decoding: body, as: UTF8.self).contains($0) } ?? false
+            inner = flagged ? #"{"cue":"not_listening","confidence":0.9,"short_reason":"stub"}"#
                             : #"{"cue":"none","confidence":0.9,"short_reason":"stub"}"#
+        }
         let reply: [String: Any] = [
             "output": [["type": "message", "content": [["type": "output_text", "text": inner]]]],
             "usage": ["input_tokens": 400, "input_tokens_details": ["cached_tokens": 0], "output_tokens": 20],

@@ -9,7 +9,54 @@ public enum Scenarios {
         interruption, monologue, missedQuestion, muteUnmute, pause, silenceToStop, twoThemVoices, noKey, costCap,
     ]
 
-    public static func named(_ name: String) -> Scenario? { all.first { $0.name == name } }
+    public static func named(_ name: String) -> Scenario? { (all + selfPivot).first { $0.name == name } }
+
+    /// The self-pivot cue's own scripts, run by its tests and not part of `all`: two pivots (a group call
+    /// where another voice reacts first, and an acknowledgment followed by the user's own story) and two
+    /// look-alikes that are not (someone moves on to the standup; the user acknowledges and asks back).
+    public static let selfPivot: [Scenario] = [selfPivotGroup, selfPivotAckThenStory, selfPivotMovedOn, selfPivotAskBack]
+
+    public static let selfPivotGroup = Scenario(
+        name: "self-pivot-group",
+        summary: "one Them voice shares, another reacts, You tell your own story and ask nothing back: one self_pivot cue",
+        lines: [
+            Line("a1", .themA, "I finally ran my first half marathon on Sunday and I was so nervous at the start line.", .at(0.5)),
+            Line("b1", .themB, "Wow, congratulations!", .after("a1", gap: 0.6)),
+            Line("y1", .you, "Oh nice, that reminds me of when I did a long charity bike ride last spring, I was exhausted for days and my legs were sore the whole week.",
+                 .after("b1", gap: 1.0)),
+        ],
+        tail: 14, selfPivotAfter: "y1")
+
+    public static let selfPivotAckThenStory = Scenario(
+        name: "self-pivot-ack-then-story",
+        summary: "Them share a worry, You acknowledge it and then tell your own story: still a pivot, one self_pivot cue",
+        lines: [
+            Line("a1", .themA, "My dad has been in the hospital all week and I have been so worried about him.", .at(0.5)),
+            Line("y1", .you, "I'm so sorry, that's rough. When my dad had surgery I was at the hospital every night and I barely slept for a month.",
+                 .after("a1", gap: 1.0)),
+        ],
+        tail: 14, selfPivotAfter: "y1")
+
+    public static let selfPivotMovedOn = Scenario(
+        name: "self-pivot-moved-on",
+        summary: "a personal share, then another voice starts the standup and You give your update: no candidate, no cue",
+        lines: [
+            Line("a1", .themA, "I just got back from a week at the lake with the kids and I was so relaxed.", .at(0.5)),
+            Line("b1", .themB, "Great, let's start the standup. Sam, you go first.", .after("a1", gap: 1.0)),
+            Line("y1", .you, "Sure, yesterday I finished my part of the migration and today I am on my code reviews, then I will pick up my next ticket.",
+                 .after("b1", gap: 0.6)),
+        ],
+        tail: 14)
+
+    public static let selfPivotAskBack = Scenario(
+        name: "self-pivot-ask-back",
+        summary: "a personal share, then You congratulate them and ask about it: no candidate, no cue",
+        lines: [
+            Line("a1", .themA, "We just moved into a new apartment and I am still unpacking boxes every evening.", .at(0.5)),
+            Line("y1", .you, "Congrats, that's great news! How did the move go, are you all settled in now and is the new place close to work?",
+                 .after("a1", gap: 1.0)),
+        ],
+        tail: 14)
 
     /// A short backchannel over Them (no cue), then a real cut-in: Them keeps talking for 3.5 s after You start.
     public static let interruption = Scenario(

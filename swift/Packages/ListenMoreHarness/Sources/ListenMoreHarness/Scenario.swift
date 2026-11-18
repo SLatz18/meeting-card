@@ -96,9 +96,14 @@ public struct Scenario: Sendable {
     public var checks: Set<ScenarioCheck>
     /// Seconds of audio after the last line or control.
     public var tail: Double
+    /// The You line the self-pivot gate takes for a pivot (one candidate there, none anywhere else);
+    /// nil: no candidate in the whole call.
+    public var selfPivotAfter: String?
 
     public init(name: String, summary: String, lines: [Line], controls: [Control] = [], saving: Bool = false,
-                keyless: Bool = false, budgetUsd: Double? = nil, checks: Set<ScenarioCheck> = [], tail: Double = 3) {
+                keyless: Bool = false, budgetUsd: Double? = nil, checks: Set<ScenarioCheck> = [], tail: Double = 3,
+                selfPivotAfter: String? = nil) {
+        self.selfPivotAfter = selfPivotAfter
         self.name = name
         self.summary = summary
         self.lines = lines

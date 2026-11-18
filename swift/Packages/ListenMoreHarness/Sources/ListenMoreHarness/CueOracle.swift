@@ -63,6 +63,10 @@ public enum CueOracle {
         public var gptStopT: Double?
         public var mode: Mode
         public var judgeOn: Bool
+        /// The self-pivot judge answers self_pivot above its floor (offline: the stub's answer).
+        public var selfPivotYes = false
+        /// The scenario's You line the gate takes for a pivot.
+        public var selfPivotAfter: String?
         /// The audio has pauses inside lines (live TTS, espeak), so a line can be transcribed in pieces.
         /// The synthetic signal doesn't: one line, one segment.
         public var segmentedSpeech: Bool
@@ -72,7 +76,10 @@ public enum CueOracle {
         public var frameS: Double
 
         public init(keyless: Bool, gptStopT: Double?, mode: Mode, judgeOn: Bool = true, segmentedSpeech: Bool? = nil,
-                    callVoiced: [Bool] = [], micVoiced: [Bool] = [], frameS: Double = 0.02) {
+                    callVoiced: [Bool] = [], micVoiced: [Bool] = [], frameS: Double = 0.02,
+                    selfPivotYes: Bool = false, selfPivotAfter: String? = nil) {
+            self.selfPivotYes = selfPivotYes
+            self.selfPivotAfter = selfPivotAfter
             self.callVoiced = callVoiced
             self.micVoiced = micVoiced
             self.frameS = frameS
@@ -117,6 +124,19 @@ public enum CueOracle {
             for u in you where heard(u) && them.contains(where: { $0.end <= u.start && $0.end > u.start - 30 }) {
                 tolerated.append(Tolerance(type: .notListening, window: u.start...(u.end + hang + allowance + c.gpt.judgeTimeoutS),
                                            reason: "judge verdict on \(u.line.id)", line: u.line.id))
+            }
+        }
+        // Self-pivot: the gate's candidate on the scenario's declared You line, judged once, shown when the
+        // judge says so within `self_pivot_max_verdict_age_s` of the line's end. Live the judge is real, so
+        // the cue may or may not come. No other line may raise one.
+        if let id = facts.selfPivotAfter, let u = you.first(where: { $0.line.id == id }), heard(u), facts.judgeOn, !facts.keyless,
+           !c.cues.disabledTypes.contains(.selfPivot), JudgeProviders.judgesSelfPivot(c.judge.provider), textOn(u.end) {
+            let window = u.end...(u.end + hang + c.gpt.selfPivotMaxVerdictAgeS)
+            if live {
+                tolerated.append(Tolerance(type: .selfPivot, window: window, reason: "self-pivot verdict on \(id)", line: id))
+            } else if facts.selfPivotYes {
+                cands.append(ExpectedCue(type: .selfPivot, level: nil, window: window, optional: false,
+                                         reason: "\(id) answers a personal share with the user's own story and asks nothing back", line: id))
             }
         }
 

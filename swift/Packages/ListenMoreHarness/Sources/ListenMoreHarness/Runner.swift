@@ -95,6 +95,10 @@ public struct RunServices: @unchecked Sendable {
     public var judgeCalls: () -> Int
     public var clips: [String: [Float]]
     public var shapes: [String: ClipShape]
+    /// Judge requests per judge and store flags, read from the transport (counts only).
+    public var traffic = JudgeTraffic()
+    /// The offline stub's self-pivot verdict clears the floor: a candidate is shown.
+    public var selfPivotYes = false
 }
 
 public struct CaptionRecord: Sendable {
@@ -164,6 +168,12 @@ public struct RunRecord: @unchecked Sendable {
     public var micOfferedWhileMuted = 0
     public var micMuteCalls: [Bool] = []
     public var judgeCalls = 0
+    /// Self-pivot judge requests on the wire, and judge requests that didn't send `store: false`.
+    public var selfPivotJudgeCalls = 0
+    public var storeViolations = 0
+    /// Each engine run's last GPT layer snapshot (nil without one), in start order.
+    public var engineSnapshots: [GptLayer.Snapshot?] = []
+    public var selfPivotYes = false
     public var judgeOn = true
     public var segmentedSpeech = false
     public var meters: [CostReading] = []
@@ -202,6 +212,10 @@ public struct RunRecord: @unchecked Sendable {
         self.timeline = timeline
         self.config = config
     }
+
+    /// Summed over the call's engine runs.
+    public var pivotCandidates: Int { engineSnapshots.compactMap { $0?.pivotCandidates }.reduce(0, +) }
+    public var selfPivotEngineCalls: Int { engineSnapshots.compactMap { $0?.selfPivotJudgeCalls }.reduce(0, +) }
 
     public func samples(_ stream: AudioStream, in window: ClosedRange<Double>) -> Int {
         engineIngests.filter { $0.stream == stream && window.contains($0.t) }.reduce(0) { $0 + $1.samples }
@@ -379,6 +393,10 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.micOfferedWhileMuted = mic.offeredWhileMuted
         record.micMuteCalls = mic.muteCalls
         record.judgeCalls = services.judgeCalls()
+        record.selfPivotJudgeCalls = services.traffic.selfPivotCalls
+        record.storeViolations = services.traffic.storeViolations
+        record.engineSnapshots = engine.snapshots
+        record.selfPivotYes = services.selfPivotYes
         record.judgeOn = services.judgeOn
         record.segmentedSpeech = services.segmentedSpeech
         record.captionStates.append((now, live.captionState))
