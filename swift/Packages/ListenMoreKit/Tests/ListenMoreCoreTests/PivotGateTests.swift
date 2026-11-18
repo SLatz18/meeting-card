@@ -11,7 +11,7 @@ enum PivotLines {
     static let relateThenAskMark = "Same thing happened to me last year, it took me weeks. The boxes must be everywhere by now?"
     static let relateThenAskNoMark = "Same thing happened to me last year, it took me weeks. How did the move go in the end"
     static let openerTwoFirstPerson = "Same thing happened to me last spring, it took me weeks before the whole place finally felt settled again."
-    static let openerMidSentence = "The long ride last spring left all of us sore, the same thing happened to me on the hills and the wind."
+    static let openerMidSentence = "The long ride last spring left all of us sore, the same thing happened to me and my legs on the hills."
     static let worried = "My dad has been in the hospital all week and I have been so worried about him."
     static let engaged = "We just got engaged last weekend and I am still so excited about it."
     static let rememberAboutThem = "Oh no, I remember you said he had surgery last spring, that sounds really hard on your whole family, sending all of you good thoughts."
@@ -317,6 +317,7 @@ final class PivotGateTests: XCTestCase {
 
     func testBriefMeTooIsNone() {
         assertNoCandidate(pivot(reply: PivotLines.brief))
+        assertNoCandidate(pivot(reply: "Me too, same thing happened to me."))
     }
 
     func testEmpathyAboutThemIsNone() {
@@ -486,6 +487,11 @@ final class PivotGateTests: XCTestCase {
         oneLine.them("\(lake) Great, let's start the standup, you go first.", 0.5, 8.0)
         oneLine.you(update, 8.5, 14.5)
         assertNoCandidate(oneLine)
+
+        var shortMoveOn = PivotScript()
+        shortMoveOn.them("\(lake) Okay, let's get started.", 0.5, 7.0)
+        shortMoveOn.you(update, 7.5, 13.5)
+        assertNoCandidate(shortMoveOn)
     }
 
     /// In the share's own line, a short sentence after it keeps the share; a longer one moves on.
@@ -558,6 +564,57 @@ final class PivotGateTests: XCTestCase {
 
     func testTheirTurnShorterThanTheMinimumIsNone() {
         assertNoCandidate(pivot(share: "I just got married!"))
+    }
+
+    /// The opener follows lead-in words ("oh nice,"), and only two first-person words back it.
+    func testAnOpenerAfterLeadInWordsCounts() {
+        XCTAssertEqual(run(pivot(reply: "Oh nice, that reminds me of my own long ride last spring, it took weeks before the soreness finally went away."),
+                           until: 30).counters.candidates, 1)
+    }
+
+    /// After the sympathy, the user's story starts at a later sentence with an opener.
+    func testSympathyThenAnOpenerInALaterSentenceCounts() {
+        XCTAssertEqual(run(pivot(reply: "I'm so sorry, that sounds really scary. That reminds me of my dad last spring, it took weeks to sort out.",
+                                 share: PivotLines.worried), until: 30).counters.candidates, 1)
+    }
+
+    /// A bare "oh no" before the sympathy doesn't hide it: still pure commiseration.
+    func testOhNoBeforeTheSympathyIsStillCommiseration() {
+        assertNoCandidate(pivot(reply: "Oh no, I am so sorry to hear that, I hope it gets easier soon, I will be thinking about it all week long.",
+                                share: PivotLines.worried))
+    }
+
+    /// Their last sentence opens like a question, though its last clause doesn't.
+    func testTheirLastSentenceOpeningAsAQuestionIsNone() {
+        assertNoCandidate(pivot(share: "Did you know I finally ran my first half marathon on Sunday, I was so nervous"))
+    }
+
+    /// Their last clause opens like a question, though their last sentence doesn't.
+    func testTheirLastClauseOpeningAsAQuestionIsNone() {
+        assertNoCandidate(pivot(share: "I finally ran my first half marathon on Sunday and I was so nervous, would you believe it"))
+    }
+
+    /// `clear()` drops a pending invitation along with the text.
+    func testClearDropsAPendingInvitation() {
+        var s = PivotScript()
+        s.them("Have you ever run a race? I always wanted to try one.", 0.5, 3.5)
+        s.you("Yeah.", 4.0, 4.4)
+        s.them(PivotLines.share, 9.0, 14.0)
+        s.you(PivotLines.pivot, 14.5, 20.5)
+        let gate = PivotGate(config: config)
+        s.play(into: gate, until: 30) { t in
+            if abs(t - 8.0) < 1e-9 { gate.clear() }
+        }
+        XCTAssertEqual(gate.counters.candidates, 1)
+    }
+
+    /// A plain turn of theirs (no share, no invitation) is closed without waiting for the user's
+    /// transcript, so a late one isn't counted.
+    func testAPlainTurnIsDecidedWithoutWaitingForTheUser() {
+        var s = PivotScript()
+        s.them(PivotLines.release, 0.5, 5.5)
+        s.you(PivotLines.releaseReply, 6.0, 12.0, delay: 5.0)
+        XCTAssertEqual(run(s, until: 30).counters, PivotGate.Counters())
     }
 
     /// Their share ended over 120 s before their next, plain turn: it is gone, not part of that turn.
