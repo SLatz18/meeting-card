@@ -143,12 +143,12 @@ public enum CueOracle {
                 e.line = u.line.id
                 // The cut-in needs Them to keep talking until its opening overlap (cut_in_min_overlap_ms of
                 // both speaking) has built up: LocalLayer drops it when Them's speech stops for longer than
-                // `cutInMaxOthersGapS` before then. Where Them's own audio pauses longer in that span (word
-                // gaps in real speech), their restarts are speaker switches and the talk-over rule may raise
-                // the red cue instead, once You hold the floor after they stop. A pause after the overlap
-                // has built up changes nothing.
+                // `cut_in_overlap_gap_ms` before then. Where Them's own audio pauses longer in that span
+                // (word gaps in real speech), their restarts are speaker switches and the talk-over rule may
+                // raise the red cue instead, once You hold the floor after they stop. A pause after the
+                // overlap has built up changes nothing.
                 let gap = openingOverlapGap(facts, from: u.start, until: th.end, overlapS: cutOverlap)
-                if gap > LocalLayer.cutInMaxOthersGapS + 1e-9 {
+                if gap > l.cutInOverlapGapMs / 1000 + 1e-9 {
                     let toHold = l.talkOverHoldFloorMs / 1000
                     e.alternative = (.talkOver, (u.start + 0.6)...max(window.upperBound, th.end + toHold + allowance))
                     e.reason += "; Them pause \(String(format: "%.2f", gap)) s in the opening overlap, so talk_over also fits"
@@ -278,8 +278,9 @@ public enum CueOracle {
     }
 
     /// Longest run of unvoiced frames in Them's audio from `start` until `overlapS` of both streams
-    /// voiced has built up (or `end`): the span in which the cut-in can still be dropped. 0 when the
-    /// audio isn't known.
+    /// voiced has built up within one stretch of Them's speech (a pause past
+    /// `LocalLayer.overlapStretchGapS` starts it again), or `end`: the span in which the cut-in can still
+    /// be dropped. 0 when the audio isn't known.
     static func openingOverlapGap(_ f: Facts, from start: Double, until end: Double, overlapS: Double) -> Double {
         let n = min(f.callVoiced.count, f.micVoiced.count)
         guard n > 0, end > start else { return 0 }
@@ -287,6 +288,7 @@ public enum CueOracle {
         var i = max(0, Int((start / f.frameS).rounded()))
         while i < n && Double(i) * f.frameS < end && overlap < overlapS - 1e-9 {
             if f.callVoiced[i] {
+                if Double(run) * f.frameS > LocalLayer.overlapStretchGapS + 1e-9 { overlap = 0 }
                 run = 0
                 if f.micVoiced[i] { overlap += f.frameS }
             } else {
