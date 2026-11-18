@@ -1,4 +1,5 @@
 #if canImport(SwiftUI) && (DEBUG || MEETINGCARD_TEST_ID)
+import AppKit
 import SwiftUI
 
 // The coaching-display prototype's surfaces (test builds only, like CueDisplay.swift): the coach card
@@ -14,22 +15,28 @@ public struct CueDisplaySurface: View {
     let t: TimeInterval
     let mode: Mode
     let hover: Bool
+    let increasedContrast: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-    public init(option: CueDisplayOption, timeline: CueTimeline, t: TimeInterval, mode: Mode, hover: Bool = false) {
+    /// The system's Increase Contrast setting, like the shipped card (`CoachCardState.increasedContrast`).
+    @MainActor public static var systemIncreasedContrast: Bool { NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
+
+    public init(option: CueDisplayOption, timeline: CueTimeline, t: TimeInterval, mode: Mode, hover: Bool = false,
+                increasedContrast: Bool = CueDisplaySurface.systemIncreasedContrast) {
         self.option = option
         self.timeline = timeline
         self.t = t
         self.mode = mode
         self.hover = hover
+        self.increasedContrast = increasedContrast
     }
 
     public var body: some View {
         let display = CueDisplayPacer.frame(at: t, events: timeline.events)
         let style = CardStyle.for(dark: colorScheme == .dark)
         switch mode {
-        case .card: CueCardMock(option: option, timeline: timeline, display: display, hover: hover, style: style)
-        case .pill: CuePillMock(option: option, display: display, hover: hover, style: style)
+        case .card: CueCardMock(option: option, timeline: timeline, display: display, hover: hover, style: style, ic: increasedContrast)
+        case .pill: CuePillMock(option: option, display: display, hover: hover, style: style, ic: increasedContrast)
         }
     }
 }
@@ -48,6 +55,7 @@ struct CueBand: View {
     let tinted: Bool
     let radius: Double
     let style: CardStyle
+    let ic: Bool
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -55,11 +63,11 @@ struct CueBand: View {
         if let tone {
             let c = tone.color(style)
             ZStack(alignment: .leading) {
-                shape.fill(c.opacity(tinted ? k.nudgeTint(dark: style.dark, increasedContrast: false) * strength : 0))
-                shape.strokeBorder(c.opacity(tinted ? k.nudgeEdgeAlpha(dark: style.dark, increasedContrast: false) * strength : 0),
+                shape.fill(c.opacity(tinted ? k.nudgeTint(dark: style.dark, increasedContrast: ic) * strength : 0))
+                shape.strokeBorder(c.opacity(tinted ? k.nudgeEdgeAlpha(dark: style.dark, increasedContrast: ic) * strength : 0),
                                    lineWidth: k.nudgeBorder)
                 Rectangle()
-                    .fill(c.opacity(k.nudgeEdgeAlpha(dark: style.dark, increasedContrast: false) * strength))
+                    .fill(c.opacity(k.nudgeEdgeAlpha(dark: style.dark, increasedContrast: ic) * strength))
                     .frame(width: k.nudgeBar)
             }
             .clipShape(shape)
@@ -130,6 +138,7 @@ struct CueCardMock: View {
     let display: CueDisplayFrame
     let hover: Bool
     let style: CardStyle
+    let ic: Bool
 
     var body: some View {
         let k = Theme.CoachCard.self
@@ -181,7 +190,7 @@ struct CueCardMock: View {
         switch option {
         case .rotatingLine, .captionAnchored:
             let nudge = display.line?.nudge
-            row(band: CueBand(tone: nudge?.tone, strength: 1, tinted: true, radius: k.bandRadius, style: style),
+            row(band: CueBand(tone: nudge?.tone, strength: 1, tinted: true, radius: k.bandRadius, style: style, ic: ic),
                 glyph: Theme.CoachCard.Symbols.status,
                 glyphStyle: nudge.map { _ in k.nudgeText.shapeStyle(style) } ?? AnyShapeStyle(Theme.Coach.live(style: style).swiftUI),
                 text: nudge?.words ?? status, font: nudge == nil ? k.statusFont : k.nudgeFont, detail: nil,
@@ -192,7 +201,7 @@ struct CueCardMock: View {
             let glyphStyle: AnyShapeStyle = cue.map { c in inHold ? AnyShapeStyle(c.nudge.tone.color(style)) : d.lingerText.shapeStyle(style) }
                 ?? AnyShapeStyle(Theme.Coach.live(style: style).swiftUI)
             let age = cue.map { CueDisplayCopy.age($0.age(at: display.t)) }
-            row(band: CueBand(tone: cue?.nudge.tone, strength: display.strength, tinted: hover && cue != nil, radius: k.bandRadius, style: style),
+            row(band: CueBand(tone: cue?.nudge.tone, strength: display.strength, tinted: hover && cue != nil, radius: k.bandRadius, style: style, ic: ic),
                 glyph: cue.map { d.glyph($0.kind) } ?? Theme.CoachCard.Symbols.status, glyphStyle: glyphStyle,
                 text: hover ? (cue?.nudge.words ?? status) : status, font: hover && cue != nil ? k.nudgeFont : k.statusFont,
                 detail: hover ? age : nil,
@@ -238,7 +247,7 @@ struct CueCardMock: View {
         case .captionAnchored:
             CueAnchoredCaptions(lines: lines, mark: CueDisplayPacer.anchorRow(display, in: timeline).flatMap { row in
                 display.lingering.map { (row: row, cue: $0, strength: display.strength) }
-            }, style: style)
+            }, style: style, ic: ic)
         }
     }
 }
@@ -250,6 +259,7 @@ struct CueAnchoredCaptions: View {
     let lines: [CaptionFeedModel.Line]
     let mark: (row: Int, cue: ShownCue, strength: Double)?
     let style: CardStyle
+    let ic: Bool
 
     var body: some View {
         let c = Theme.Captions.self
@@ -262,13 +272,13 @@ struct CueAnchoredCaptions: View {
                     let tone = m.cue.nudge.tone.color(style)
                     HStack(spacing: 0) {
                         CueGlyph(symbol: d.glyph(m.cue.kind), size: d.markGlyphSize, weight: CardStyle.Typography.button.weight,
-                                 style: AnyShapeStyle(tone.opacity(max(m.strength, k.nudgeEdgeAlpha(dark: style.dark, increasedContrast: false)))))
+                                 style: AnyShapeStyle(tone.opacity(max(m.strength, k.nudgeEdgeAlpha(dark: style.dark, increasedContrast: ic)))))
                             .frame(width: d.markGutter)
                         Spacer(minLength: 0)
                     }
                     .frame(width: c.cardArea.width + d.markGutter, height: c.cardRowHeight)
                     .background(RoundedRectangle(cornerRadius: d.markRadius, style: .continuous)
-                        .fill(tone.opacity(k.nudgeTint(dark: style.dark, increasedContrast: false) * m.strength)))
+                        .fill(tone.opacity(k.nudgeTint(dark: style.dark, increasedContrast: ic) * m.strength)))
                     .offset(x: -d.markGutter, y: Double(m.row) * c.cardRowHeight)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(CueDisplayCopy.anchoredRowLabel(speaker: lines[m.row].speaker, text: lines[m.row].text,
@@ -285,6 +295,7 @@ struct CuePillMock: View {
     let display: CueDisplayFrame
     let hover: Bool
     let style: CardStyle
+    let ic: Bool
 
     var body: some View {
         let p = Theme.CoachPill.self
@@ -302,7 +313,7 @@ struct CuePillMock: View {
         let age = cue.map { CueDisplayCopy.age($0.age(at: display.t)) }
         VStack(spacing: d.tooltipPadding) {
             ZStack(alignment: .top) {
-                CueBand(tone: tone, strength: option == .glyphState ? display.strength : 1, tinted: words != nil, radius: p.radius, style: style)
+                CueBand(tone: tone, strength: option == .glyphState ? display.strength : 1, tinted: words != nil, radius: p.radius, style: style, ic: ic)
                 Capsule()
                     .fill(Theme.CoachPill.grabberColor.shapeStyle(style))
                     .frame(width: p.grabber.width, height: p.grabber.height)
@@ -362,9 +373,11 @@ struct CuePillMock: View {
 /// the glyph vocabulary, each on the backdrop.
 @MainActor
 public enum CueDisplaySnapshot {
+    /// Snapshots draw standard contrast unless asked, whatever the machine's setting.
     public static func image(_ option: CueDisplayOption, _ timeline: CueTimeline, at t: TimeInterval, mode: CueDisplaySurface.Mode,
-                             hover: Bool = false, dark: Bool, scale: CGFloat) -> CGImage? {
-        render(CueDisplaySurface(option: option, timeline: timeline, t: t, mode: mode, hover: hover), dark: dark, scale: scale)
+                             hover: Bool = false, increasedContrast: Bool = false, dark: Bool, scale: CGFloat) -> CGImage? {
+        render(CueDisplaySurface(option: option, timeline: timeline, t: t, mode: mode, hover: hover, increasedContrast: increasedContrast),
+               dark: dark, scale: scale)
     }
 
     /// The surface at each moment, side by side, each under its time.
@@ -378,7 +391,7 @@ public enum CueDisplaySnapshot {
                     Text(CueDisplayCopy.stripTime(t))
                         .font(d.stripLabelFont.swiftUI)
                         .foregroundStyle(d.stripLabelText.shapeStyle(style))
-                    CueDisplaySurface(option: option, timeline: timeline, t: t, mode: mode)
+                    CueDisplaySurface(option: option, timeline: timeline, t: t, mode: mode, increasedContrast: false)
                 }
             }
         }

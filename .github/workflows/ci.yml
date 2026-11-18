@@ -97,8 +97,10 @@ jobs:
           missing=0
           for o in rotating-line glyph-state caption-anchored; do
             for a in light dark; do
-              for s in card pill burst-card burst-pill before-pacing-card; do
-                [[ -s "build/cue-display/$s-$o-$a.png" ]] || { echo "missing $s-$o-$a.png"; missing=1; }
+              for s in card card-increased-contrast pill burst-card burst-pill before-pacing-card; do
+                f="$s-$o-$a.png"
+                [[ $s == card-increased-contrast ]] && f="card-$o-increased-contrast-$a.png"
+                [[ -s "build/cue-display/$f" ]] || { echo "missing $f"; missing=1; }
               done
             done
           done

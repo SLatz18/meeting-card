@@ -66,6 +66,19 @@ final class CueDisplaySnapshotTests: XCTestCase {
         }
     }
 
+    /// Increase Contrast: the shipped card's stronger tint and full-strength edge, for each option on the card.
+    func testIncreaseContrastStrengthensTheCue() throws {
+        for option in CueDisplayOption.allCases {
+            for dark in [false, true] {
+                let ic = try XCTUnwrap(CueDisplaySnapshot.image(option, Self.busy, at: Self.atCue, mode: .card, increasedContrast: true, dark: dark,
+                                                                scale: Self.scale))
+                let standard = try XCTUnwrap(CueDisplaySnapshot.image(option, Self.busy, at: Self.atCue, mode: .card, dark: dark, scale: Self.scale))
+                XCTAssertNotEqual(try pixels(ic), try pixels(standard), "\(option) dark=\(dark)")
+                try write(ic, "card-\(option.rawValue)-increased-contrast-\(tag(dark))")
+            }
+        }
+    }
+
     /// Each option on the pill, light and dark. The glyph-state pill never widens; the others widen
     /// for the words like the shipped pill.
     func testPillForEachOptionInLightAndDark() throws {
