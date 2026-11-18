@@ -31,7 +31,8 @@ status glyph after the words go, put the glyph state on the pill, and leave capt
 ## 1. Cue inventory (from the code)
 
 ListenMoreCore defines eight cue types (`CueType` in `ListenMoreCore/CuePolicy.swift`; the card mirrors them as
-`CoachNudge.Kind`); seven can be raised today (`self_pivot` is defined and displayable, but nothing raises it yet). Thresholds are the built-in config (`ListenMoreCore/DefaultConfig.swift`).
+`CoachNudge.Kind`); seven can be raised today (`self_pivot` is defined and displayable, but nothing raises it
+yet). Thresholds are the built-in config (`ListenMoreCore/DefaultConfig.swift`).
 
 | Cue | Source and trigger | Tone | Priority | Urgency | Mid-sentence? | Card words (shipped) |
 |---|---|---|---|---|---|---|
