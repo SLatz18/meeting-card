@@ -83,6 +83,9 @@ public struct SpeakerScore: Sendable, Codable {
     public var correct: Int
     public var total: Int
     public var unmatched: Int
+    /// Segments whose transcript never became a caption (the GPT layer drops You text while muted and
+    /// everything after the cost cap): only their stream could be checked.
+    public var uncaptioned = 0
     public var multiThem: MultiThem
     public var accuracy: Double? { total == 0 ? nil : Double(correct) / Double(total) }
 }
@@ -156,19 +159,49 @@ public enum Scoring {
         return out
     }
 
+    /// The label the caption feed should show for `speaker` at scenario time `t`: You, or Them until a
+    /// speaker tag was applied (then the tag).
+    static func expectedLabel(_ speaker: Speaker, at t: Double, in r: RunRecord) -> String {
+        guard speaker == .others else { return SpeakerLabels.defaultLabels[.me] ?? "You" }
+        let renames = Array(zip(r.applied.filter { $0.kind == .renameThem }, r.scenario.controls.filter { $0.kind == .renameThem }))
+        let tag = renames.last { $0.0.t <= t }?.1.tag
+        return tag ?? SpeakerLabels.defaultLabels[.others] ?? "Them"
+    }
+
+    /// A segment is attributed correctly when it reached the right stream's transcriber, the caption
+    /// that carried its text has the right speaker, and the caption feed labelled that line right.
     public static func speakers(_ r: RunRecord) -> SpeakerScore {
         let hang = hangover(r)
-        var correct = 0, total = 0, unmatched = 0
+        var correct = 0, total = 0, unmatched = 0, uncaptioned = 0
         var themBSpeakers: [Speaker] = []
+        let finals = r.captions.filter { $0.isFinal && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+        var used = Set<Int>()
+        func norm(_ s: String) -> String { ScriptText.tokens(s).joined(separator: " ") }
         for seg in r.sockets.segments where !seg.text.trimmingCharacters(in: .whitespaces).isEmpty {
             guard let p = line(for: seg, lines: r.timeline.lines, hangover: hang) else {
                 unmatched += 1
                 continue
             }
             total += 1
-            let speaker: Speaker = seg.stream == .mic ? .me : .others
-            if speaker == p.line.voice.speaker { correct += 1 }
-            if p.line.voice == .themB { themBSpeakers.append(speaker) }
+            let expected = p.line.voice.speaker
+            let stream: Speaker = seg.stream == .mic ? .me : .others
+            var ok = stream == expected
+            let text = norm(seg.text)
+            if let i = finals.indices.first(where: { !used.contains($0) && norm(finals[$0].text) == text
+                && finals[$0].t >= seg.transcribedAt - 0.05 && finals[$0].t <= seg.transcribedAt + 3 }) {
+                used.insert(i)
+                let c = finals[i]
+                ok = ok && c.speaker == expected
+                if let view = r.captionViews.first(where: { abs($0.t - c.t) < 1e-9 }),
+                   let row = view.rows.last(where: { norm($0.text).contains(text) }) {
+                    ok = ok && row.label == expectedLabel(expected, at: c.t, in: r)
+                }
+                if p.line.voice == .themB { themBSpeakers.append(c.speaker) }
+            } else {
+                uncaptioned += 1
+                if p.line.voice == .themB { themBSpeakers.append(stream) }
+            }
+            if ok { correct += 1 }
         }
         let multi: MultiThem
         if !r.timeline.lines.contains(where: { $0.line.voice == .themB }) || themBSpeakers.isEmpty {
@@ -179,6 +212,6 @@ public enum Scoring {
             // Speaker has two cases, so both remote voices share Them's label.
             multi = .mergedAsThem
         }
-        return SpeakerScore(correct: correct, total: total, unmatched: unmatched, multiThem: multi)
+        return SpeakerScore(correct: correct, total: total, unmatched: unmatched, uncaptioned: uncaptioned, multiThem: multi)
     }
 }

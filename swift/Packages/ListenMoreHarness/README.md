@@ -13,8 +13,9 @@ Each run scores three things per scenario and writes one results table:
   the VAD hangover) to its final transcript. Live lines are committed in pieces at pauses, so this is
   per segment, never per line.
 - **Speaker identification**: every transcribed segment attributed to You or Them by audio timing (the
-  script line whose span holds the segment's speech end and most of its words), with an accuracy
-  figure, and what happens with two different Them voices.
+  script line whose span holds the segment's speech end and most of its words); correct means the right
+  stream's transcriber, the right speaker on its caption and the right label in the caption feed. With
+  an accuracy figure, and what happens with two different Them voices.
 - **Coaching**: every cue (type, level, timing, source) against the cue rules: expected cues fire, no
   false cues (including right after unmute), and none while paused or muted.
 
@@ -80,7 +81,7 @@ secret, so the main-only restriction guards it.
 expected vs actual cues and every check), `results.json` and `cost-log.jsonl`, in `--out` (default: a
 new folder under the system temp directory). Never committed. Each scenario gets a private temp
 directory (mode 0700, named with the harness's pid) for the opt-in transcript; it is wiped at the end,
-a run sweeps folders a crashed run left behind, and a disk audit fails the run if an audio-like file
+a run sweeps folders a crashed run left behind (dead pid and untouched for five minutes), and a disk audit fails the run if an audio-like file
 appeared anywhere else (temp dir, the repository, the home folder's top level).
 
 For each missed or false interrupt, the report adds a diagnostic: the run's own audio replayed through
@@ -95,7 +96,7 @@ audio, where You's onsets fell, whether Them were talking, and Them's longest ga
 | `interruption` | A 0.4 s "Yeah." over Them gives no cue; You cutting in while Them keep talking 3.5 s gives one `interrupt` about 1.2 s after You start. |
 | `monologue` | You hold the floor for over 60 s after Them ask for the plan: one soft `monologue` cue at the 60 s mark. |
 | `missed-question` | A question You answer ("Yes, ...") gives no cue; one You talk past gives one soft `missed_question`. Save transcripts on, then Delete Transcript mid-call: the file is gone and stays gone (T4). |
-| `mute-unmute` | The coach's Mute: zero mic samples reach the engine and zero ME audio is sent, though the fake device keeps offering audio; no You lines in captions or the saved file; Them captions continue; You cutting in and Them asking a question while muted give nothing; You's first words back start 0.3 s after Unmute, inside `local.unmute_grace_s`, and give no cue though they run on past the grace through comma pauses; a real cut-in later gives one `interrupt`. Saved transcript: one `Call … .md`, mode 0600, times and labels, deleted at teardown (T3, T4). |
+| `mute-unmute` | The coach's Mute: zero mic samples reach the engine and zero ME audio is sent, though the fake device keeps offering audio; no You lines in captions or the saved file; Them captions continue; You cutting in and Them asking a question while muted give nothing; You's first words back start 0.3 s after Unmute, inside `local.unmute_grace_s`, and give no cue though they run on past the grace through comma pauses (the exemption ends when You pause 0.5 s, Them start a new utterance, or 3 s past the grace); a real cut-in later gives one `interrupt`. Saved transcript: one `Call … .md`, mode 0600, times and labels, deleted at teardown (T3, T4). |
 | `pause` | One `interrupt` before Pause. Paused: no frames reach the engine on either stream, no transcription traffic, no captions, no cues; the engine stops at Pause and restarts at Resume. A second `interrupt` after Resume, more than the 20 s cooldown after the first in session time, though the restarted engine's clock is back near 0. |
 | `silence-to-stop` | The call app stops running audio: the session ends `trigger.stop_after_s` (30 s) later, not sooner; captions are cleared; no cues during the silence; keep-nothing (saving off) writes nothing (T2). |
 | `two-them-voices` | Two distinct Them voices on the call stream. The engine attributes by stream (no diarization), so the report says **merged as Them**. Them renamed mid-call: caption rows and the saved file use the tag; the next call is back to Them (X4). |
@@ -120,7 +121,8 @@ transcription latency: cues that wait on a transcript get 1.5 s after the speech
 0.66-0.80 s the first live run measured), and the session's stop gets two polls (the trigger needs one
 poll to see the call app's audio off and, on the live wall clock, can need one more to see 30 s have
 passed). A missed question can fire as soon as `question_decide_words` words of the reply are
-transcribed, which with pauses is before the reply ends. A tolerated cue (a judge verdict on a reply,
+transcribed, which with pauses (live, espeak) is before the reply ends; with the synthetic signal, one
+segment per line, it is due at the reply's end. A tolerated cue (a judge verdict on a reply,
 a borderline trailing cut-in, a counter-question) is tolerated only in a window around the line that
 justifies it, never for a cue type across the scenario.
 

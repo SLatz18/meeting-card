@@ -121,6 +121,7 @@ public enum Harness {
                 services.engineConfig = engineConfig
                 services.ignoredControls = o.ignoredControls
                 services.judgeOn = o.judgeOn
+                services.segmentedSpeech = o.mode == .live || o.offlineVoices == .espeak
                 record = try await ScenarioRun(scenario: scenario, services: services, workDir: dir.url).run()
             } catch {
                 dir.wipe()

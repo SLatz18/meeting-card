@@ -50,12 +50,16 @@ public enum CueOracle {
         public var gptStopT: Double?
         public var mode: Mode
         public var judgeOn: Bool
+        /// The audio has pauses inside lines (live TTS, espeak), so a line can be transcribed in pieces.
+        /// The synthetic signal doesn't: one line, one segment.
+        public var segmentedSpeech: Bool
 
-        public init(keyless: Bool, gptStopT: Double?, mode: Mode, judgeOn: Bool = true) {
+        public init(keyless: Bool, gptStopT: Double?, mode: Mode, judgeOn: Bool = true, segmentedSpeech: Bool? = nil) {
             self.keyless = keyless
             self.gptStopT = gptStopT
             self.mode = mode
             self.judgeOn = judgeOn
+            self.segmentedSpeech = segmentedSpeech ?? (mode == .live)
         }
     }
 
@@ -192,12 +196,15 @@ public enum CueOracle {
             let shared = ScriptText.content(question, stop: stop).intersection(ScriptText.content(reply, stop: stop))
             if shared.count >= c.text.questionClearMinSharedWords { continue }
             // The rule decides on the reply's transcript as it arrives, segment by segment: the soft cue
-            // comes once `question_decide_words` words are in, which with pauses in the reply can be
-            // before the reply ends (from when that word is spoken), and at the latest when the reply's
-            // last segment is transcribed; a shorter reply is decided at the end of the turn.
+            // comes once `question_decide_words` words are in. With pauses in the reply (live, espeak)
+            // that can be before the reply ends, from when that word is spoken, and at the latest when
+            // its last segment is transcribed; one segment per line (the synthetic signal) means at the
+            // reply's end. A shorter reply is decided at the end of the turn.
             let words = ScriptText.tokens(reply).count
             let window: ClosedRange<Double>
-            if words >= c.text.questionDecideWords {
+            if words >= c.text.questionDecideWords && !facts.segmentedSpeech {
+                window = (r.end - 0.3)...(r.end + allowance)
+            } else if words >= c.text.questionDecideWords {
                 let decideWordSpoken = r.start + (r.end - r.start) * Double(c.text.questionDecideWords) / Double(words)
                 window = decideWordSpoken...(r.end + hang + allowance)
             } else {

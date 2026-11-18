@@ -17,17 +17,26 @@ public struct RunDirectory {
         return RunDirectory(url: url)
     }
 
-    /// Removes run folders whose harness process is gone (a crash skipped their wipe). Only names in
-    /// the exact `lm-harness-<pid>-<uuid>` form are touched; a folder of a running harness is kept.
-    /// Returns how many were removed.
+    /// A run folder younger than this is never swept. A harness in another PID namespace (a container
+    /// sharing /tmp) can look dead from here; each scenario has its own folder and the longest runs
+    /// about two minutes live, so a folder untouched for five minutes belongs to no running scenario.
+    public static let sweepMinAgeS: TimeInterval = 300
+
+    /// Removes run folders whose harness process is gone (a crash skipped their wipe) and that haven't
+    /// changed for `minAge` seconds. Only names in the exact `lm-harness-<pid>-<uuid>` form are touched;
+    /// a folder of a running harness is kept. Returns how many were removed.
     @discardableResult
-    public static func sweepStale(in dir: URL = FileManager.default.temporaryDirectory) -> Int {
+    public static func sweepStale(in dir: URL = FileManager.default.temporaryDirectory, minAge: TimeInterval = sweepMinAgeS,
+                                  now: Date = Date()) -> Int {
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return 0 }
         var removed = 0
         for name in names {
             guard let pid = ownerPid(name), !processAlive(pid) else { continue }
-            if (try? fm.removeItem(at: dir.appendingPathComponent(name))) != nil { removed += 1 }
+            let url = dir.appendingPathComponent(name)
+            guard let modified = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
+                  now.timeIntervalSince(modified) >= minAge else { continue }
+            if (try? fm.removeItem(at: url)) != nil { removed += 1 }
         }
         return removed
     }

@@ -85,6 +85,8 @@ public struct RunServices: @unchecked Sendable {
     public var ignoredControls: Set<ControlKind> = []
     /// The not_listening judge is on (off: `Harness.judgeOff`, 0 judge calls).
     public var judgeOn = true
+    /// The audio has pauses inside lines (live TTS, espeak).
+    public var segmentedSpeech = false
     public var key: APIKey?
     public var transports: GptTransports?
     public var clock: HarnessClock
@@ -161,6 +163,7 @@ public struct RunRecord: @unchecked Sendable {
     public var micMuteCalls: [Bool] = []
     public var judgeCalls = 0
     public var judgeOn = true
+    public var segmentedSpeech = false
     public var meters: [CostReading] = []
     /// Every cost reading with its scenario time (each engine's meter starts at 0).
     public var meterLog: [(t: Double, reading: CostReading)] = []
@@ -367,6 +370,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.micMuteCalls = mic.muteCalls
         record.judgeCalls = services.judgeCalls()
         record.judgeOn = services.judgeOn
+        record.segmentedSpeech = services.segmentedSpeech
         record.captionStates.append((now, live.captionState))
         record.shadow = ShadowTrace.record(config: config, tracks: tracks, applied: record.applied)
         return record
