@@ -49,6 +49,11 @@ import Foundation
 /// mute stop the engine, and the next start builds a new `GptCore` with a new gate. A count for the
 /// whole call is the sum over its engine runs.
 ///
+/// Known limits: by design, a reply with only 2 first-person words and no pivot opener isn't a
+/// candidate (`pivot_first_person_min_words` is 3). "we should all go sometime, i did that trail last
+/// year and i was exhausted for days after the climb." gives none for that reason, not because of
+/// `pivot_plural_team`.
+///
 /// Voice activity places the turns (times are VAD onsets and offsets, and a transcript's reference
 /// time is the offset its commit was made at); transcripts arrive later and decide. Segment text stays
 /// in RAM for at most 120 s (pruned on every frame), is dropped by `clear()` and is never logged.
