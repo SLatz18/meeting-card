@@ -146,6 +146,19 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(try read("App/CoachCardPanel.swift").contains("notification: .announcementRequested"))
     }
 
+    /// Increase Contrast reaches the cue on both surfaces: the controller reads the system setting, the
+    /// card's band and the pill's cue bar take their alpha from it, and the lingering glyph is a
+    /// semantic text role (which follows it).
+    func testCueHonorsIncreaseContrast() throws {
+        XCTAssertTrue(try read("App/CoachController.swift").contains("increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast"))
+        let view = try read("App/CoachCardView.swift")
+        XCTAssertTrue(view.contains("CardStyle.Coach.nudgeEdgeAlpha(dark: dark, increasedContrast: state.increasedContrast)"), "the pill's cue bar")
+        XCTAssertTrue(view.contains("let ic = state.increasedContrast"), "the card's band")
+        XCTAssertTrue(view.contains("Theme.text(Theme.CoachCard.lingerGlyphText, style)"), "the lingering glyph's semantic role")
+        XCTAssertFalse(view.contains("increasedContrast: false"))
+        XCTAssertEqual(Theme.CoachCard.lingerGlyphText, .secondary, "a system label color: Increase Contrast darkens it")
+    }
+
     /// not_listening nudges are off unless MeetingCard turns them on.
     func testNotListeningIsOffByDefault() throws {
         let controller = try read("App/CoachController.swift")

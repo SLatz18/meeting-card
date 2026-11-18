@@ -79,6 +79,7 @@ case "${1:-}" in
              pill-idle pill-listening pill-muted pill-paused pill-nudge-amber pill-nudge-rose \
              card-cue-linger-amber card-cue-linger-rose card-cue-expired card-cue-linger-mic-off \
              pill-cue-linger-amber pill-cue-linger-rose pill-cue-expired \
+             card-cue-linger-increased-contrast pill-nudge-increased-contrast \
              pill-zoom-mute morph-end collapse-end; do
       for a in light dark; do
         [[ -s "$OUT/coach-$s-$a.png" ]] || { echo "missing coach-$s-$a.png" >&2; missing=1; }
