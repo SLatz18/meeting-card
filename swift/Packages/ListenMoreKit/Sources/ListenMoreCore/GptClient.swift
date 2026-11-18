@@ -166,8 +166,9 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
 }
 
 /// Port of `LiveJudge`: POST /v1/responses with the configured model alias, store=false and a strict
-/// JSON schema. On `401 incorrect_hostname` it retries once on the regional OpenAI host the error names
-/// and keeps that host for the rest of the call. The prompt and the reply stay in memory.
+/// JSON schema. On `401 incorrect_hostname` the cue judge retries once on the regional OpenAI host the error
+/// names and keeps that host for the rest of the call; a judge whose spec doesn't `resendsOnOtherHost` (the
+/// self-pivot judge) sends its one request and never resends it. The prompt and the reply stay in memory.
 public final class LiveJudge: CueJudge, @unchecked Sendable {
     private let gpt: ListenMoreConfig.Gpt
     private let key: APIKey
@@ -222,6 +223,10 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
         let (first, tried) = lock.withLock { (url, fallbackTried) }
         let (status, data) = try await post(first, body)
         if status == 200 { return try Self.parse(data) }
+        guard spec.resendsOnOtherHost else {
+            learnRegionalHost(status: status, body: data, from: first)
+            throw GptError.http(status)
+        }
         guard !tried else { throw GptError.http(status) }
         let regional = Self.regionalHost(status: status, body: data)
         let backToConfigured = first != configured && Self.learnedHostRejections.contains(status)
@@ -241,6 +246,14 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
         lock.withLock { url = alt }
         if alt == configured { hosts.forget(configured) } else { hosts.learn(alt, for: configured) }
         return result
+    }
+
+    /// A judge that never resends still reads the regional host a `401 incorrect_hostname` names, so its next
+    /// request starts there. No request is made for it.
+    private func learnRegionalHost(status: Int, body: Data, from first: String) {
+        guard let regional = Self.regionalHost(status: status, body: body), let alt = Self.withHost(first, regional) else { return }
+        lock.withLock { url = alt }
+        hosts.learn(alt, for: gpt.responsesUrl)
     }
 
     private func post(_ urlString: String, _ body: Data) async throws -> (status: Int, body: Data) {

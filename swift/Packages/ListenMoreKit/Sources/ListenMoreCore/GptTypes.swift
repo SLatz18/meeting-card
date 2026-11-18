@@ -38,10 +38,13 @@ public struct JudgeSpec: Equatable, Sendable {
     public var name: String
     public var instructions: String
     public var labels: [String]
+    /// Whether `LiveJudge` may send the same question again on another host after a rejection (the regional
+    /// host `401 incorrect_hostname` names). The self-pivot judge's one request per candidate is never resent.
+    public var resendsOnOtherHost = true
 
     public static let cue = JudgeSpec(name: "listen_more_cue", instructions: GptJudgeSpec.instructions, labels: GptJudgeSpec.labels)
     public static let selfPivot = JudgeSpec(name: SelfPivotJudgeSpec.name, instructions: SelfPivotJudgeSpec.instructions,
-                                            labels: SelfPivotJudgeSpec.labels)
+                                            labels: SelfPivotJudgeSpec.labels, resendsOnOtherHost: false)
 
     public var schema: [String: Any] {
         [
