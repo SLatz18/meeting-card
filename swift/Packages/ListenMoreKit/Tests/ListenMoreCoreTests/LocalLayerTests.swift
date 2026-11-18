@@ -32,6 +32,21 @@ final class LocalLayerTests: XCTestCase {
 
     // MARK: cut-in
 
+    /// A gap in the other side's speech during the cut-in's opening overlap: one of
+    /// `LocalLayer.cutInMaxOthersGapS` (0.16 s) keeps the cut-in, one frame more (0.18 s) drops it, at
+    /// any point on the clock (absolute times change how frame-time differences round).
+    func testCutInSurvivesThemGapUpToTheTolerance() {
+        XCTAssertEqual(LocalLayer.cutInMaxOthersGapS, 0.16, accuracy: 1e-12)
+        for offset in [0.0, 10.0, 100.0] {
+            func cut(gap: Double) -> [LocalEvent.Kind] {
+                kinds(run(offset + 9, me: [(offset + 3.2, offset + 6.5)],
+                          others: [(offset + 1.0, offset + 3.5), (offset + 3.5 + gap, offset + 7.0)]))
+            }
+            XCTAssertEqual(cut(gap: 0.16), [.interrupt], "a 0.16 s gap at offset \(offset)")
+            XCTAssertEqual(cut(gap: 0.18), [], "a 0.18 s gap at offset \(offset)")
+        }
+    }
+
     func testCutInNeedsTheOverlapAndThemContinuing() throws {
         let evs = run(8, me: [(3.0, 6.0)], others: [(1.0, 5.5)])
         XCTAssertEqual(kinds(evs), [.interrupt])

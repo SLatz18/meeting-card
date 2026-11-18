@@ -79,6 +79,10 @@ public final class LocalLayer {
     /// opening overlap (`cut_in_min_overlap_ms`) has built up: they count as speaking for
     /// `speakingTailS` after their last voiced frame, then the gap may run to `overlapGapS`.
     public static let cutInMaxOthersGapS = speakingTailS + overlapGapS
+    /// Frame times are multiples of the frame length, and their differences round (3.56 - 3.50 is a hair
+    /// over 0.06): comparisons against the windows above allow this much, so a window holds the same
+    /// number of frames anywhere on the clock.
+    static let timeSlackS = 1e-6
     /// The longest the user's first words back stay settled past the grace. A first reply after unmute
     /// ("Sorry, I was on mute, give me one second") runs about three seconds, so its comma onsets fall
     /// inside this; anything the user says after it is graded as usual, whatever their pauses.
@@ -181,7 +185,7 @@ public final class LocalLayer {
     }
 
     private func speaking(_ vad: StreamVAD, _ t: TimeInterval) -> Bool {
-        vad.active && t - vad.lastSpeechT <= Self.speakingTailS
+        vad.active && t - vad.lastSpeechT <= Self.speakingTailS + Self.timeSlackS
     }
 
     /// The user's mic went off (true) or came back. Either way the user's utterance and turn in
@@ -284,7 +288,7 @@ public final class LocalLayer {
                 c.overlap += both ? frameS : 0
             } else {
                 c.gap += frameS
-                if c.gap > Self.overlapGapS {
+                if c.gap > Self.overlapGapS + Self.timeSlackS {
                     let end = others.lastSpeechT
                     if c.overlap >= cutTrailingOverlap && abs(end - c.onset) <= cutTrailingWindow {
                         c.trailing = true
