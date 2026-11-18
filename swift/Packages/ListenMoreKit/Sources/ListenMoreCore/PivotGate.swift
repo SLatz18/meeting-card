@@ -16,7 +16,9 @@ import Foundation
 ///    `update_handoff_phrases`: "let's", "anyway", "next item", "you go first", "you're up").
 /// 2. The user starts within `pivot_reply_max_start_s` of their last speech and says at least
 ///    `pivot_reply_min_words` about themselves: first-person words make up `pivot_first_person_share`
-///    of the person words (`pivot_other_person` counts you, he, she, they and the like against it),
+///    of the person words (`pivot_other_person` counts you, he, she, they and the like against it,
+///    and `pivot_about_them` reactions such as "that sounds" or "love that" one each, unless they
+///    open the reply, where they acknowledge them like sympathy),
 ///    and either a sentence opens with a pivot opener and there are `pivot_opener_min_first_person`
 ///    of them, or there are at least `pivot_first_person_min_words`. A reply that opens with sympathy (`pivot_sympathy`:
 ///    "sorry to hear", "i hope he", "congratulations", "that's rough") is judged on what follows the
@@ -313,23 +315,31 @@ final class PivotGate {
             let rest = opening.rest.flatMap(TextRules.tokens)
             let ownStory = rest.contains(where: firstPerson.contains) || opening.rest.contains(where: { has($0, x.pivotShareMarkers) })
             return aboutUser(rest, firstPerson: ownStory ? firstPersonAfterSympathy : firstPerson,
-                             opens: opening.starts.contains(where: opensWithOpener))
+                             reactions: reactions(opening.rest), opens: opening.starts.contains(where: opensWithOpener))
         }
-        return aboutUser(words, firstPerson: firstPerson, opens: lines.contains(where: opensWithPivot))
+        return aboutUser(words, firstPerson: firstPerson, reactions: reactions(lines.map(\.text)),
+                         opens: lines.contains(where: opensWithPivot))
+    }
+
+    /// Reactions to their news ("that sounds", "love that", "good for you"): each counts as one
+    /// word about them.
+    private func reactions(_ texts: [String]) -> Int {
+        texts.reduce(0) { n, text in n + x.pivotAboutThem.reduce(0) { $0 + TextRules.phraseCount(text, $1) } }
     }
 
     /// First-person words are `pivot_first_person_share` of the person words, and either the text
     /// opens with a pivot opener and has `pivot_opener_min_first_person` of them ("me too" alone
     /// isn't enough), or there are `pivot_first_person_min_words` of them.
-    private func aboutUser(_ words: [String], firstPerson: Set<String>, opens: Bool) -> Bool {
-        let first = words.filter(firstPerson.contains).count, other = words.filter(otherPerson.contains).count
+    private func aboutUser(_ words: [String], firstPerson: Set<String>, reactions: Int, opens: Bool) -> Bool {
+        let first = words.filter(firstPerson.contains).count, other = words.filter(otherPerson.contains).count + reactions
         let aboutMe = Double(first) >= x.pivotFirstPersonShare * Double(first + other)
         if aboutMe && opens && first >= x.pivotOpenerMinFirstPerson { return true }
         return aboutMe && first >= x.pivotFirstPersonMinWords
     }
 
-    /// Does the reply open with sympathy for them ("oh no, i'm so sorry, that's rough")? If so, the
-    /// clauses after it, and those of them that start a sentence or the rest of the reply.
+    /// Does the reply open by acknowledging them, with sympathy or a reaction ("oh no, i'm so sorry,
+    /// that sounds scary")? If so, the clauses after it, and those of them that start a sentence or
+    /// the rest of the reply.
     private func sympathyOpening(_ lines: [Line]) -> (led: Bool, rest: [String], starts: [String]) {
         var led = false, leading = true
         var rest: [String] = [], starts: [String] = []
@@ -337,7 +347,7 @@ final class PivotGate {
             for (i, piece) in clauses(sentence).enumerated() {
                 if leading {
                     if TextRules.tokens(strippingLeadIns(piece)).isEmpty { continue }
-                    if has(piece, x.pivotSympathy) {
+                    if has(piece, x.pivotSympathy) || has(piece, x.pivotAboutThem) {
                         led = true
                         continue
                     }

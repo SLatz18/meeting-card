@@ -189,6 +189,17 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(pivot(reply: "Oh nice, me too, that sounds like such a great day, the weather on Sunday was perfect for a long race."))
     }
 
+    /// "Me too" plus reactions to their day ("i love that", "that sounds like"): about them.
+    func testMeTooAndReactingToTheirDayIsNone() {
+        assertNoCandidate(pivot(reply: "Me too, I love that, that sounds like such a great day out, the weather on Sunday was perfect for a long race."))
+    }
+
+    /// A reaction that opens the reply acknowledges them, like sympathy: the story after it counts.
+    func testAReactionThenTheUsersOwnStoryIsACandidate() {
+        XCTAssertEqual(run(pivot(reply: "That sounds amazing, that reminds me of my first race last spring, it took ages to get over the nerves."),
+                           until: 30).counters.candidates, 1)
+    }
+
     /// Three first-person words against one "you": not enough about the user.
     func testAnOpenerInAReplyAboutTheirNewsIsNone() {
         assertNoCandidate(pivot(reply: "When my sister told me the news I was so thrilled for you, it is such wonderful news for the whole family.",
