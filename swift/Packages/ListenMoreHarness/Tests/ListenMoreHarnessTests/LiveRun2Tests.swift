@@ -149,6 +149,18 @@ final class LiveRun2Tests: XCTestCase {
         XCTAssertNil(try cutIn(framesBeforeStart: 1, quietFrames: 8).alternative, "still speaking at the onset, 0.16 s: kept")
     }
 
+    /// A line starting at or past the end of the known audio has no gaps to measure: (0, 0), not a read
+    /// past the end of the voicing arrays.
+    func testOpeningOverlapGapsPastTheEndOfTheAudioAreZero() {
+        let voiced = Array(repeating: true, count: 10)
+        let facts = CueOracle.Facts(keyless: true, gptStopT: nil, mode: .offline, callVoiced: voiced, micVoiced: voiced)
+        for start in [0.18, 0.20, 1.0, 100.0] {
+            let gaps = CueOracle.openingOverlapGaps(facts, from: start, until: start + 1.0, overlapS: 0.6, confirmFrames: 2)
+            XCTAssertEqual(gaps.atOnset, 0, "from \(start)")
+            XCTAssertEqual(gaps.later, 0, "from \(start)")
+        }
+    }
+
     /// The alternative is accepted only in its window after Them stop, and only where it was offered.
     func testTalkOverMatchesOnlyWhereOffered() throws {
         let (t, _) = try interruptionFacts(gapFrames: 0, after: 0)

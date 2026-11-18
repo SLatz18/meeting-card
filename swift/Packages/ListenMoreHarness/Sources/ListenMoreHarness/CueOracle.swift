@@ -286,16 +286,17 @@ public enum CueOracle {
     /// `LocalLayer.speakingTailS` after their last voiced frame, and starts the cut-in once You's VAD has
     /// confirmed (`confirmFrames` voiced frames after the onset). If their last voiced frame is still
     /// inside that tail then, `start` didn't land in a pause: their pause is a later one, measured from
-    /// that frame. 0 when the audio isn't known.
+    /// that frame. (0, 0) when the audio isn't known or ends before `start`.
     static func openingOverlapGaps(_ f: Facts, from start: Double, until end: Double, overlapS: Double,
                                    confirmFrames: Int) -> (atOnset: Double, later: Double) {
         let n = min(f.callVoiced.count, f.micVoiced.count)
         guard n > 0, end > start else { return (0, 0) }
         var overlap = 0.0, run = 0, atOnset = 0, longest = 0, heard = false
         var i = max(0, Int((start / f.frameS).rounded()))
+        guard i < n else { return (0, 0) }
         var back = 0
-        while back < i && back < n && !f.callVoiced[i - 1 - back] && Double(back + 1) * f.frameS <= LocalLayer.speakingTailS + 1e-9 { back += 1 }
-        let spoke = back < i && i - 1 - back < n && f.callVoiced[i - 1 - back]
+        while back < i && !f.callVoiced[i - 1 - back] && Double(back + 1) * f.frameS <= LocalLayer.speakingTailS + 1e-9 { back += 1 }
+        let spoke = back < i && f.callVoiced[i - 1 - back]
         if spoke && Double(back + confirmFrames) * f.frameS <= LocalLayer.speakingTailS + 1e-9 {
             heard = true
             run = back
