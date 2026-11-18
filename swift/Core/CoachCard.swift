@@ -52,20 +52,20 @@ public enum CoachCardCopy {
         public static let accessibilityLabel = "Tip: your headphones may be in call mode, which lowers volume. Choose your Mac's mic in your call app to keep full volume."
     }
 
-    // MARK: DRAFT: no-mic notice (not yet copy-reviewed; edit before release)
+    // MARK: no-mic notice (approved copy)
 
     /// The notice under the card (in the tip's row) when Bluetooth headphones are used on a Mac with no
     /// built-in mic, so mic-based cues are off. Generic on purpose: it never names the call app.
     public enum NoMicNotice {
         /// False once the strings below are approved.
-        public static let isDraft = true
-        public static let title = "Mic cues are off"
-        public static let body = "This Mac has no built-in mic, and Call coach doesn't use headset mics, so cues about how you speak are off with Bluetooth headphones."
+        public static let isDraft = false
+        public static let title = "Speaking cues are off"
+        public static let body = "With Bluetooth headphones, Call coach can't hear you on this Mac. It has no built-in mic, and the coach doesn't use headset mics. Captions and cues about the others still work."
         public static let dismiss = "Got it"
-        /// What VoiceOver reads for the notice.
-        public static let accessibilityLabel = "Mic cues are off. This Mac has no built-in mic, and Call coach doesn't use headset mics, so cues about how you speak are off with Bluetooth headphones."
+        /// What VoiceOver reads for the notice: the title, then the body.
+        public static let accessibilityLabel = "\(title). \(body)"
         /// The line in Settings, on a Mac without a built-in mic.
-        public static let settingsNote = "On a Mac without a built-in mic, Call coach can't hear you while you use Bluetooth headphones, so cues about how you speak are off. Wired headphones or speakers keep them."
+        public static let settingsNote = "On a Mac with no built-in mic, Call coach can't hear you while you use Bluetooth headphones, so cues about how you speak are off. Captions and cues about the others still work."
     }
 }
 
