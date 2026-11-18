@@ -87,7 +87,8 @@ final class PrivacyGuardTests: XCTestCase {
     /// The opt-in note's own parts: a summary placeholder section and the daily-note line are what
     /// the user asked for when they turned on saving. These files may say "summary" and "daily";
     /// every other word of the history rule below still holds in them.
-    static let noteFiles: Set<String> = ["CallNote.swift", "CallRecord.swift", "DailyNote.swift", "Transcript.swift"]
+    static let noteFiles: Set<String> = ["CallNote.swift", "CallRecord.swift", "DailyNote.swift", "Transcript.swift",
+                                         "CoachNoteSettings.swift"]
 
     /// The summary section is a fixed placeholder: the note never gets a generated summary.
     func testTheSummarySectionIsOnlyAPlaceholder() {
@@ -104,7 +105,7 @@ final class PrivacyGuardTests: XCTestCase {
     func testCaptionAndTranscriptSourcesNeverLog() throws {
         let names: Set<String> = ["Captions.swift", "Transcript.swift", Self.transcriptWriter, "LiveTranscript.swift",
                                   "CallRecord.swift", "CallNote.swift", "DailyNote.swift",
-                                  "CoachTranscript.swift", "CoachNotice.swift"]
+                                  "CoachTranscript.swift", "CoachNotice.swift", "CoachNoteSettings.swift"]
         let sources = try allSources().filter { names.contains($0.0) }
         XCTAssertGreaterThanOrEqual(sources.count, 7)
         for (name, text) in sources {
@@ -231,11 +232,14 @@ final class PrivacyGuardTests: XCTestCase {
     }
 
     /// A host's only defaults are coach settings, never call data. `coach.cardPosition` is where the
-    /// user last dragged the coach card (an offset in points).
+    /// user last dragged the coach card (an offset in points); `coach.transcriptFolderBookmark` is the
+    /// chosen folder's bookmark; the other `coach.transcript*` keys are the saved notes' options.
     func testHostDefaultsAreSettingsOnly() throws {
         let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
                                     "coach.judgeProvider", "coach.cardPosition", "coach.captions", "coach.saveTranscripts",
-                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen"]
+                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen", "coach.transcriptFolderBookmark",
+                                    "coach.transcriptFileName", "coach.transcriptTags", "coach.transcriptDailyNote",
+                                    "coach.transcriptDailyNotePath", "coach.transcriptDailyNoteEmbed", "coach.transcriptRetentionDays"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
         for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {

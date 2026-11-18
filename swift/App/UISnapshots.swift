@@ -27,8 +27,8 @@ enum UISnapshots {
     ]
 
     /// Holds transcript text in memory for the screenshots; never touches disk. The recorder's I/O
-    /// queue and the main thread both use it, so it locks. `dirs` stands in for folders (a synthetic
-    /// vault's `.obsidian`).
+    /// queue and the main thread both use it, so it locks. `addFolder` stands in for a folder (a
+    /// synthetic vault's `.obsidian`).
     final class MemoryTranscriptStore: TranscriptStore, @unchecked Sendable {
         private let lock = NSLock()
         private var files: [URL: String] = [:]
@@ -113,6 +113,28 @@ enum UISnapshots {
             defaults.removePersistentDomain(forName: suite)
             done()
         }
+        // The same group with the folder in a synthetic vault, the daily-note line on and 30-day retention.
+        func obsidianShot(_ coach: CoachController, _ store: MemoryTranscriptStore, _ w: CoachSettingsWindow) {
+            let vault = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Example Vault", isDirectory: true)
+            store.addFolder(vault.appendingPathComponent(".obsidian"))
+            store.addFolder(vault.appendingPathComponent("Meetings"))
+            coach.transcript.setFolder(vault.appendingPathComponent("Meetings", isDirectory: true), keyUsable: coach.transcriptKeyUsable)
+            coach.transcript.note.setDailyNote(true)
+            coach.transcript.note.setRetentionDays(30)
+            coach.transcript.sync(keyUsable: coach.transcriptKeyUsable)
+            w.update()
+            controller.schedule(0.5, repeats: false) {
+                MainActor.assumeIsolated {
+                    let img = w.transcriptGroupView.flatMap { viewImage($0, in: w.window) }
+                    let ok = img.map { Card.writePNG($0, "\(dir)/transcript-settings-obsidian-\(tag).png") } ?? false
+                    controller.log("coach shot transcript-settings-obsidian-\(tag) ok=\(ok)")
+                    packet("transcript-settings-obsidian", img)
+                    w.window.orderOut(nil)
+                    coach.transcript.callEnded()
+                    finish()
+                }
+            }
+        }
         func settingsShot() {
             for key in [CoachController.Keys.onboarded, CoachController.Keys.enabled, CoachTranscript.Keys.captions,
                         CoachTranscript.Keys.saveTranscripts, CoachTranscript.Keys.noticeSeen] { defaults.set(true, forKey: key) }
@@ -120,8 +142,9 @@ enum UISnapshots {
             defaults.set(false, forKey: CoachController.Keys.callControls)
             defaults.set(JudgeProviderKind.gpt.rawValue, forKey: CoachController.Keys.judgeProvider)
             let keychain = KeychainStore(service: suite, account: "none")
+            let store = MemoryTranscriptStore()
             guard let coach = try? CoachController(defaults: defaults, keychain: keychain, showsStatusItem: false,
-                                                   transcriptStore: MemoryTranscriptStore()) else { return finish() }
+                                                   transcriptStore: store) else { return finish() }
             coach.service?.setEnabled(false)
             coach.keyStored = true
             coach.transcript.sync(keyUsable: coach.transcriptKeyUsable)
@@ -139,9 +162,7 @@ enum UISnapshots {
                     let ok = img.map { Card.writePNG($0, "\(dir)/transcript-settings-\(tag).png") } ?? false
                     controller.log("coach shot transcript-settings-\(tag) ok=\(ok)")
                     packet("transcript-settings", img)
-                    w.window.orderOut(nil)
-                    coach.transcript.callEnded()
-                    finish()
+                    obsidianShot(coach, store, w)
                 }
             }
         }

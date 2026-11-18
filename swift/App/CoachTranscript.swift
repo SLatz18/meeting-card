@@ -3,32 +3,46 @@ import ListenMoreCore
 import MeetingCardCore
 
 /// Live captions and saved transcripts (both off by default; both need a key OpenAI accepts, since
-/// they read the GPT cues' transcription). Takes the coach service's call and caption events into
-/// `LiveTranscript` and publishes what the card shows in `feed` (a `CaptionFeedModel` for
-/// `CaptionFeedView`; no window of its own), and stores four settings in UserDefaults (never call
-/// data). Caption text lives in memory; with saving on, the Kit's `FileTranscriptStore` writes the
-/// call's one Markdown file in the chosen folder.
+/// they read the GPT cues' transcription). Takes the coach service's call, caption, cue and
+/// condition events into `LiveTranscript` and publishes what the card shows in `feed` (a
+/// `CaptionFeedModel` for `CaptionFeedView`; no window of its own), and stores its settings in
+/// UserDefaults (never call data; the note options are `CoachNoteSettings`). Caption text lives in
+/// memory; with saving on, the Kit's `FileTranscriptStore` writes the call's Obsidian-ready note in
+/// the chosen folder, on a serial queue off the main thread.
 @MainActor
 final class CoachTranscript {
     enum Keys {
         static let captions = "coach.captions"
         static let saveTranscripts = "coach.saveTranscripts"
         static let transcriptFolder = "coach.transcriptFolder"
+        static let transcriptFolderBookmark = "coach.transcriptFolderBookmark"
         static let noticeSeen = "coach.transcriptNoticeSeen"
     }
 
     let defaults: UserDefaults
     let live: LiveTranscript
+    let note: CoachNoteSettings
     /// What the card's caption feed shows; the coach card hosts `CaptionFeedView(model: feed)`.
     let feed = CaptionFeedModel()
     /// The per-call cost meter's latest reading (nil until the first billed segment).
     private(set) var meter: CostReading?
+    private var resolvedFolder: URL?
+    /// Whether `resolvedFolder` can take notes, checked when it is resolved (each call's start, a new
+    /// folder, Settings on screen), never on every refresh.
+    private var resolvedUsable = true
+    /// Calls whose spool upkeep had to leave (another Mac's, or one still being written), for Settings.
+    private(set) var unfinished = 0
+    /// The folder whose security scope is open (sandboxed builds only).
+    private var accessing: URL?
 
     init(defaults: UserDefaults, store: TranscriptStore = FileTranscriptStore()) {
         self.defaults = defaults
+        note = CoachNoteSettings(defaults: defaults)
         live = LiveTranscript(settings: .init(folder: Self.defaultFolder), store: store,
-                              captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines), labels: Self.speakerLabels)
+                              captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines), labels: Self.speakerLabels,
+                              io: .serial(label: AppIdentity.current.scoped("transcript")))
         live.update(settings(keyUsable: false))
+        maintain()
     }
 
     // MARK: settings
@@ -39,13 +53,76 @@ final class CoachTranscript {
     /// This identity's default transcripts folder, so a `--test-id` build saves apart from the shipping app.
     static var defaultFolder: URL { AppPaths.transcripts(for: .current) }
 
-    var folder: URL {
-        defaults.string(forKey: Keys.transcriptFolder).map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? Self.defaultFolder
+    /// The app isn't sandboxed, so this needs no entitlement: a sandboxed build would need
+    /// `com.apple.security.files.user-selected.read-write` and `com.apple.security.files.bookmarks.app-scope`.
+    static var isSandboxed: Bool { ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil }
+
+    /// The chosen folder, through its bookmark (so it follows a rename or move), else its stored
+    /// path, else the default. Kept between calls; looked up again at each call's start, while
+    /// Settings is on screen, and when the user picks another.
+    var folder: URL { resolvedFolder ?? refreshFolder() }
+
+    /// The user picked a folder (else the default is used, created when first needed).
+    var folderIsChosen: Bool {
+        defaults.string(forKey: Keys.transcriptFolder) != nil || defaults.data(forKey: Keys.transcriptFolderBookmark) != nil
+    }
+
+    /// A chosen folder that is gone or in the Trash takes no notes: it is never recreated, and
+    /// nothing goes anywhere else instead. As of the last time the folder was resolved.
+    var folderUsable: Bool {
+        _ = folder
+        return resolvedUsable
+    }
+
+    static func isInTrash(_ url: URL) -> Bool {
+        let parts = url.standardizedFileURL.pathComponents
+        return parts.contains(".Trash") || parts.contains(".Trashes")
+    }
+
+    /// Resolves the folder again: a renamed or moved folder is followed (its new path is stored).
+    @discardableResult
+    func refreshFolder() -> URL {
+        let stored = defaults.string(forKey: Keys.transcriptFolder).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let url = resolveBookmark() ?? stored ?? Self.defaultFolder
+        if let stored, url.standardizedFileURL.path != stored.standardizedFileURL.path, !Self.isInTrash(url) {
+            defaults.set(url.path, forKey: Keys.transcriptFolder)
+        }
+        resolvedFolder = url
+        resolvedUsable = !folderIsChosen || (!Self.isInTrash(url) && live.recorder.store.isDirectory(url))
+        return url
+    }
+
+    private func resolveBookmark() -> URL? {
+        guard let data = defaults.data(forKey: Keys.transcriptFolderBookmark) else { return nil }
+        var stale = false
+        let scoped = Self.isSandboxed
+        guard let url = try? URL(resolvingBookmarkData: data, options: scoped ? [.withSecurityScope] : [],
+                                 relativeTo: nil, bookmarkDataIsStale: &stale) else { return nil }
+        if scoped {
+            accessing?.stopAccessingSecurityScopedResource()
+            accessing = url.startAccessingSecurityScopedResource() ? url : nil
+        }
+        if stale && !Self.isInTrash(url) { storeBookmark(url) }
+        return url
+    }
+
+    private func storeBookmark(_ url: URL) {
+        let options: URL.BookmarkCreationOptions = Self.isSandboxed ? [.withSecurityScope] : []
+        if let data = try? url.bookmarkData(options: options, includingResourceValuesForKeys: nil, relativeTo: nil) {
+            defaults.set(data, forKey: Keys.transcriptFolderBookmark)
+        } else {
+            defaults.removeObject(forKey: Keys.transcriptFolderBookmark)
+        }
+        defaults.set(url.path, forKey: Keys.transcriptFolder)
+    }
+
+    /// The Obsidian vault the folder is in (its name), if any.
+    func vaultName() -> String? {
+        ObsidianVault.root(containing: folder, store: live.recorder.store)?.lastPathComponent
     }
 
     func settings(keyUsable: Bool) -> LiveTranscript.Settings {
-        .init(captions: captionsOn, saving: savingOn, folder: folder, keyUsable: keyUsable)
+        .init(captions: captionsOn, saving: savingOn && folderUsable, folder: folder, keyUsable: keyUsable, note: note.options)
     }
 
     func setCaptions(_ on: Bool, keyUsable: Bool) {
@@ -58,34 +135,81 @@ final class CoachTranscript {
         sync(keyUsable: keyUsable)
     }
 
-    /// nil restores the default folder. The app isn't sandboxed, so a plain path is enough (no
-    /// security-scoped bookmark). Takes effect for the next call's file.
+    /// nil restores the default folder. Kept as a bookmark plus its path. Takes effect for the next
+    /// call's note; notes already saved stay where they are.
     func setFolder(_ url: URL?, keyUsable: Bool) {
-        if let url { defaults.set(url.path, forKey: Keys.transcriptFolder) } else { defaults.removeObject(forKey: Keys.transcriptFolder) }
+        if let url {
+            storeBookmark(url)
+        } else {
+            defaults.removeObject(forKey: Keys.transcriptFolder)
+            defaults.removeObject(forKey: Keys.transcriptFolderBookmark)
+        }
+        resolvedFolder = nil
         sync(keyUsable: keyUsable)
+        maintain()
     }
 
     func markNoticeSeen() { defaults.set(true, forKey: Keys.noticeSeen) }
 
-    /// Keeps the live settings in step with the stored ones and the key (each coach refresh).
+    /// Keeps the live settings in step with the stored ones and the key (each coach refresh; it reads
+    /// nothing from disk).
     func sync(keyUsable: Bool) {
         let s = settings(keyUsable: keyUsable)
         if s != live.settings { live.update(s) }
         render()
     }
 
+    /// Recovery (notes of calls the app quit during) and the opt-in retention, in the folder, queued
+    /// behind the recorder's writes so they never touch the call being saved. Runs at launch, after
+    /// every call and on a new folder; Settings shows what it had to leave.
+    func maintain() {
+        guard folderUsable else { return }
+        live.recorder.maintain(folder: folder, retentionDays: note.retentionDays, pattern: note.fileNamePattern,
+                               labels: Self.speakerLabels) { [weak self] left in self?.unfinished = left }
+    }
+
+    /// The longest quit waits for the note's writes; whatever is left is recovered at the next launch.
+    static let quitWait: TimeInterval = 2
+
+    /// App quit: finishes the call's note now, then waits a little for the writes.
+    func finishForQuit() {
+        live.callEnded()
+        live.recorder.flush(timeout: Self.quitWait)
+    }
+
     // MARK: coach events
 
-    func callStarted() {
+    func callStarted(info: CallInfo = CallInfo()) {
         meter = nil
+        if folderIsChosen {
+            refreshFolder()
+            let s = settings(keyUsable: live.settings.keyUsable)
+            if s != live.settings { live.update(s) }
+        }
+        live.setCallInfo(info)
         live.callStarted()
         render()
     }
 
     func callEnded() {
         live.callEnded()
+        maintain()
         render()
     }
+
+    /// The host's call details changed (the call app or the joined event's title arrived). A title
+    /// or app the call already has stays, so a call that runs past its event keeps its title.
+    func setCallInfo(_ info: CallInfo) {
+        var merged = info
+        merged.title = info.title ?? live.callInfo.title
+        merged.app = info.app ?? live.callInfo.app
+        if merged != live.callInfo { live.setCallInfo(merged) }
+    }
+
+    /// The session's Mute, Pause and call-app mute, marked as gaps in the saved note.
+    func observe(_ conditions: CallConditions) { live.observe(conditions) }
+
+    func cue(_ type: CueType) { live.cue(type) }
 
     func receive(_ event: CaptionEvent) {
         live.receive(event)

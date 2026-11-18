@@ -162,7 +162,10 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ n: Notification) { log("exiting") }
+    func applicationWillTerminate(_ n: Notification) {
+        MainActor.assumeIsolated { coach?.willTerminate() }
+        log("exiting")
+    }
 
     /// Reopening the app (Finder, Spotlight, `open -a`) opens the call coach Settings.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -293,7 +296,8 @@ final class Controller: NSObject, NSApplicationDelegate {
     @objc func joinClicked(_ sender: Any?) {
         guard let c = card(for: sender), let url = coord.join(c) else { return }
         let end = Timing.times(c.ev)?.end
-        MainActor.assumeIsolated { coach?.joinHint(endsAt: end) }
+        let title = c.ev.summary
+        MainActor.assumeIsolated { coach?.joinHint(endsAt: end, title: title) }
         if dryJoin {
             log("DRY_JOIN would open \(url)")
         } else if let u = URL(string: url) {

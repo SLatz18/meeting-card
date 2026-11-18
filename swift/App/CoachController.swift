@@ -85,6 +85,8 @@ final class CoachController: NSObject {
     private var noMicTracker = OncePerCallNotice()
     /// The coach card is the pill (for the rest of this showing).
     private(set) var minimized = false
+    /// The event joined from a card: its title and end, for the saved note (memory only).
+    private var joined: (title: String?, until: Date)?
 
     init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
          showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore()) throws {
@@ -254,9 +256,18 @@ final class CoachController: NSObject {
         s.fallbackScreen = { [weak self] in self?.cardScreen() }
         s.hostWindowNumber = { [weak self] in self?.hostWindowNumber() }
         s.onChange = { [weak self] in self?.refresh() }
-        s.onCue = { [weak self] cue in self?.showNudge(cue) }
-        s.onCallStart = { [weak self] in self?.transcript.callStarted() }
-        s.onCallEnd = { [weak self] in self?.transcript.callEnded() }
+        s.onCue = { [weak self] cue in
+            self?.showNudge(cue)
+            self?.transcript.cue(cue.type)
+        }
+        s.onCallStart = { [weak self] in
+            guard let self else { return }
+            self.transcript.callStarted(info: self.callInfo())
+        }
+        s.onCallEnd = { [weak self] in
+            self?.transcript.callEnded()
+            self?.joined = nil
+        }
         s.onCaption = { [weak self] in self?.transcript.receive($0) }
         s.onMeter = { [weak self] in self?.transcript.record($0) }
         service = s
@@ -309,9 +320,32 @@ final class CoachController: NSObject {
 
     // MARK: controls
 
-    func joinHint(endsAt: Date?) {
+    /// `title`: the joined event's, for the saved note's name and properties until the event ends.
+    func joinHint(endsAt: Date?, title: String? = nil) {
         guard enabled, let endsAt else { return }
+        joined = (title, endsAt)
         service?.joinHint(endsAt: endsAt)
+    }
+
+    /// What the saved note knows about the call: the joined event's title (until it ends), the call
+    /// app's name and the transcription model. Never logged.
+    func callInfo(now: Date = Date()) -> CallInfo {
+        let title = joined.flatMap { $0.until > now ? $0.title : nil }
+        let app = service?.session.session?.appKey.flatMap { key in
+            config.captureTargets.first { $0.bundleId.lowercased() == key }?.name
+        }
+        return CallInfo(title: title, app: app, transcriber: config.gpt.transcribeModel)
+    }
+
+    /// The session's state as the saved note marks it: the coach's own Mute, Pause, the call app's mute.
+    var callConditions: CallConditions {
+        guard enabled, let s = service?.session.session else { return CallConditions() }
+        return CallConditions(youMuted: micMuted, paused: s.paused, appMuted: s.muted)
+    }
+
+    /// App quit: the saved note of a call in progress is finished before the app exits.
+    func willTerminate() {
+        transcript.finishForQuit()
     }
 
     @objc func chipClicked(_ sender: Any?) { service?.chipControl() }
@@ -394,6 +428,8 @@ final class CoachController: NSObject {
         let chip = card == nil ? self.chip : nil
         for c in visibleCards() { c.setCoach(chip) }
         transcript.sync(keyUsable: transcriptKeyUsable)
+        transcript.observe(callConditions)
+        if transcript.live.inCall { transcript.setCallInfo(callInfo()) }
         if let reason = service?.gptStopped { transcript.gptStopped(reason) }
         updateCoachCard(card)
         updateStatusItem()
@@ -509,8 +545,8 @@ final class CoachController: NSObject {
             menu.addItem(m)
         }
         if transcript.canDelete {
-            let m = NSMenuItem(title: CoachCopy.menuDeleteTranscript, action: #selector(deleteTranscriptClicked(_:)), keyEquivalent: "")
-            m.image = Theme.symbol(sym.delete, size, label: CoachCopy.menuDeleteTranscript)
+            let m = NSMenuItem(title: TranscriptCopy.deleteThisCallMenu, action: #selector(deleteTranscriptClicked(_:)), keyEquivalent: "")
+            m.image = Theme.symbol(sym.delete, size, label: TranscriptCopy.deleteThisCallMenu)
             m.target = self
             menu.addItem(m)
         }
@@ -528,7 +564,7 @@ final class CoachController: NSObject {
         NSApp.activate()
         let alert = NSAlert()
         alert.messageText = CoachCopy.deleteConfirmTitle
-        alert.informativeText = CoachCopy.deleteConfirmBody
+        alert.informativeText = TranscriptCopy.deleteConfirmBody
         alert.addButton(withTitle: CoachCopy.delete).hasDestructiveAction = true
         alert.addButton(withTitle: CoachCopy.cancel)
         guard alert.runModal() == .alertFirstButtonReturn else { return }

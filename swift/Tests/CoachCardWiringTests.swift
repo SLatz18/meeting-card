@@ -135,7 +135,7 @@ final class CoachCardWiringTests: XCTestCase {
     /// Nudges tint and widen the pill for `nudgeHold` and are announced to VoiceOver.
     func testNudgesAreAnnouncedAndExpire() throws {
         let controller = try read("App/CoachController.swift")
-        XCTAssertTrue(controller.contains("s.onCue = { [weak self] cue in self?.showNudge(cue) }"))
+        XCTAssertTrue(controller.contains("s.onCue = { [weak self] cue in\n            self?.showNudge(cue)\n"))
         XCTAssertTrue(controller.contains("CoachCardPresenter.announce(n.announcement)"))
         XCTAssertTrue(controller.contains("Timer(timeInterval: nudges.hold, repeats: false)"))
         XCTAssertTrue(controller.contains("nudge: nudges.active(now: now)"))
