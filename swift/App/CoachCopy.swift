@@ -35,6 +35,9 @@ enum CoachCopy {
     }
     static let menuShowCoachLog = "Show Coach Log"
     static let menuShowCoachLogHelp = "Shows the coach's local diagnostics file in Finder. It lists event names, times, device and app names, error codes and counts. Never transcript text, audio or your key. Old entries are removed after a few days."
+    static let menuVersion = "Version"
+    static let menuVersionUnknown = "unknown"
+    static let menuQuit = "Quit"
     static let menuOff = "Call coach: off"
     static let menuWaiting = "Coach on, waiting for a call"
     static let menuGptOffNoKey = "GPT cues off: no API key"
