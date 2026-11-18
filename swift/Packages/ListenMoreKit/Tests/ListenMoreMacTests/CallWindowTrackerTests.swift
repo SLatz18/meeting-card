@@ -29,13 +29,37 @@ final class CallWindowTrackerTests: XCTestCase {
     func testBrowserOnlyPollingNeverReadsTheWindowList() {
         let src = Source()
         let t = CallWindowTracker(lookbackS: 60, windowSource: src.read)
+        let keys: Set<String> = [Self.zoom, Self.chrome, Self.dia]
         for i in 0..<20 {
-            t.update(session: nil, appKeys: [Self.chrome, Self.dia], browserKeys: browsers, hints: [:], now: Double(i) / 2)
+            t.update(session: nil, appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: Double(i) / 2)
         }
-        t.update(session: (appKey: Self.chrome, startedAt: 3), appKeys: [Self.chrome, Self.dia], browserKeys: browsers,
-                 hints: [:], now: 10)
-        XCTAssertTrue(src.asked.isEmpty, "no native app and no Meet hint: the window list is never read")
+        XCTAssertEqual(src.asked, Array(repeating: Set([Self.zoom]), count: 20), "only Zoom is asked for: browsers have no hint")
+        t.update(session: (appKey: Self.chrome, startedAt: 3), appKeys: keys, browserKeys: browsers,
+                 alwaysOnKeys: [Self.zoom], hints: [:], now: 10)
+        XCTAssertEqual(src.asked, Array(repeating: Set([Self.zoom]), count: 21), "a browser session with no hint is still not read")
+        XCTAssertFalse(src.asked.contains { $0.contains(Self.chrome) || $0.contains(Self.dia) })
         XCTAssertNil(t.target(appKey: Self.chrome))
+    }
+
+    /// The tracker hands the selector only the apps it read on that poll. If it handed over every watched
+    /// app instead, Slack would be "observed" (with no windows) on every poll, so its open window would look
+    /// new when a session starts, and bind. Pins `selector.observe(all, appKeys: readKeys, ...)`.
+    func testANonZoomAppForgetsItsWindowsBetweenSessionsThroughTheTracker() {
+        let src = Source()
+        src.windows = [window(1, "com.tinyspeck.slackmacgap", home)]      // Slack's home window was open all along
+        let t = CallWindowTracker(lookbackS: 60, windowSource: src.read)
+        let keys: Set<String> = [Self.zoom, Self.slack]
+        for i in 0..<4 {
+            t.update(session: nil, appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: Double(i) / 2)
+        }
+        XCTAssertEqual(src.asked, Array(repeating: Set([Self.zoom]), count: 4), "no session: Slack is not read")
+        t.update(session: (appKey: Self.slack, startedAt: 10), appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 10)
+        XCTAssertEqual(src.asked.last, Set([Self.zoom, Self.slack]))
+        XCTAssertNil(t.target(appKey: Self.slack), "first read of Slack is at the session start: its window has unknown age")
+        t.update(session: nil, appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 20)
+        XCTAssertEqual(src.asked.last, Set([Self.zoom]))
+        t.update(session: (appKey: Self.slack, startedAt: 30), appKeys: keys, browserKeys: browsers, alwaysOnKeys: [Self.zoom], hints: [:], now: 30)
+        XCTAssertNil(t.target(appKey: Self.slack), "a second session: forgotten between sessions, so unknown age again")
     }
 
     static let slack = "com.tinyspeck.slackmacgap"
@@ -96,9 +120,9 @@ final class CallWindowTrackerTests: XCTestCase {
         src.windows = [window(5, "com.google.Chrome", meeting), window(6, "com.google.Chrome", home)]
         let t = CallWindowTracker(lookbackS: 60, windowSource: src.read)
         let hint = CallWindowHint(rank: 1, visibleWindows: 2)
-        t.update(session: (appKey: Self.chrome, startedAt: 1), appKeys: [Self.chrome], browserKeys: browsers, hints: [Self.chrome: hint], now: 1)
+        t.update(session: (appKey: Self.chrome, startedAt: 1), appKeys: [Self.chrome], browserKeys: browsers, alwaysOnKeys: [], hints: [Self.chrome: hint], now: 1)
         XCTAssertEqual(t.target(appKey: Self.chrome), meeting, "the rank-1 window")
-        t.update(session: (appKey: Self.chrome, startedAt: 1), appKeys: [Self.chrome], browserKeys: browsers, hints: [:], now: 2)
+        t.update(session: (appKey: Self.chrome, startedAt: 1), appKeys: [Self.chrome], browserKeys: browsers, alwaysOnKeys: [], hints: [:], now: 2)
         XCTAssertNil(t.target(appKey: Self.chrome), "the hint went away: nothing is bound")
     }
 

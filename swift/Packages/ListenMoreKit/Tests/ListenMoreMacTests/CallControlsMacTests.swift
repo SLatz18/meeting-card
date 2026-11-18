@@ -68,7 +68,7 @@ final class CallControlsMacTests: XCTestCase {
         let t = CallWindowTracker(lookbackS: 60)
         XCTAssertTrue(CallWindowTracker.windows(appKeys: ["com.example.notinstalled"]).isEmpty)
         t.update(session: (appKey: "com.example.notinstalled", startedAt: 0), appKeys: ["com.example.notinstalled"],
-                 browserKeys: [], hints: [:])
+                 browserKeys: [], alwaysOnKeys: [], hints: [:])
         XCTAssertNil(t.target(appKey: "com.example.notinstalled"))
         XCTAssertNil(t.callWindowPresent(appKey: "com.example.notinstalled"))
         XCTAssertEqual(CallDisplayLocator.screen(callWindow: nil, fallback: NSRect(x: 1, y: 2, width: 3, height: 4)),

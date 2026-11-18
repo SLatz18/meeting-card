@@ -85,7 +85,7 @@ public struct CallWindowSelector: Sendable {
                                   sessionAppKey: String?, hints: [String: CallWindowHint]) -> Set<String> {
         appKeys.filter { key in
             if browserKeys.contains(key) { return hints[key] != nil }
-            return alwaysKeys.contains(key) || key == sessionAppKey
+            return alwaysKeys.contains { BundleIds.belongs(key, to: $0) } || key == sessionAppKey
         }
     }
 

@@ -29,7 +29,7 @@ public final class CallWindowTracker: @unchecked Sendable {
     /// One observation. `session` is the coach session's app and start time (system uptime);
     /// `alwaysOnKeys` are the apps read on every poll (Zoom).
     public func update(session: (appKey: String, startedAt: Double)?, appKeys: Set<String>, browserKeys: Set<String>,
-                       alwaysOnKeys: Set<String> = [], hints: [String: CallWindowHint],
+                       alwaysOnKeys: Set<String>, hints: [String: CallWindowHint],
                        now: Double = ProcessInfo.processInfo.systemUptime) {
         let readKeys = CallWindowSelector.keysToRead(appKeys: appKeys, browserKeys: browserKeys, alwaysKeys: alwaysOnKeys,
                                                      sessionAppKey: session?.appKey, hints: hints)

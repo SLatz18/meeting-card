@@ -214,14 +214,18 @@ final class CallWindowsTests: XCTestCase {
         }
         XCTAssertEqual(read(), [Self.zoom], "Zoom always; Slack with no session and browsers with no hint cost no window-list read")
         XCTAssertEqual(read(session: slack), [Self.zoom, slack], "Slack with an active session")
+        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: ["us.zoom.xos.zoomclips", slack], browserKeys: browsers,
+                                                     alwaysKeys: [Self.zoom], sessionAppKey: nil, hints: [:]),
+                       ["us.zoom.xos.zoomclips"], "an allowlist entry under Zoom's bundle ID counts as Zoom, like everywhere else")
         XCTAssertEqual(read(hints: [Self.chrome: hint]), [Self.zoom, Self.chrome])
         XCTAssertEqual(read(appKeys: browsers), [], "browser-only: nothing to read")
         XCTAssertEqual(read(session: Self.chrome, appKeys: browsers), [], "a browser session with no hint is still not read")
         XCTAssertEqual(read(appKeys: [slack, "com.microsoft.teams2"]), [], "non-Zoom natives with no session")
     }
 
-    /// An app that isn't read on a poll forgets its windows: the next session's first read sees
-    /// every open window as unknown age, so a window opened before the session never binds.
+    /// The selector forgets an app that is left out of a poll's `appKeys`: the next session's first
+    /// observation sees every open window as unknown age, so a window opened before it never binds.
+    /// (That the tracker leaves out the apps it didn't read is pinned in `CallWindowTrackerTests`.)
     func testANonZoomNativeAppForgetsItsWindowsBetweenSessions() {
         let slack = "com.tinyspeck.slackmacgap"
         func win(_ id: Int, _ r: CGRect) -> AppWindow { AppWindow(id: id, bundleId: slack, layer: 0, onScreen: true, bounds: r) }
