@@ -51,7 +51,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     /// The saving indicator, as the card shows it (Theme.Captions; the card's secondary control).
     private let savingHolder = SavingPill(label: CoachCopy.savingNow)
     private let transcriptStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
-    private let deleteButton = NSButton(title: CoachCopy.deleteTranscript, target: nil, action: nil)
+    private let deleteButton = NSButton(title: TranscriptCopy.deleteThisCall, target: nil, action: nil)
+    /// The saved notes' rows, under the folder row.
+    private lazy var noteRows = CoachNoteSettingsRows(coach: coach)
     private let youField = NSTextField()
     private let themField = NSTextField()
     private let costLabel = CoachSettingsWindow.text("", font: Theme.Captions.costFont, color: CoachSettingsWindow.color(Theme.Captions.cost))
@@ -542,7 +544,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let captionsHelp = Self.text(CoachCopy.captionsHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
         let savingRow = Self.row(Self.text(CoachCopy.saveToggle, font: Theme.Settings.itemFont), savingToggle)
         let savingHelp = Self.text(CoachCopy.saveHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
-        let folderLabels = NSStackView(views: [Self.text(CoachCopy.folderLabel, font: Theme.Settings.itemFont), folderPath])
+        let folderLabels = NSStackView(views: [Self.text(TranscriptCopy.saveTo, font: Theme.Settings.itemFont), folderPath])
         folderLabels.orientation = .vertical
         folderLabels.alignment = .leading
         folderLabels.spacing = 0
@@ -553,8 +555,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         names.distribution = .fillEqually
         names.spacing = CGFloat(Theme.Settings.groupSpacing)
         let namesHelp = Self.text(CoachCopy.speakerNamesHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
-        let views: [NSView] = [heading, transcriptNote, captionsRow, captionsHelp, savingRow, savingHelp, folderRow, savingHolder,
-                               statusRow, Self.text(CoachCopy.speakerNames, font: Theme.Settings.itemFont), names, namesHelp, costLabel]
+        let views: [NSView] = [heading, transcriptNote, captionsRow, captionsHelp, savingRow, savingHelp, folderRow] + noteRows.views
+            + [savingHolder, statusRow, Self.text(CoachCopy.speakerNames, font: Theme.Settings.itemFont), names, namesHelp, costLabel]
         let g = Self.group(views)
         for v in views where v !== heading && v !== savingHolder { pin(v, in: g) }
         transcriptGroupView = g
@@ -629,6 +631,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         savingToggle.isEnabled = usable
         transcriptNote.isHidden = usable
         folderPath.stringValue = (t.folder.path as NSString).abbreviatingWithTildeInPath
+        noteRows.update(visible: window.isVisible)
         let rec = t.live.recorder
         savingHolder.isHidden = !rec.isSaving
         switch rec.state {
@@ -758,7 +761,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     @objc private func deleteTranscript(_ sender: Any?) {
         let alert = NSAlert()
         alert.messageText = CoachCopy.deleteConfirmTitle
-        alert.informativeText = CoachCopy.deleteConfirmBody
+        alert.informativeText = TranscriptCopy.deleteConfirmBody
         alert.addButton(withTitle: CoachCopy.delete).hasDestructiveAction = true
         alert.addButton(withTitle: CoachCopy.cancel)
         alert.beginSheetModal(for: window) { [weak self] response in
