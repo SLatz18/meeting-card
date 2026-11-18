@@ -15,8 +15,8 @@ final class CueDisplaySnapshotTests: XCTestCase {
     /// The busy call at the talk-over: a cue in its hold, three caption rows.
     static let busy = CueTimeline.harnessBusy
     static let atCue: TimeInterval = 30.5
-    /// After the hold, while the talk-over lingers.
-    static let lingering: TimeInterval = 33
+    /// After the hold, while the talk-over lingers (about 10 s after it showed).
+    static let lingering: TimeInterval = 40
 
     func write(_ img: CGImage, _ name: String) {
         try? FileManager.default.createDirectory(at: Self.outDir, withIntermediateDirectories: true)

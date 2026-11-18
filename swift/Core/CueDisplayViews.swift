@@ -67,6 +67,33 @@ struct CueBand: View {
     }
 }
 
+/// An SF Symbol scaled to fit a square, like the card's image views (wide glyphs never overflow).
+struct CueGlyph: View {
+    let symbol: String
+    let size: Double
+    let weight: Theme.FontSpec.Weight
+    let style: AnyShapeStyle
+
+    var body: some View {
+        Image(systemName: symbol)
+            .resizable()
+            .scaledToFit()
+            .fontWeight(weight.swiftUI)
+            .foregroundStyle(style)
+            .frame(width: size, height: size)
+    }
+}
+
+extension Theme.FontSpec.Weight {
+    var swiftUI: Font.Weight {
+        switch self {
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        }
+    }
+}
+
 struct CueIconButton: View {
     let symbol: String
     let size: Double
@@ -179,10 +206,7 @@ struct CueCardMock: View {
         return ZStack(alignment: .leading) {
             band
             HStack(spacing: k.glyphGap) {
-                Image(systemName: glyph)
-                    .font(Theme.FontSpec(k.glyphSize, k.iconGlyph.weight).swiftUI)
-                    .foregroundStyle(glyphStyle)
-                    .frame(width: k.glyphSize, height: k.glyphSize)
+                CueGlyph(symbol: glyph, size: k.glyphSize, weight: k.iconGlyph.weight, style: glyphStyle)
                 Text(text)
                     .font(font.swiftUI)
                     .foregroundStyle(k.statusText.shapeStyle(style))
@@ -231,27 +255,26 @@ struct CueAnchoredCaptions: View {
         let c = Theme.Captions.self
         let d = Theme.CueDisplay.self
         let k = CardStyle.Coach.self
-        ZStack(alignment: .topLeading) {
-            if let m = mark, m.row < lines.count {
-                let tone = m.cue.nudge.tone.color(style)
-                HStack(spacing: 0) {
-                    Image(systemName: d.glyph(m.cue.kind))
-                        .font(Theme.FontSpec(d.markGlyphSize, CardStyle.Typography.button.weight).swiftUI)
-                        .foregroundStyle(tone.opacity(max(m.strength, k.nudgeEdgeAlpha(dark: style.dark, increasedContrast: false))))
-                        .frame(width: d.markGutter)
-                    Spacer(minLength: 0)
+        CaptionFeedView(model: CaptionFeedModel(lines: lines), layout: .card)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(alignment: .topLeading) {
+                if let m = mark, m.row < lines.count {
+                    let tone = m.cue.nudge.tone.color(style)
+                    HStack(spacing: 0) {
+                        CueGlyph(symbol: d.glyph(m.cue.kind), size: d.markGlyphSize, weight: CardStyle.Typography.button.weight,
+                                 style: AnyShapeStyle(tone.opacity(max(m.strength, k.nudgeEdgeAlpha(dark: style.dark, increasedContrast: false)))))
+                            .frame(width: d.markGutter)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(width: c.cardArea.width + d.markGutter, height: c.cardRowHeight)
+                    .background(RoundedRectangle(cornerRadius: d.markRadius, style: .continuous)
+                        .fill(tone.opacity(k.nudgeTint(dark: style.dark, increasedContrast: false) * m.strength)))
+                    .offset(x: -d.markGutter, y: Double(m.row) * c.cardRowHeight)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(CueDisplayCopy.anchoredRowLabel(speaker: lines[m.row].speaker, text: lines[m.row].text,
+                                                                         words: m.cue.nudge.words))
                 }
-                .frame(width: c.cardArea.width + d.markGutter, height: c.cardRowHeight)
-                .background(RoundedRectangle(cornerRadius: d.markRadius, style: .continuous)
-                    .fill(tone.opacity(k.nudgeTint(dark: style.dark, increasedContrast: false) * m.strength)))
-                .offset(x: -d.markGutter, y: Double(m.row) * c.cardRowHeight)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(CueDisplayCopy.anchoredRowLabel(speaker: lines[m.row].speaker, text: lines[m.row].text,
-                                                                     words: m.cue.nudge.words))
             }
-            CaptionFeedView(model: CaptionFeedModel(lines: lines), layout: .card)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -285,10 +308,7 @@ struct CuePillMock: View {
                     .frame(width: p.grabber.width, height: p.grabber.height)
                     .padding(.top, p.grabberTop)
                 HStack(spacing: p.glyphGap) {
-                    Image(systemName: glyph)
-                        .font(Theme.FontSpec(p.glyphSize, Theme.CoachCard.iconGlyph.weight).swiftUI)
-                        .foregroundStyle(glyphStyle)
-                        .frame(width: p.glyphSize, height: p.glyphSize)
+                    CueGlyph(symbol: glyph, size: p.glyphSize, weight: Theme.CoachCard.iconGlyph.weight, style: glyphStyle)
                     if let words {
                         Text(words.words)
                             .font(p.wordsFont.swiftUI)
@@ -373,10 +393,8 @@ public enum CueDisplaySnapshot {
             ForEach(CoachNudge.Kind.priorityOrder, id: \.self) { kind in
                 let n = CoachNudge(kind: kind, tone: kind.tone)
                 HStack(spacing: k.glyphGap) {
-                    Image(systemName: Theme.CueDisplay.glyph(kind))
-                        .font(Theme.FontSpec(k.glyphSize, k.iconGlyph.weight).swiftUI)
-                        .foregroundStyle(n.tone.color(style))
-                        .frame(width: k.glyphSize, height: k.glyphSize)
+                    CueGlyph(symbol: Theme.CueDisplay.glyph(kind), size: k.glyphSize, weight: k.iconGlyph.weight,
+                             style: AnyShapeStyle(n.tone.color(style)))
                     Text(n.words)
                         .font(k.nudgeFont.swiftUI)
                         .foregroundStyle(k.nudgeText.shapeStyle(style))
