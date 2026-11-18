@@ -620,6 +620,12 @@ final class PivotGateTests: XCTestCase {
         anyway.you(update, 8.0, 14.0)
         assertNoCandidate(anyway)
 
+        var thanks = PivotScript()
+        thanks.them(lake, 0.5, 5.5)
+        thanks.them("Thanks for sharing. Sam.", 6.5, 7.5)
+        thanks.you(update, 8.0, 14.0)
+        assertNoCandidate(thanks)
+
         var deck = PivotScript()
         deck.them(PivotLines.share, 0.5, 5.5)
         deck.them("Nice. Can we get the numbers for the board deck by Friday", 6.0, 8.0)
