@@ -79,19 +79,11 @@ public final class LocalLayer {
     /// opening overlap (`cut_in_min_overlap_ms`) has built up: they count as speaking for
     /// `speakingTailS` after their last voiced frame, then the gap may run to `overlapGapS`.
     public static let cutInMaxOthersGapS = speakingTailS + overlapGapS
-    /// Frame times are multiples of the frame length, and their differences round (3.56 - 3.50 is a hair
-    /// over 0.06, 4.40 - 3.20 a hair under 1.2). Every window comparison reads its elapsed time through
-    /// `span`, which rounds it to the microsecond, so a window holds the same number of frames anywhere on
-    /// the clock. The cut-in's overlap gap is a sum of frame lengths from zero, which is exact at 20 ms
-    /// frames: rounding it is defensive and changes nothing there.
-    static let spanStepsPerS = 1e6
 
-    /// An elapsed time (a difference of frame times or a sum of frame lengths), rounded to the
-    /// microsecond. Dividing the whole step count lands on the same double as a window parsed from
-    /// milliseconds or seconds.
-    static func span(_ d: Double) -> Double {
-        (d * spanStepsPerS).rounded() / spanStepsPerS
-    }
+    // Every window comparison below reads its elapsed time through `Elapsed.span`. The cut-in's overlap
+    // gap is a sum of frame lengths from zero, which is exact at 20 ms frames: rounding it is defensive
+    // and changes nothing there.
+
     /// The longest the user's first words back stay settled past the grace. A first reply after unmute
     /// ("Sorry, I was on mute, give me one second") runs about three seconds, so its comma onsets fall
     /// inside this; anything the user says after it is graded as usual, whatever their pauses.
@@ -194,7 +186,7 @@ public final class LocalLayer {
     }
 
     private func speaking(_ vad: StreamVAD, _ t: TimeInterval) -> Bool {
-        vad.active && Self.span(t - vad.lastSpeechT) <= Self.speakingTailS
+        vad.active && Elapsed.span(t - vad.lastSpeechT) <= Self.speakingTailS
     }
 
     /// The user's mic went off (true) or came back. Either way the user's utterance and turn in
@@ -252,18 +244,18 @@ public final class LocalLayer {
             }
         }
         if settlingRun {
-            let userPaused = !s.active && Self.span(t - me.lastSpeechT) > cutPause
-            let othersNewUtterance = o.onset.map { Self.span($0 - othersLastEnd) >= cutPause } ?? false
-            let capped = unmuteGraceUntil.map { Self.span(t - $0) >= Self.firstWordsBackMaxS } ?? true
+            let userPaused = !s.active && Elapsed.span(t - me.lastSpeechT) > cutPause
+            let othersNewUtterance = o.onset.map { Elapsed.span($0 - othersLastEnd) >= cutPause } ?? false
+            let capped = unmuteGraceUntil.map { Elapsed.span(t - $0) >= Self.firstWordsBackMaxS } ?? true
             if userPaused || othersNewUtterance || capped { settlingRun = false }
         }
         if let on = s.onset {
             ev.append(LocalEvent(kind: .meOnset, t: t, onset: on))
-            let settling = settlingRun || unmuteGraceUntil.map { Self.span(on - $0) < 0 } ?? false
+            let settling = settlingRun || unmuteGraceUntil.map { Elapsed.span(on - $0) < 0 } ?? false
             settlingRun = settling
             if !settling { onset(on, .me) }
-            let midSpeech = o.active || Self.span(on - others.lastSpeechT) <= cutMidPause
-            let afterTalkOver = Self.span(on - toFiredAt) < cutAfterTalkOver
+            let midSpeech = o.active || Elapsed.span(on - others.lastSpeechT) <= cutMidPause
+            let afterTalkOver = Elapsed.span(on - toFiredAt) < cutAfterTalkOver
             if midSpeech && cut == nil && !afterTalkOver && !settling {
                 cut = CutIn(onset: on)
             }
@@ -291,15 +283,15 @@ public final class LocalLayer {
     private func cutIn(_ t: TimeInterval, _ s: VadState, _ ev: inout [LocalEvent], _ both: Bool) {
         guard var c = cut else { return }
         let othersSpeaking = speaking(others, t)
-        if Self.span(c.overlap) < cutOverlap && !c.trailing {
+        if Elapsed.span(c.overlap) < cutOverlap && !c.trailing {
             if othersSpeaking {
                 c.gap = 0
                 c.overlap += both ? frameS : 0
             } else {
                 c.gap += frameS
-                if Self.span(c.gap) > Self.overlapGapS {
+                if Elapsed.span(c.gap) > Self.overlapGapS {
                     let end = others.lastSpeechT
-                    if Self.span(c.overlap) >= cutTrailingOverlap && Self.span(abs(end - c.onset)) <= cutTrailingWindow {
+                    if Elapsed.span(c.overlap) >= cutTrailingOverlap && Elapsed.span(abs(end - c.onset)) <= cutTrailingWindow {
                         c.trailing = true
                         c.othersEnd = end
                     } else {
@@ -313,18 +305,18 @@ public final class LocalLayer {
             cut = nil
             return
         }
-        if othersSpeaking && Self.span(t - c.onset) > 0 { c.othersAfter += frameS }
+        if othersSpeaking && Elapsed.span(t - c.onset) > 0 { c.othersAfter += frameS }
         cut = c
         if !s.active {
-            if Self.span(t - me.lastSpeechT) > cutPause { cut = nil }
+            if Elapsed.span(t - me.lastSpeechT) > cutPause { cut = nil }
             return
         }
-        if c.trailing && Self.span(t - c.onset) >= max(cutBackchannel, cutTrailingYield) {
+        if c.trailing && Elapsed.span(t - c.onset) >= max(cutBackchannel, cutTrailingYield) {
             ev.append(LocalEvent(kind: .interrupt, t: t, onset: c.onset, othersActive: false, othersLastSpeech: c.othersEnd,
                                  trailing: true))
             cut = nil
-        } else if Self.span(c.overlap) >= cutOverlap && Self.span(c.othersAfter) >= cutContinue
-                    && Self.span(t - c.onset) >= cutBackchannel {
+        } else if Elapsed.span(c.overlap) >= cutOverlap && Elapsed.span(c.othersAfter) >= cutContinue
+                    && Elapsed.span(t - c.onset) >= cutBackchannel {
             ev.append(LocalEvent(kind: .interrupt, t: t, onset: c.onset, othersActive: others.active,
                                  othersLastSpeech: others.lastSpeechT))
             cut = nil
@@ -335,19 +327,19 @@ public final class LocalLayer {
     // the user ends up holding the floor.
     private func talkOver(_ t: TimeInterval, _ ev: inout [LocalEvent]) {
         let horizon = toWindow + toHold + 2
-        while let first = switchLog.first, Self.span(t - first.t) > horizon { switchLog.removeFirst() }
-        while let first = overlapFrames.first, Self.span(t - first) > horizon { overlapFrames.removeFirst() }
+        while let first = switchLog.first, Elapsed.span(t - first.t) > horizon { switchLog.removeFirst() }
+        while let first = overlapFrames.first, Elapsed.span(t - first) > horizon { overlapFrames.removeFirst() }
         guard switchLog.count >= toSwitches else { return }
         let last = switchLog[switchLog.count - 1]
         let firstT = switchLog[switchLog.count - toSwitches].t
-        guard last.who == .me, Self.span(last.t - toDoneAt) > 0, Self.span(last.t - firstT) <= toWindow else { return }
-        let holding = speaking(me, t) && Self.span(t - others.lastSpeechT) >= toHold && Self.span(t - last.t) >= toHold
+        guard last.who == .me, Elapsed.span(last.t - toDoneAt) > 0, Elapsed.span(last.t - firstT) <= toWindow else { return }
+        let holding = speaking(me, t) && Elapsed.span(t - others.lastSpeechT) >= toHold && Elapsed.span(t - last.t) >= toHold
         guard holding else { return }
-        let overlap = Double(overlapFrames.filter { Self.span($0 - firstT) >= -0.5 && Self.span(t - $0) >= 0 }.count) * frameS
+        let overlap = Double(overlapFrames.filter { Elapsed.span($0 - firstT) >= -0.5 && Elapsed.span(t - $0) >= 0 }.count) * frameS
         toDoneAt = last.t
-        guard Self.span(overlap) >= toOverlap else { return }
+        guard Elapsed.span(overlap) >= toOverlap else { return }
         if let context, context.readback(from: firstT, now: t) { return }
-        ev.append(LocalEvent(kind: .talkOver, t: t, onset: last.t, switches: switchLog.filter { Self.span($0.t - firstT) >= 0 }.count))
+        ev.append(LocalEvent(kind: .talkOver, t: t, onset: last.t, switches: switchLog.filter { Elapsed.span($0.t - firstT) >= 0 }.count))
         toFiredAt = t
         cut = nil
     }
@@ -357,7 +349,7 @@ public final class LocalLayer {
     // other side asked how/why; none during the user's update turn in a round of updates.
     private func thresholds() -> (soft: Double, strong: Double) {
         var soft = monoSoft
-        let done = runs.filter { Self.span($0) >= relMinRunS }
+        let done = runs.filter { Elapsed.span($0) >= relMinRunS }
         if done.count >= relMinRuns {
             soft = min(soft, max(relFactor * ProsodyMath.median(done), relMinS))
         }
@@ -384,14 +376,14 @@ public final class LocalLayer {
             othersSoloSince = nil
         }
         guard let start = turnStart else { return }
-        let othersFloor = othersSoloSince.map { Self.span(t - $0) >= monoFloor } ?? false
-        if othersFloor || Self.span(t - meLastActive) >= monoGap {
+        let othersFloor = othersSoloSince.map { Elapsed.span(t - $0) >= monoFloor } ?? false
+        if othersFloor || Elapsed.span(t - meLastActive) >= monoGap {
             runs.append(meLastActive - start)
             if runs.count > 200 { runs.removeFirst(runs.count - 200) }
             turnStart = nil
             return
         }
-        let run = Self.span(t - start)
+        let run = Elapsed.span(t - start)
         if run < min(relMinS, monoSoft) { return }
         if turnExempt == nil, let context { turnExempt = context.updateTurnBefore(start) }
         if turnExempt == true { return }
@@ -419,7 +411,7 @@ public final class LocalLayer {
         shareCount.me += s.raw ? 1 : 0
         shareCount.others += o.raw ? 1 : 0
         let total = Double(shareCount.me + shareCount.others) * frameS
-        if Self.span(total) >= shareMin {
+        if Elapsed.span(total) >= shareMin {
             let share = Double(shareCount.me) / Double(shareCount.me + shareCount.others)
             if shareArmed && share > shareMax {
                 ev.append(LocalEvent(kind: .talkShare, t: t, onset: t, share: (share * 1000).rounded(.toNearestOrEven) / 1000))

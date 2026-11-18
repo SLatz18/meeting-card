@@ -41,6 +41,29 @@ final class CuePolicyTests: XCTestCase {
         XCTAssertNotNil(p.offer(.aggressive, t: 20, onset: 19.9, source: .local))
     }
 
+    /// Cue times are 20 ms frame times. A cue exactly one cooldown after the previous one is never held,
+    /// wherever on the clock (frame-time differences round either way), and one frame earlier always is.
+    func testCueOneCooldownLaterShowsAnywhereOnTheClock() {
+        let frameS = config.frameS
+        let cooldownFrames = Int((config.cues.cooldownS / frameS).rounded())
+        XCTAssertEqual(cooldownFrames, 1000)
+        var perType = config.cues, global = config.cues
+        perType.globalCooldownS = 0
+        global.cooldownS = 0
+        var held: [String] = []
+        for k in stride(from: 0, to: 200_000, by: 997) {
+            let first = Double(k) * frameS, due = Double(k + cooldownFrames) * frameS
+            let early = Double(k + cooldownFrames - 1) * frameS
+            for (name, cues, second) in [("type", perType, CueType.interrupt), ("global", global, CueType.monologue)] {
+                let p = CuePolicy(config: cues)
+                XCTAssertNotNil(p.offer(.interrupt, t: first, onset: first, source: .local))
+                XCTAssertNil(p.offer(second, t: early, onset: early, source: .local), "\(name) one frame early at frame \(k)")
+                if p.offer(second, t: due, onset: due, source: .local) == nil { held.append("\(name)@\(k)") }
+            }
+        }
+        XCTAssertEqual(held, [], "a cue exactly one cooldown later was held")
+    }
+
     func testSimultaneousCandidatesGoInPriorityOrder() {
         var cues = config.cues
         cues.priority = ["interrupt", "talk_over", "missed_question", "not_listening", "monologue", "talk_share", "aggressive"]
