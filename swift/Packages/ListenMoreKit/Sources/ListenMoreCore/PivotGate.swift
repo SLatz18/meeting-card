@@ -9,10 +9,11 @@ import Foundation
 ///    `question_open_invites`) and no question at its end. An invitation the user answered with less
 ///    than `pivot_reply_min_words` (a backchannel) still holds for their turns ending within
 ///    `pivot_invite_hold_s`. The share has to
-///    be what the user answers: in their last line, followed in it only by sentences shorter than
-///    `pivot_share_min_words` ("it was amazing."), and with no move-on or agenda language from the
-///    share on (`pivot_move_on`, `update_handoff_phrases`: "let's", "next item", "you go first").
-///    Another line after it, from any voice, ends the share.
+///    be what the user answers: across their lines (every line starts a sentence, and the
+///    transcriber commits one at nearly every pause), only sentences shorter than
+///    `pivot_share_min_words` may follow it ("it was such a long day.", another voice's "wow,
+///    congratulations!"), and no move-on or agenda language from the share on (`pivot_move_on`,
+///    `update_handoff_phrases`: "let's", "anyway", "next item", "you go first", "you're up").
 /// 2. The user starts within `pivot_reply_max_start_s` of their last speech and says at least
 ///    `pivot_reply_min_words` about themselves: first-person words make up `pivot_first_person_share`
 ///    of the person words (`pivot_other_person` counts you, he, she, they and the like against it),
@@ -34,9 +35,9 @@ import Foundation
 ///
 /// Group calls: "they" are every voice on the call stream (the engine has no diarization), so one of
 /// them can share and another speak next. Their turn is all of the stream's speech since the user's
-/// last reply, from any voice; the reply window counts from its last speech, whoever spoke; the share
-/// has to be in that turn's last line, so another voice speaking after it (moving on to the standup,
-/// asking someone, or even just "wow, congrats") ends it; any voice's invitation in the turn holds
+/// last reply, from any voice; the reply window counts from its last speech, whoever spoke; a longer
+/// line from another voice after the share (moving on to the standup, or their own story) ends it,
+/// while a short reaction ("wow, congrats!") doesn't; any voice's invitation in the turn holds
 /// the candidate back; and any voice starting to talk while the user is quiet ends the user's turn.
 ///
 /// The counters, the re-arm and the cap are per engine run, not per call: Pause and the call app's
@@ -287,11 +288,11 @@ final class PivotGate {
         guard lines.reduce(0, { $0 + TextRules.tokens($1.text).count }) >= x.pivotShareMinWords,
               lines.contains(where: { has($0.text, x.pivotShareMarkers) }),
               lines.contains(where: { has($0.text, x.pivotShareWords) }) else { return false }
-        let last = lines.last.map(\.text) ?? ""
-        let sentences = TextRules.sentences(last)
+        let sentences = lines.flatMap { TextRules.sentences($0.text) }
         guard let at = sentences.lastIndex(where: { has($0, x.pivotShareMarkers) || has($0, x.pivotShareWords) }),
               !sentences[at...].contains(where: { has($0, moveOn) }),
               sentences[(at + 1)...].allSatisfy({ TextRules.tokens($0).count < x.pivotShareMinWords }) else { return false }
+        let last = lines.last.map(\.text) ?? ""
         let lastSentence = sentences.last ?? ""
         return !asks(lastSentence) && !endsWithTag(lastSentence) && !(pieces(last).last.map(asks) ?? false)
     }

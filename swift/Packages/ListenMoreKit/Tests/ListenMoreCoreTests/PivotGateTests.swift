@@ -452,12 +452,33 @@ final class PivotGateTests: XCTestCase {
         XCTAssertEqual(c.themEnd, 10.0, accuracy: 1e-9)
     }
 
-    /// Any line after the share, from any voice, ends it; even a reaction (a known recall limit).
-    func testAnotherVoiceReactingAfterTheShareEndsIt() {
+    /// A short reaction from another voice doesn't change what the user answers: the share stands.
+    func testAnotherVoiceReactingAfterTheShareKeepsIt() {
         var s = PivotScript()
         s.them(PivotLines.share, 0.5, 5.5)
-        s.them("Wow, congratulations, that is huge news!", 6.0, 7.5)
-        s.you(PivotLines.pivot, 8.0, 14.0)
+        s.them("Wow, congratulations!", 6.0, 7.0)
+        s.you(PivotLines.pivot, 7.5, 13.5)
+        XCTAssertEqual(run(s, until: 30).counters.candidates, 1)
+    }
+
+    /// The transcriber commits a line at nearly every pause, so a short tail in its own line is still
+    /// part of the share.
+    func testAShortTailInItsOwnLineKeepsTheShare() {
+        for tail in ["It was such a long day.", "Honestly it was amazing."] {
+            var s = PivotScript()
+            s.them(PivotLines.share, 0.5, 5.5)
+            s.them(tail, 5.8, 7.0)
+            s.you(PivotLines.pivot, 7.5, 13.5)
+            XCTAssertEqual(run(s, until: 30).counters.candidates, 1, tail)
+        }
+    }
+
+    /// Another voice's own 14-word story after the share changes what the user answers.
+    func testAnotherVoicesOwnStoryAfterTheShareEndsIt() {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.them("Oh nice, I did one last year too and I was wrecked for days after.", 6.5, 9.0)
+        s.you("Ha, I would never manage that, my knees are terrible and I get bored running for more than ten minutes at a time.", 9.5, 15.5)
         assertNoCandidate(s)
     }
 
@@ -476,6 +497,18 @@ final class PivotGateTests: XCTestCase {
         dashboard.them("Okay, let's look at the release dashboard now.", 6.5, 8.5)
         dashboard.you("Sure, I updated my numbers this morning and I think my part of the dashboard is ready, I will share my screen now.", 9.0, 15.0)
         assertNoCandidate(dashboard)
+
+        var yourUpdate = PivotScript()
+        yourUpdate.them("I just got back from my sister's wedding and I was so emotional the whole day.", 0.5, 5.5)
+        yourUpdate.them("Sam, give us your update on the migration please.", 6.5, 8.5)
+        yourUpdate.you("Sure, I finished my part yesterday and I am running my last checks today, I should be done with mine by noon.", 9.0, 15.0)
+        assertNoCandidate(yourUpdate)
+
+        var anyway = PivotScript()
+        anyway.them(lake, 0.5, 5.5)
+        anyway.them("Anyway. Sam.", 6.5, 7.5)
+        anyway.you(update, 8.0, 14.0)
+        assertNoCandidate(anyway)
 
         var deck = PivotScript()
         deck.them(PivotLines.share, 0.5, 5.5)
