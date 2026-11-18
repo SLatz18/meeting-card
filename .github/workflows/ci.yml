@@ -66,7 +66,17 @@ jobs:
         working-directory: swift
         run: |
           set -euo pipefail
-          scan() { strings -a "$@"; for b in "$@"; do nm -a "$b" 2>/dev/null || true; done; }
+          shopt -s inherit_errexit
+          # Every binary must give a symbol table: an nm failure or empty output fails the step.
+          scan() {
+            strings -a "$@" || return 1
+            local b syms
+            for b in "$@"; do
+              syms=$(nm -a "$b") || { echo "nm -a failed on $b" >&2; return 1; }
+              [[ -n $syms ]] || { echo "nm -a found no symbols in $b" >&2; return 1; }
+              printf '%s\n' "$syms"
+            done
+          }
           shipping=build/dd/Build/Products/Release/MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift
           testbuild=build/dd-test/Build/Products/Release/MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift
           # A missing or empty binary has no markers to find: fail rather than count it as clean.
@@ -88,7 +98,17 @@ jobs:
         working-directory: swift
         run: |
           set -euo pipefail
-          scan() { strings -a "$@"; for b in "$@"; do nm -a "$b" 2>/dev/null || true; done; }
+          shopt -s inherit_errexit
+          # Every binary must give a symbol table: an nm failure or empty output fails the step.
+          scan() {
+            strings -a "$@" || return 1
+            local b syms
+            for b in "$@"; do
+              syms=$(nm -a "$b") || { echo "nm -a failed on $b" >&2; return 1; }
+              [[ -n $syms ]] || { echo "nm -a found no symbols in $b" >&2; return 1; }
+              printf '%s\n' "$syms"
+            done
+          }
           bins() { echo "$1/Contents/MacOS/MeetingCardSwift" "$1/Contents/Frameworks/MeetingCardCore.framework/MeetingCardCore"; }
           read -ra shipping <<<"$(bins build/dd/Build/Products/Release/MeetingCardSwift.app)"
           read -ra testbuild <<<"$(bins build/dd-test/Build/Products/Release/MeetingCardSwift.app)"
