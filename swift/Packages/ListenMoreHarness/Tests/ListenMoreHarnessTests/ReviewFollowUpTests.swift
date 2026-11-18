@@ -43,4 +43,25 @@ final class ReviewFollowUpTests: XCTestCase {
         XCTAssertEqual(Harness.scrub("bad arg sk-scrub-test-0123456789!", environment: env), "bad arg [REDACTED]!")
         XCTAssertEqual(Harness.scrub("nothing here", environment: [:]), "nothing here")
     }
+
+    /// One watchdog serves every waiter: waits resolve on add, time out on their own deadline, and the
+    /// watchdog stops when nobody is waiting.
+    func testAsyncCounterWaitsAndTimesOut() async {
+        let c = AsyncCounter()
+        async let reached = c.wait(atLeast: 1, timeout: 5)
+        async let timedOut = c.wait(atLeast: 100, timeout: 0.3)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        c.add()
+        let started = Date()
+        let (a, b) = await (reached, timedOut)
+        XCTAssertTrue(a)
+        XCTAssertFalse(b)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+        var results: [Bool] = []
+        for i in 0..<500 {
+            c.add()
+            results.append(await c.wait(atLeast: i + 2, timeout: 5))
+        }
+        XCTAssertTrue(results.allSatisfy { $0 })
+    }
 }

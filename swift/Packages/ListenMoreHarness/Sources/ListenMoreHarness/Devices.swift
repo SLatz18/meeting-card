@@ -28,14 +28,25 @@ public final class HarnessClock: @unchecked Sendable {
 }
 
 /// A counter tasks can wait on. `wait` returns false if the target isn't reached within `timeout`
-/// seconds of real time (a stuck barrier is reported, never hung on).
+/// seconds of real time (a stuck barrier is reported, never hung on). One watchdog timer runs only
+/// while someone is waiting and expires overdue waiters; a wait doesn't schedule its own timer.
 public final class AsyncCounter: @unchecked Sendable {
+    struct Waiter {
+        var target: Int
+        var deadline: DispatchTime
+        var c: CheckedContinuation<Bool, Never>
+    }
+
+    static let watchdogInterval = 0.25
     private let lock = NSLock()
     private var value = 0
     private var nextId = 0
-    private var waiters: [Int: (target: Int, c: CheckedContinuation<Bool, Never>)] = [:]
+    private var waiters: [Int: Waiter] = [:]
+    private var watchdog: DispatchSourceTimer?
 
     public init() {}
+
+    deinit { watchdog?.cancel() }
 
     public var current: Int { lock.withLock { value } }
 
@@ -44,32 +55,51 @@ public final class AsyncCounter: @unchecked Sendable {
             value += n
             let hits = waiters.filter { $0.value.target <= value }
             for k in hits.keys { waiters[k] = nil }
+            stopWatchdogIfIdle()
             return hits.map(\.value.c)
         }
         ready.forEach { $0.resume(returning: true) }
     }
 
     public func wait(atLeast target: Int, timeout: Double) async -> Bool {
-        let id: Int = lock.withLock {
-            nextId += 1
-            return nextId
-        }
-        return await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+        await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
             let reached = lock.withLock { () -> Bool in
                 if value >= target { return true }
-                waiters[id] = (target, c)
+                nextId += 1
+                waiters[nextId] = Waiter(target: target, deadline: .now() + timeout, c: c)
+                startWatchdogIfNeeded()
                 return false
             }
-            if reached {
-                c.resume(returning: true)
-                return
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in
-                guard let self else { return }
-                let w = self.lock.withLock { self.waiters.removeValue(forKey: id) }
-                w?.c.resume(returning: false)
-            }
+            if reached { c.resume(returning: true) }
         }
+    }
+
+    /// Under `lock`.
+    private func startWatchdogIfNeeded() {
+        guard watchdog == nil else { return }
+        let t = DispatchSource.makeTimerSource(queue: .global())
+        t.schedule(deadline: .now() + Self.watchdogInterval, repeating: Self.watchdogInterval)
+        t.setEventHandler { [weak self] in self?.expireOverdue() }
+        watchdog = t
+        t.resume()
+    }
+
+    /// Under `lock`.
+    private func stopWatchdogIfIdle() {
+        guard waiters.isEmpty, let t = watchdog else { return }
+        t.cancel()
+        watchdog = nil
+    }
+
+    private func expireOverdue() {
+        let now = DispatchTime.now()
+        let overdue = lock.withLock { () -> [CheckedContinuation<Bool, Never>] in
+            let late = waiters.filter { $0.value.deadline <= now }
+            for k in late.keys { waiters[k] = nil }
+            stopWatchdogIfIdle()
+            return late.map(\.value.c)
+        }
+        overdue.forEach { $0.resume(returning: false) }
     }
 }
 
