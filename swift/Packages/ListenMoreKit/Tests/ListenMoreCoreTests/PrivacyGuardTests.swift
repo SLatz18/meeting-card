@@ -370,6 +370,12 @@ final class PrivacyGuardTests: XCTestCase {
         for (name, text) in try allSources() where name != "CallDisplayLocator.swift" {
             XCTAssertFalse(code(text).contains("CGWindowListCopyWindowInfo"), "\(name) reads the window list")
         }
+        // The binding reaches the glow (and, through `glowScreen`, the coach card) only via `locateScreen`.
+        let service = code(try XCTUnwrap(try allSources().first { $0.0 == "CoachService.swift" }).1)
+        XCTAssertTrue(service.contains("locateScreen = { appKey, fallback in CallDisplayLocator.screen(callWindow: callWindows.target(appKey: appKey), fallback: fallback) }"),
+                      "locateScreen is the call window binding")
+        XCTAssertTrue(service.contains("let screen = self.locateScreen(self.session.session?.appKey, self.fallbackScreen())"),
+                      "the glow's placement asks locateScreen")
     }
 
     /// Nothing the providers see is logged, printed or kept beyond the call states.
