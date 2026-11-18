@@ -258,6 +258,16 @@ final class CueDisplayTests: XCTestCase {
         }
     }
 
+    /// Increase Contrast is the system's unless a snapshot asks, and live in the lab: the surface reads
+    /// the environment's colorSchemeContrast (which redraws it) as well as NSWorkspace's setting.
+    func testSurfacesFollowIncreaseContrastLive() throws {
+        let views = try read("Core/CueDisplayViews.swift")
+        XCTAssertTrue(views.contains("@Environment(\\.colorSchemeContrast) private var contrast"))
+        XCTAssertTrue(views.contains("increasedContrast ?? (contrast == .increased || NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)"))
+        XCTAssertFalse(views.contains("increasedContrast: false)"), "no hard-coded standard contrast in the surfaces")
+        XCTAssertFalse(try read("Core/CueDisplayLab.swift").contains("increasedContrast:"), "the lab leaves it to the system")
+    }
+
     // MARK: test builds only
 
     /// The prototype compiles only into test builds: Debug (these tests) and `--test-id`. The

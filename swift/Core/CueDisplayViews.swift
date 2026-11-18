@@ -15,9 +15,11 @@ public struct CueDisplaySurface: View {
     let t: TimeInterval
     let mode: Mode
     let hover: Bool
-    /// nil: the system's Increase Contrast setting, like the shipped card (`CoachCardState.increasedContrast`).
+    /// nil: the system's Increase Contrast setting, like the shipped card (`CoachCardState.increasedContrast`),
+    /// followed live: the environment's `colorSchemeContrast` redraws the surface (the lab) when it changes.
     let increasedContrast: Bool?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     public init(option: CueDisplayOption, timeline: CueTimeline, t: TimeInterval, mode: Mode, hover: Bool = false,
                 increasedContrast: Bool? = nil) {
@@ -32,7 +34,7 @@ public struct CueDisplaySurface: View {
     public var body: some View {
         let display = CueDisplayPacer.frame(at: t, events: timeline.events)
         let style = CardStyle.for(dark: colorScheme == .dark)
-        let ic = increasedContrast ?? NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        let ic = increasedContrast ?? (contrast == .increased || NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
         switch mode {
         case .card: CueCardMock(option: option, timeline: timeline, display: display, hover: hover, style: style, ic: ic)
         case .pill: CuePillMock(option: option, display: display, hover: hover, style: style, ic: ic)
@@ -381,7 +383,7 @@ public enum CueDisplaySnapshot {
 
     /// The surface at each moment, side by side, each under its time.
     public static func strip(_ option: CueDisplayOption, _ timeline: CueTimeline, moments: [TimeInterval], mode: CueDisplaySurface.Mode,
-                             dark: Bool, scale: CGFloat) -> CGImage? {
+                             increasedContrast: Bool = false, dark: Bool, scale: CGFloat) -> CGImage? {
         let style = CardStyle.for(dark: dark)
         let d = Theme.CueDisplay.self
         let content = HStack(alignment: .top, spacing: d.stripGap) {
@@ -390,7 +392,7 @@ public enum CueDisplaySnapshot {
                     Text(CueDisplayCopy.stripTime(t))
                         .font(d.stripLabelFont.swiftUI)
                         .foregroundStyle(d.stripLabelText.shapeStyle(style))
-                    CueDisplaySurface(option: option, timeline: timeline, t: t, mode: mode, increasedContrast: false)
+                    CueDisplaySurface(option: option, timeline: timeline, t: t, mode: mode, increasedContrast: increasedContrast)
                 }
             }
         }
