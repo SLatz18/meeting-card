@@ -4,6 +4,13 @@ Status: proposal, with a prototype in the **test build only** (draft PR #31). No
 app. **All new copy is placeholder** (`CueDisplayCopy.isPlaceholder`); the cue words and VoiceOver announcements
 it shows are the shipped, approved `CoachNudge.words` and `CoachNudge.announcement`.
 
+**Decision (owner, 2026-11-18):** the card shows the rotating words line, then the cue's glyph lingers in the
+status glyph; the pill is the glyph state, with the words in its tooltip and VoiceOver label. Both ship in the
+follow-up PR stacked on #31 (CC4 in [MAC_DEMO_CHECKS.md](MAC_DEMO_CHECKS.md)). Still open, with the proposals
+below as the defaults: the 10 s gap, the glyph set and the final copy (to a writer). In the shipped card the
+glyph is the cue's from the moment the words show, so the two are learned together; the prototype's rotating
+line keeps the coach glyph during the words.
+
 **Recommendation in one line:** keep the shipped rotating line on the card, let the cue's glyph linger in the
 status glyph after the words go, put the glyph state on the pill, and leave caption anchoring for later.
 [Reasoning below](#recommendation).
