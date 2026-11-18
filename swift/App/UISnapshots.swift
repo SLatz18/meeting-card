@@ -26,13 +26,40 @@ enum UISnapshots {
         .partial(.others, item: "demo", text: "Great, let's go through it section by"),
     ]
 
-    /// Holds transcript text in memory for the screenshots; never touches disk.
-    final class MemoryTranscriptStore: TranscriptStore {
-        var files: [URL: String] = [:]
+    /// Holds transcript text in memory for the screenshots; never touches disk. The recorder's I/O
+    /// queue and the main thread both use it, so it locks. `dirs` stands in for folders (a synthetic
+    /// vault's `.obsidian`).
+    final class MemoryTranscriptStore: TranscriptStore, @unchecked Sendable {
+        private let lock = NSLock()
+        private var files: [URL: String] = [:]
+        private var folders: Set<String> = []
+
+        private func locked<T>(_ body: () throws -> T) rethrows -> T {
+            lock.lock()
+            defer { lock.unlock() }
+            return try body()
+        }
+
+        func addFolder(_ url: URL) { locked { _ = folders.insert(url.standardizedFileURL.path) } }
         func prepare(folder: URL) throws {}
-        func exists(_ url: URL) -> Bool { files[url] != nil }
-        func write(_ text: String, to url: URL) throws { files[url] = text }
-        func remove(_ url: URL) throws { files[url] = nil }
+        func exists(_ url: URL) -> Bool { locked { files[url] != nil } }
+        func write(_ text: String, to url: URL) throws { locked { files[url] = text } }
+        func create(_ text: String, at url: URL) throws {
+            try locked {
+                guard files[url] == nil else { throw TranscriptStoreError.exists }
+                files[url] = text
+            }
+        }
+        func append(_ text: String, to url: URL) throws { locked { files[url, default: ""] += text } }
+        func remove(_ url: URL) throws { locked { files[url] = nil } }
+        func read(_ url: URL) -> String? { locked { files[url] } }
+        func head(_ url: URL, bytes: Int) -> String? { read(url).map { String(decoding: Data($0.utf8).prefix(bytes), as: UTF8.self) } }
+        func contents(of folder: URL) -> [URL] {
+            let path = folder.standardizedFileURL.path
+            return locked { files.keys.filter { $0.deletingLastPathComponent().standardizedFileURL.path == path } }
+        }
+        func modified(_ url: URL) -> Date? { nil }
+        func isDirectory(_ url: URL) -> Bool { locked { folders.contains(url.standardizedFileURL.path) } }
     }
 
     /// The caption feed (CaptionFeedView at the card's width on the card surface: lines, lines while
