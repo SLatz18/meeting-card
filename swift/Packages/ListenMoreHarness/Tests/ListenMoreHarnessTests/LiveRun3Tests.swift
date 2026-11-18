@@ -78,6 +78,19 @@ final class LiveRun4Tests: XCTestCase {
             Line("y2", .you, "Sorry to cut in. I think the services should go first because they are smaller.", .into("a2", offset: 0.6)),
         ])
 
+    /// The same verdict, then Them's question You talk past: the missed-question cue is a transcript
+    /// rule's, so the verdict's global cooldown still holds it.
+    static let judgedThenMissedQuestion = Scenario(
+        name: "judged-then-missed-question",
+        summary: "a judged not_listening, then a missed question inside the global cooldown",
+        lines: [
+            Line("a1", .themA, "Let me walk you through the plan for the release next week.", .at(0.5)),
+            Line("y1", .you, "Okay, I see what you mean about the plan.", .after("a1", gap: 1.0)),
+            Line("a2", .themA, "Good. What date should we pick for the customer pilot?", .after("y1", gap: 1.0)),
+            Line("y2", .you, "I was thinking we should also tidy up the onboarding emails and move the team lunch to the afternoon.", .after("a2", gap: 1.0)),
+            Line("a3", .themA, "Okay, let us come back to that later.", .after("y2", gap: 2.5)),
+        ])
+
     func run(_ s: Scenario) async throws -> ScenarioResult {
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: out) }
@@ -105,5 +118,14 @@ final class LiveRun4Tests: XCTestCase {
         let held = r.diagnostics.first { $0.hasPrefix("missed interrupt: the engine raised it") }
         XCTAssertNotNil(held, "\(r.diagnostics)")
         XCTAssertTrue(held?.contains("held it (the last cue still on screen); last cue shown: not_listening at") ?? false, held ?? "")
+    }
+
+    func testGlobalCooldownHoldIsNamedInTheDiagnostics() async throws {
+        let r = try await run(Self.judgedThenMissedQuestion)
+        XCTAssertEqual(r.cues.falseCues.map(\.type), [.notListening], "offline, the judge's cue isn't tolerated")
+        XCTAssertEqual(r.cues.missed.map(\.type), [.missedQuestion])
+        let held = r.diagnostics.first { $0.hasPrefix("missed missed_question: the engine raised it") }
+        XCTAssertNotNil(held, "\(r.diagnostics)")
+        XCTAssertTrue(held?.contains("held it (global cooldown); last cue shown: not_listening at") ?? false, held ?? "")
     }
 }
