@@ -171,3 +171,22 @@ Apple developer account; see [SIGNING_PLAN.md](SIGNING_PLAN.md)). Until then:
 
 If that matters for the demo Mac, remove the item after the demo (Keychain Access, or
 `security delete-generic-password -s com.slatz.meetingcard.swift.test.openai -a OPENAI_API_KEY`).
+
+### Transcripts as Obsidian notes (OB1–OB7)
+Run on the test build, with a key OpenAI accepts and **Save transcripts** on. Use a throwaway test vault:
+in Obsidian, create a vault named `Test Vault` with a `Meetings` folder in it, then quit Obsidian. The paths
+below say `<test vault>`; never use a real vault for these checks. Join test calls from a reminder card so the
+note gets the event's title, and only talk with people who know the call is transcribed. What a note holds is in
+[TRANSCRIPTS_OBSIDIAN.md](TRANSCRIPTS_OBSIDIAN.md).
+
+| # | App | Check | How | Pass when |
+|---|---|---|---|---|
+| OB1 | All | Choose a vault folder | Settings → Save transcripts to → Choose… → `<test vault>/Meetings`; then choose a folder outside any vault; then `<test vault>/Meetings` again | Under the path: "In the Obsidian vault “Test Vault”."; outside a vault: "Not in an Obsidian vault…"; the File name, Tags, daily-note and Keep transcripts rows are there |
+| OB2 | Zoom or Meet | Run a call | Obsidian closed. Join a test call from a card; both sides talk; turn on the coach's own Mute (Mute My Mic for Coach) for about 15 s while the other side talks; Pause for about 15 s, then Resume; get one cue (talk over the other side); leave | `ls -a "<test vault>/Meetings"` shows exactly one new `<date> <time> <event title>.md` and no `.meetingcard-*.spool` or `*.mc-tmp`; the note ends `transcript-status: complete`, has a "Coach mic off: no You text" line with Them lines inside its range, a "Coach paused" line, and `coach-cues` equal to the cues shown |
+| OB3 | All | Verify the note in Obsidian | Open `Test Vault` in Obsidian and the OB2 note | Properties show date, start, end, duration, meeting-app, title, speakers, tags, transcriber, coach-cues; `#meeting/transcript` is in the tag pane; clicking a cue's time under Coaching cues jumps to its transcript line; no stray tags, links or hidden text in the transcript |
+| OB4 | All | Daily note | Turn on Link from the daily note (default path); type a line into today's `<test vault>/Daily/<yyyy-MM-dd>.md` in Obsidian, quit Obsidian; run a short call; then quit and relaunch MeetingCard | The daily note keeps your text unchanged with one new last line `- <hh:mm> [[Meetings/<note>\|<title>]]` that opens the note; still one line after the relaunch. Repeat with Show the call as: Embed: the note shows inside the daily note |
+| OB5 | All | Crash recovery | During a call with saving on, after a few lines: `pkill -9 -f "MeetingCardSwift-Test.app/Contents/MacOS"`; `ls -a` the folder; relaunch the test build | Before the relaunch: the note (`in-progress`) and its `.meetingcard-<id>.spool` are there. After: the same note says `transcript-status: recovered`, has the lines said just before the kill and ends with "The app quit during the call…"; the spool is gone |
+| OB6 | All | Edit during a call | During a call, open the note in Obsidian and type under Summary; keep talking; end the call | Your note keeps your text, untouched; the rest of the call is in `<same name> (2).md`, which ends `complete` |
+| OB7 | All | Delete | Settings → Delete This Call's Transcript during a call; then, after another call, from the coach menu | During the call: note and spool removed, the saving badge goes away and nothing is written for the rest of that call. After: that call's note removed. With the daily note on, its line stays (shown unresolved) |
+
+Keep transcripts (retention) is covered by unit tests (`TranscriptDurabilityTests`); no hand check.
