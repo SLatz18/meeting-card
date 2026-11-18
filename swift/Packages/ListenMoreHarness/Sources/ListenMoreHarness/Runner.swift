@@ -534,7 +534,13 @@ public final class ScenarioRun: CoachSessionDelegate {
         record?.meterLog.append((now, reading))
     }
 
+    /// The scripted call stream is digital silence wherever nobody on the call speaks, so a session that
+    /// reports a silent call (the coach log's silent-call report) is following the script, not failing.
+    /// Any other reported problem is one.
+    static func isSessionProblem(_ report: String) -> Bool { !report.hasPrefix("callAudioSilent(") }
+
     public func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) {
-        record?.problems.append(String(describing: problem))
+        let report = String(describing: problem)
+        if Self.isSessionProblem(report) { record?.problems.append(report) }
     }
 }

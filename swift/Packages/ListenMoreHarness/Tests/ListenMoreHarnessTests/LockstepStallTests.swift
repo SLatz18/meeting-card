@@ -44,6 +44,13 @@ final class LockstepStallTests: XCTestCase {
         XCTAssertFalse(record.problems.contains("lockstep stalled"))
     }
 
+    /// A reported silent call isn't a session problem on the scripted streams; any other report still is.
+    func testASilentCallReportIsNotASessionProblem() {
+        XCTAssertFalse(ScenarioRun.isSessionProblem("callAudioSilent(ListenMoreCore.SilenceKind.digitalSilence)"))
+        XCTAssertTrue(ScenarioRun.isSessionProblem("keyUnreadable"))
+        XCTAssertTrue(ScenarioRun.isSessionProblem("lockstep stalled"))
+    }
+
     func testOneDroppedFinalCostsOneTimeoutNotOnePerFrame() async throws {
         let (record, seconds) = try await run(dropping: 1)
         XCTAssertEqual(record.finalsBarrierTimeouts, 1, "re-baselined after the dropped final")
