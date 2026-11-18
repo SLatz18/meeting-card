@@ -104,6 +104,18 @@ final class CallWindowsTests: XCTestCase {
         XCTAssertEqual(selector.target(appKey: Self.zoom), meeting, "re-resolved once the home window closes")
     }
 
+    func testATieNeverResolvesByItselfAndALaterWindowWinsTheFirstBind() {
+        let chat = CGRect(x: 1700, y: 100, width: 400, height: 600)
+        observe([], at: 0)
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 3, at: 3)
+        for t in stride(from: 4.0, through: 60.0, by: 4.0) {
+            observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 3, at: t)
+            XCTAssertNil(selector.target(appKey: Self.zoom), "still tied at \(t) s")
+        }
+        observe([zoomWindow(1, home), zoomWindow(2, meeting), zoomWindow(9, chat)], session: 3, at: 64)
+        XCTAssertEqual(selector.target(appKey: Self.zoom), chat, "nothing was bound when Chat opened, so it is the newest and binds")
+    }
+
     func testNothingIdentifiedFallsBackAndNeverLatchesOntoHome() {
         observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 0, at: 0)   // observing starts mid-call
         observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 0, at: 30)
@@ -148,6 +160,48 @@ final class CallWindowsTests: XCTestCase {
         XCTAssertNil(selector.target(appKey: Self.zoom), "between windows: the card's display, never home")
         observe([zoomWindow(1, home), zoomWindow(6, meeting)], session: 10, at: 201)   // then the meeting window opens
         XCTAssertEqual(selector.target(appKey: Self.zoom), meeting, "the binding moves to the meeting window")
+    }
+
+    /// The meeting window can open before the preview closes: it opened while the preview was
+    /// bound, so it never takes over, and the glow falls back to the card's display (ZW1b accepts it).
+    func testMeetingWindowOpeningBeforeThePreviewClosesNeverBinds() {
+        observe([zoomWindow(1, home)], at: 0)
+        observe([zoomWindow(1, home), zoomWindow(5, preview)], session: 10, at: 8)
+        XCTAssertEqual(selector.target(appKey: Self.zoom), preview)
+        observe([zoomWindow(1, home), zoomWindow(5, preview), zoomWindow(6, meeting)], session: 10, at: 100)
+        XCTAssertEqual(selector.target(appKey: Self.zoom), preview, "the preview stays bound while it is open")
+        observe([zoomWindow(1, home), zoomWindow(6, meeting)], session: 10, at: 101)
+        XCTAssertNil(selector.target(appKey: Self.zoom), "the meeting window opened while another was bound: the card's display")
+        XCTAssertNil(selector.callWindowPresent(appKey: Self.zoom))
+        observe([zoomWindow(1, home), zoomWindow(6, meeting)], session: 10, at: 300)
+        XCTAssertNil(selector.target(appKey: Self.zoom), "and it stays that way for the call")
+    }
+
+    /// Stopping the coach and starting it again mid-call is a new session: its first bind only takes
+    /// windows from the last 60 s before it started, so the still-open meeting window doesn't bind.
+    func testARestartedSessionMidCallDoesNotRebindTheEarlierWindow() {
+        observe([zoomWindow(1, home)], at: 0)
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 5, at: 5)
+        XCTAssertEqual(selector.target(appKey: Self.zoom), meeting)
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], at: 100)                 // the coach stopped
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 300, at: 300)   // and started again
+        XCTAssertNil(selector.target(appKey: Self.zoom), "documented: the card's display for the rest of that call")
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 300, at: 400)
+        XCTAssertNil(selector.target(appKey: Self.zoom))
+    }
+
+    /// An app outside the allowlist ("coach any app") joins the watch only when its session starts,
+    /// so the windows it already has never bind; one it opens afterwards can.
+    func testAnAppOutsideTheAllowlistNeverBindsItsOpenWindows() {
+        let other = "com.example.callapp"
+        func win(_ id: Int, _ r: CGRect) -> AppWindow { AppWindow(id: id, bundleId: other, layer: 0, onScreen: true, bounds: r) }
+        selector.observe([win(1, home), win(2, meeting)], appKeys: keys, browserKeys: browsers, session: nil, hints: [:], now: 0)
+        selector.observe([win(1, home), win(2, meeting)], appKeys: keys.union([other]), browserKeys: browsers,
+                         session: (appKey: other, startedAt: 10), hints: [:], now: 10)
+        XCTAssertNil(selector.target(appKey: other), "its windows were already open when it joined the watch: unknown age")
+        selector.observe([win(1, home), win(2, meeting), win(3, preview)], appKeys: keys.union([other]), browserKeys: browsers,
+                         session: (appKey: other, startedAt: 10), hints: [:], now: 15)
+        XCTAssertEqual(selector.target(appKey: other), preview, "a window it opens after that binds")
     }
 
     func testOnlyNativeAppsAndBrowsersWithAHintAreRead() {

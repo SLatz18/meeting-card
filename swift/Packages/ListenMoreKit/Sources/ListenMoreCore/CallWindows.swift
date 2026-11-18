@@ -154,7 +154,9 @@ public struct CallWindowSelector: Sendable {
         }
         guard let newest = candidates.map({ state.firstSeen[$0.id] ?? -.infinity }).max() else { return nil }
         let tied = candidates.filter { state.firstSeen[$0.id] == newest }
-        // Two windows that appeared in the same observation can't be told apart: wait for the next.
+        // Two windows that appeared in the same observation can't be told apart, so nothing binds. The
+        // tie never resolves by itself: it lasts while both stay open, and the next window to open
+        // (Chat, say) is the newest and wins the first bind. It also ends when one of the two closes.
         return tied.count == 1 ? tied[0].id : nil
     }
 
