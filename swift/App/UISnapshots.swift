@@ -88,7 +88,8 @@ enum UISnapshots {
         }
         func settingsShot() {
             for key in [CoachController.Keys.onboarded, CoachController.Keys.enabled, CoachTranscript.Keys.captions,
-                        CoachTranscript.Keys.saveTranscripts, CoachTranscript.Keys.noticeSeen] { defaults.set(true, forKey: key) }
+                        CoachTranscript.Keys.saveTranscripts, CoachTranscript.Keys.noticeSeen,
+                        CoachSelfPivot.Keys.noticeSeen] { defaults.set(true, forKey: key) }
             // Shot with the other opt-ins at their defaults: Use Zoom/Meet controls off, GPT as the cue judge.
             defaults.set(false, forKey: CoachController.Keys.callControls)
             defaults.set(JudgeProviderKind.gpt.rawValue, forKey: CoachController.Keys.judgeProvider)
@@ -129,6 +130,23 @@ enum UISnapshots {
                     let ok = img.map { Card.writePNG($0, "\(dir)/notice-\(tag).png") } ?? false
                     controller.log("coach shot notice-\(tag) ok=\(ok)")
                     packet("notice", img)
+                    notice.window.orderOut(nil)
+                    selfPivotNoticeShot()
+                }
+            }
+        }
+        /// The ask-back cue's one-time notice, in its own window.
+        func selfPivotNoticeShot() {
+            let notice = CoachNotice(content: .selfPivot) { _ in }
+            notice.window.appearance = NSApp.effectiveAppearance
+            notice.window.center()
+            notice.window.orderFrontRegardless()
+            controller.schedule(0.5, repeats: false) {
+                MainActor.assumeIsolated {
+                    let img = notice.window.contentView.flatMap { layerImage($0, scale: notice.window.backingScaleFactor > 0 ? notice.window.backingScaleFactor : 2) }
+                    let ok = img.map { Card.writePNG($0, "\(dir)/self-pivot-notice-\(tag).png") } ?? false
+                    controller.log("coach shot self-pivot-notice-\(tag) ok=\(ok)")
+                    packet("self-pivot-notice", img)
                     notice.window.orderOut(nil)
                     settingsShot()
                 }

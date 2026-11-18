@@ -35,6 +35,10 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let typeSafeNote = CoachSettingsWindow.text(CoachCopy.typeSafeKeyMissing, font: Theme.Settings.helperFont,
                                                         color: CoachSettingsWindow.color(.secondary))
     private let judgeStoppedNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
+    private let selfPivotSwitch = NSSwitch()
+    private let selfPivotNote = CoachSettingsWindow.text(CoachSelfPivot.Copy.unsupportedJudge, font: Theme.Settings.helperFont,
+                                                         color: CoachSettingsWindow.color(.secondary))
+    private var selfPivotGroupView: NSView?
     private let root = NSStackView()
     private let document = NSView()
     private let scroll = NSScrollView()
@@ -438,7 +442,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
                                 color: Self.color(.secondary), maxWidth: Self.outerWidth)
-        return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), privacy, feedbackGroup()]
+        let gSelfPivot = selfPivotGroup()
+        selfPivotGroupView = gSelfPivot
+        return [section, g1, gControls, g2, gJudge, gSelfPivot, g3, transcriptGroup(), privacy, feedbackGroup()]
     }
 
     /// Last, so everything above it lays out exactly as before.
@@ -504,6 +510,36 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let stopped = typeSafe ? coach.judgeStopped : nil
         judgeStoppedNote.stringValue = stopped.map(CoachCopy.judgeStopped) ?? ""
         judgeStoppedNote.isHidden = stopped == nil
+    }
+
+    /// The ask-back cue: its switch, what it sends (the notice's terms, always here), and why it is off on a cue
+    /// judge that can't check it. Dimmed without a usable key; hidden when the build ships the cue disabled.
+    private func selfPivotGroup() -> Group {
+        selfPivotSwitch.target = self
+        selfPivotSwitch.action = #selector(selfPivotToggled(_:))
+        selfPivotSwitch.setAccessibilityLabel(CoachSelfPivot.Copy.toggle)
+        let row = Self.row(Self.text(CoachSelfPivot.Copy.toggle, font: Theme.Settings.rowFont), selfPivotSwitch)
+        let help = Self.text(CoachSelfPivot.Copy.help, font: Theme.Settings.helperFont, color: Self.color(.secondary))
+        let g = Self.group([row, help, selfPivotNote])
+        for v in [row, help, selfPivotNote] { pin(v, in: g) }
+        return g
+    }
+
+    private func updateSelfPivot() {
+        let state = coach.selfPivotState
+        selfPivotGroupView?.isHidden = state == .notShipped
+        switch state {
+        case .notShipped, .unsupportedJudge:
+            selfPivotSwitch.state = .off
+            selfPivotSwitch.isEnabled = false
+        case .needsKey:
+            selfPivotSwitch.state = coach.selfPivotOn ? .on : .off
+            selfPivotSwitch.isEnabled = false
+        case .available(let on):
+            selfPivotSwitch.state = on ? .on : .off
+            selfPivotSwitch.isEnabled = true
+        }
+        selfPivotNote.isHidden = state != .unsupportedJudge
     }
 
     /// Captions and saved transcripts: two opt-in switches, the folder, the saving indicator and
@@ -605,6 +641,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         keyStatus.isHidden = keyStatus.stringValue.isEmpty
         updateCallControls()
         updateJudge()
+        updateSelfPivot()
         updateTranscript()
     }
 
@@ -703,6 +740,11 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let all = JudgeProviderKind.allCases
         guard all.indices.contains(sender.indexOfSelectedItem) else { return }
         coach.setJudgeProvider(all[sender.indexOfSelectedItem])
+        update()
+    }
+
+    @objc private func selfPivotToggled(_ sender: NSSwitch) {
+        coach.setSelfPivot(sender.state == .on)
         update()
     }
 

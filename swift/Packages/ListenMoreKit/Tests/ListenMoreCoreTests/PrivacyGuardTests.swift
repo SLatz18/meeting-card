@@ -205,9 +205,12 @@ final class PrivacyGuardTests: XCTestCase {
     func testHostDefaultsAreSettingsOnly() throws {
         let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
                                     "coach.judgeProvider", "coach.cardPosition", "coach.captions", "coach.saveTranscripts",
-                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen"]
+                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen", "coach.selfPivot", "coach.selfPivotNoticeSeen"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
-        for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
+        let core = Self.hostAppURL.deletingLastPathComponent().appendingPathComponent("Core")
+        let files = try swiftFiles(in: Self.hostAppURL, prefix: "Coach") + swiftFiles(in: core, prefix: "Coach")
+        if Self.exists(core) { XCTAssertTrue(files.contains { $0.0 == "CoachSelfPivot.swift" }, "the ask-back cue's settings are scanned") }
+        for (name, text) in files {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
                 let key = (text as NSString).substring(with: m.range(at: 1))
                 XCTAssertTrue(allowed.contains(key), "\(name) uses defaults key \(key)")

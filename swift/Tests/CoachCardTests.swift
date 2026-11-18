@@ -536,20 +536,20 @@ final class CoachCardTests: XCTestCase {
                        "Coach on, listening. Let them finish", "the pill's label while the words hold: unchanged")
     }
 
-    /// The self-pivot cue: draft words and VoiceOver line, the glyph, the 4.5 s words then the glyph to 20 s, the
+    /// The self-pivot cue: its final words and VoiceOver line, the glyph, the 4.5 s words then the glyph to 20 s, the
     /// pill's tooltip, and nothing in any status but listening.
     func testSelfPivotCueIsShownLikeAnyOther() {
         let c = CoachCardCopy.SelfPivot.self
-        XCTAssertTrue(c.isDraft, "the VoiceOver line is still a placeholder")
-        XCTAssertEqual(c.words, "Ask how they feel")
-        XCTAssertEqual(c.announcement, "Call coach: ask how they feel about it.", "placeholder, pending final copy")
+        XCTAssertFalse(c.isDraft, "final copy")
+        XCTAssertEqual(c.words, "Ask about them")
+        XCTAssertEqual(c.announcement, "Call coach: ask the other person about what they shared.")
         XCTAssertEqual(CoachNudge.Kind.selfPivot.rawValue, "self_pivot", "the Kit's CueType raw value")
         let n = CoachNudge(kind: .selfPivot, tone: .amber)
         XCTAssertEqual(n.words, c.words)
         XCTAssertEqual(n.announcement, c.announcement)
         XCTAssertEqual(Theme.CoachCard.Symbols.cue(.selfPivot), "person.fill.questionmark")
         XCTAssertEqual(CoachCardCopy.Linger.accessibilityLabel(status: "Coach on, listening", words: n.words),
-                       "Coach on, listening. Last cue: Ask how they feel.", "the existing lingering template")
+                       "Coach on, listening. Last cue: Ask about them.", "the existing lingering template")
 
         var h = CoachNudgeHold()
         XCTAssertTrue(h.show(n, now: 10, status: .listening))

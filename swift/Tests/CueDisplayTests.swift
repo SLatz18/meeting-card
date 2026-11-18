@@ -164,8 +164,9 @@ final class CueDisplayTests: XCTestCase {
 
     // MARK: scanning the sources for switches over the cue enums
 
-    /// Where the cue enums are switched over: the app, its Core, and the Kit's sources (not its tests).
-    static let sourceDirs = ["App", "Core", "Packages/ListenMoreKit/Sources/ListenMoreCore", "Packages/ListenMoreKit/Sources/ListenMoreMac"]
+    /// Where the cue enums are switched over: the app, its Core, the Kit's sources and the harness's (not tests).
+    static let sourceDirs = ["App", "Core", "Packages/ListenMoreKit/Sources/ListenMoreCore", "Packages/ListenMoreKit/Sources/ListenMoreMac",
+                             "Packages/ListenMoreHarness/Sources"]
 
     /// Every Swift source file under `sourceDirs`, as paths relative to the swift directory.
     func sourceFiles() throws -> [String] {
@@ -313,39 +314,50 @@ final class CueDisplayTests: XCTestCase {
         }
     }
 
-    /// The self-pivot cue stays off in MeetingCard, and nothing in the code raises it yet. The files that may name
-    /// it are the ones that define, colour, rank, draw or disable it; every other source file under `sourceDirs`
-    /// is scanned (the judges, the engines, the rules, the session, the pipeline and the views included), so a new
-    /// file that raises it fails here without anyone adding it to a list. PivotGate.swift (#39) is picked up
-    /// the same way once this is restacked onto it: that PR's allowance for it belongs in `mayNameSelfPivot`.
-    static let mayNameSelfPivot: Set<String> = [
-        "App/CoachController.swift",
-        "Core/CoachCard.swift", "Core/CueDisplay.swift", "Core/Theme.swift",
-        "Packages/ListenMoreKit/Sources/ListenMoreCore/Config.swift",
+    /// The shipping code: the app, its Core and the Kit's sources.
+    static let shippingDirs = ["App", "Core", "Packages/ListenMoreKit/Sources/ListenMoreCore", "Packages/ListenMoreKit/Sources/ListenMoreMac"]
+    static let lane = "Packages/ListenMoreKit/Sources/ListenMoreCore/SelfPivotLane.swift"
+    /// Where the cue type, its raw value and its config are defined (the only files spelling "self_pivot" out).
+    static let spellsTheLabel: Set<String> = [
+        "Core/CoachCard.swift",
         "Packages/ListenMoreKit/Sources/ListenMoreCore/CuePolicy.swift",
         "Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift",
     ]
+    /// Where the self-pivot judge's label is used: defined, mapped to the cue type, offered by the lane.
+    static let usesTheJudgeLabel: Set<String> = [
+        lane,
+        "Packages/ListenMoreKit/Sources/ListenMoreCore/GptTypes.swift",
+        "Packages/ListenMoreKit/Sources/ListenMoreCore/CuePolicy.swift",
+    ]
 
-    func testSelfPivotIsDisabledAndNeverRaised() throws {
+    /// The self-pivot (ask-back) cue is raised only by the self-pivot judge's lane: the lane alone turns a verdict
+    /// into a self_pivot offer; nothing in the shipping code builds a self_pivot suggestion or offers one to a cue
+    /// policy directly; the label is spelled out only where the type and its config are defined. MeetingCard ships
+    /// it on: `configOverrides` disables only not_listening (adding the cue back to it is the rollback), and the
+    /// engine reads the user's switch and the notice through `CoachSelfPivot.allowed`.
+    func testSelfPivotIsRaisedOnlyByItsJudgeLane() throws {
+        let files = try Self.shippingDirs.flatMap { dir -> [String] in
+            let root = Self.swiftDir.appendingPathComponent(dir).resolvingSymlinksInPath()
+            let names = try XCTUnwrap(FileManager.default.enumerator(atPath: root.path), dir).compactMap { $0 as? String }
+            return names.filter { $0.hasSuffix(".swift") }.map { "\(dir)/\($0)" }
+        }
+        XCTAssertTrue(files.contains(Self.lane))
+        let direct = try NSRegularExpression(pattern: #"CueSuggestion\(\s*type:\s*\.selfPivot|\.offer\(\s*\.selfPivot|offerMany\(\[[^\]]*\.selfPivot"#)
+        for file in files {
+            let src = try read(file)
+            let code = Self.stripped(src)
+            if !Self.spellsTheLabel.contains(file) {
+                XCTAssertFalse(src.contains("\"self_pivot\""), "\(file) spells the self_pivot label out")
+            }
+            if !Self.usesTheJudgeLabel.contains(file) {
+                XCTAssertFalse(code.contains("SelfPivotJudgeSpec.label"), "\(file) uses the self-pivot judge's label")
+            }
+            XCTAssertNil(direct.firstMatch(in: code, range: NSRange(code.startIndex..., in: code)), "\(file) raises the self-pivot cue directly")
+        }
+        XCTAssertTrue(try read(Self.lane).contains("return GptCore.Offer(label: Self.label, t: now, refT: req.replyEnd, confidence: res.confidence)"))
         let controller = try read("App/CoachController.swift")
-        XCTAssertTrue(controller.contains("CueType.selfPivot.rawValue"))
-        let files = try sourceFiles()
-        for file in Self.mayNameSelfPivot { XCTAssertTrue(files.contains(file), "\(file) is a source file") }
-        for file in ["LocalLayer", "TextRules", "GptLayer", "CoachPipeline", "EngineBridge", "CoachSession", "TypeSafeJudge", "JudgeProvider",
-                     "LocalCoachEngine", "SystemOne"].map({ "Packages/ListenMoreKit/Sources/ListenMoreCore/\($0).swift" }) {
-            XCTAssertTrue(files.contains(file), "the scan covers \(file)")
-        }
-        for file in files where !Self.mayNameSelfPivot.contains(file) {
-            let code = try read(file)
-            XCTAssertFalse(code.contains(".selfPivot") || code.contains("self_pivot"), "\(file) raises or shows the self-pivot cue")
-        }
-        // The controller may name it only to disable it: its comment and the one configOverrides line, nothing else.
-        let naming = controller.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { $0.contains(".selfPivot") || $0.contains("self_pivot") }
-        XCTAssertEqual(naming.filter { !$0.hasPrefix("///") }.count, 1, "one non-comment line names the cue in CoachController.swift")
-        XCTAssertTrue(naming.allSatisfy { $0.hasPrefix("///") || $0.hasPrefix("static let configOverrides: [String: Any] = ") },
-                      "CoachController.swift names the cue only in configOverrides: \(naming)")
-        XCTAssertEqual(controller.components(separatedBy: ".selfPivot").count - 1, 1, "exactly one .selfPivot in CoachController.swift")
+        XCTAssertTrue(controller.contains("static let configOverrides: [String: Any] = [\"cues\": [\"disabled\": [CueType.notListening.rawValue]]]"))
+        XCTAssertTrue(controller.contains("selfPivotEnabled: { CoachSelfPivot.allowed(defaults) }"))
     }
 
     /// Words for the hold, then the linger (glyph, row mark) fading to nothing.

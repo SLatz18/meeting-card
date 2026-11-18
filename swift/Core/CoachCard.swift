@@ -51,17 +51,13 @@ public enum CoachCardCopy {
         public static func accessibilityLabel(status: String, words: String) -> String { "\(status). Last cue: \(words)." }
     }
 
-    // MARK: self-pivot cue (draft copy)
+    // MARK: self-pivot cue, the ask-back cue (final copy)
 
-    /// The self-pivot cue's words and VoiceOver line. Its lingering line is `Linger`'s template.
+    /// The self-pivot cue's words and VoiceOver line (signed off). Its lingering line is `Linger`'s template.
     public enum SelfPivot {
-        /// True until the VoiceOver line below has its final copy.
-        public static let isDraft = true
-        /// The approved placeholder words.
-        public static let words = "Ask how they feel"
-        /// PLACEHOLDER, pending final copy: the only string here outside the approved design. Replace it, and set
-        /// `isDraft` to false, with the final line.
-        public static let announcement = "Call coach: ask how they feel about it."
+        public static let isDraft = false
+        public static let words = "Ask about them"
+        public static let announcement = "Call coach: ask the other person about what they shared."
     }
 
     // MARK: call-mode tip (approved copy)

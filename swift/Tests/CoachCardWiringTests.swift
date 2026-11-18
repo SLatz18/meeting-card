@@ -174,10 +174,11 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertEqual(Theme.CoachCard.lingerGlyphText, .secondary, "a system label color: Increase Contrast darkens it")
     }
 
-    /// not_listening and self_pivot nudges are off unless MeetingCard turns them on.
+    /// not_listening nudges are off unless MeetingCard turns them on; self_pivot (the ask-back cue) ships on, behind
+    /// its own switch and notice. Putting `CueType.selfPivot.rawValue` back in this list is the rollback.
     func testNotListeningIsOffByDefault() throws {
         let controller = try read("App/CoachController.swift")
-        XCTAssertTrue(controller.contains("static let configOverrides: [String: Any] = [\"cues\": [\"disabled\": [CueType.notListening.rawValue, CueType.selfPivot.rawValue]]]"))
+        XCTAssertTrue(controller.contains("static let configOverrides: [String: Any] = [\"cues\": [\"disabled\": [CueType.notListening.rawValue]]]"))
         XCTAssertTrue(controller.contains("config = try ListenMoreConfig.load(overrides: Self.configOverrides)"))
     }
 

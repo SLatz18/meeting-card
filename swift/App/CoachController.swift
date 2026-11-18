@@ -7,8 +7,10 @@ import MeetingCardCore
 /// coach status menu) there is no service, no Core Audio polling, no capture and no network. It
 /// turns on without a key (local cues only); GPT cues need a key OpenAI hasn't rejected. Stores seven
 /// settings in UserDefaults (never call data; one is where the coach card was dragged), plus the
-/// captions and transcript settings (`CoachTranscript`); the API keys live only in the Keychain. The cue judge
-/// (`coach.judgeProvider`, gpt unless set) applies from the next call.
+/// captions and transcript settings (`CoachTranscript`) and the ask-back cue's two (`CoachSelfPivot`); the API
+/// keys live only in the Keychain. The cue judge (`coach.judgeProvider`, gpt unless set) applies from the next call.
+/// The ask-back cue (the Kit's self_pivot) is on inside the coach with a usable key and a cue judge that can
+/// check it, but sends and shows nothing until its one-time notice has been answered.
 /// "Use Zoom/Meet controls" (off by default) lets Zoom's meeting controls and an open Meet tab stop
 /// the coach within seconds of a call ending and hold it while Zoom is muted; its Accessibility and
 /// Automation prompts appear only when the user turns it on (or asks again from Settings).
@@ -27,8 +29,9 @@ final class CoachController: NSObject {
         static let cardPosition = "coach.cardPosition"
     }
 
-    /// MeetingCard's choices on top of the coach's generic config: not_listening and self_pivot nudges are off by default.
-    static let configOverrides: [String: Any] = ["cues": ["disabled": [CueType.notListening.rawValue, CueType.selfPivot.rawValue]]]
+    /// MeetingCard's choices on top of the coach's generic config: not_listening nudges are off by default. The
+    /// ask-back cue ships on; rolling it back for everyone is adding `CueType.selfPivot.rawValue` to this list.
+    static let configOverrides: [String: Any] = ["cues": ["disabled": [CueType.notListening.rawValue]]]
 
     /// MeetingCard's Keychain item for the OpenAI key, `<bundle id>.openai` (the Kit's default service is not ours).
     static let keychainService = AppIdentity.current.keychainService
@@ -85,6 +88,8 @@ final class CoachController: NSObject {
     private var noMicTracker = OncePerCallNotice()
     /// The coach card is the pill (for the rest of this showing).
     private(set) var minimized = false
+    /// The ask-back cue's one-time notice, while it's up.
+    private(set) var selfPivotNotice: CoachNotice?
 
     init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
          showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore()) throws {
@@ -136,6 +141,38 @@ final class CoachController: NSObject {
     func setJudgeProvider(_ kind: JudgeProviderKind) {
         defaults.set(kind.rawValue, forKey: Keys.judgeProvider)
         refresh()
+    }
+
+    // MARK: ask-back cue
+
+    var selfPivotOn: Bool { CoachSelfPivot.isOn(defaults) }
+
+    /// What Settings shows for the ask-back switch.
+    var selfPivotState: CoachSelfPivot.State {
+        CoachSelfPivot.state(shipped: !config.cues.disabledTypes.contains(.selfPivot),
+                             judgeSupports: JudgeProviders.judgesSelfPivot(judgeProvider), keyUsable: gptAvailable, on: selfPivotOn)
+    }
+
+    /// The Settings switch: off means no ask-back judge calls from the next step on, even mid-call.
+    func setSelfPivot(_ on: Bool) {
+        defaults.set(on, forKey: CoachSelfPivot.Keys.on)
+        refresh()
+    }
+
+    /// Shows the ask-back notice when it's due (`CoachSelfPivot.noticeDue`); until it's answered the engine's
+    /// switch stays off. Either button answers it; Open Settings also opens Settings.
+    private func showSelfPivotNoticeIfDue() {
+        guard selfPivotNotice == nil,
+              CoachSelfPivot.noticeDue(coachEnabled: enabled, state: selfPivotState, seen: CoachSelfPivot.noticeSeen(defaults)) else { return }
+        let notice = CoachNotice(content: .selfPivot) { [weak self] gotIt in
+            guard let self else { return }
+            self.defaults.set(true, forKey: CoachSelfPivot.Keys.noticeSeen)
+            self.selfPivotNotice = nil
+            if !gotIt { self.showSettings() }
+            self.refresh()
+        }
+        selfPivotNotice = notice
+        notice.presentAlone()
     }
 
     /// The user's allowlist, or nil for the shipped call apps.
@@ -245,7 +282,8 @@ final class CoachController: NSObject {
     private func makeService() {
         let defaults = defaults
         let engine = LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,
-                                      judgeProvider: { Self.storedJudgeProvider(defaults) })
+                                      judgeProvider: { Self.storedJudgeProvider(defaults) },
+                                      selfPivotEnabled: { CoachSelfPivot.allowed(defaults) })
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
                              allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine)
         #if MEETINGCARD_TEST_ID
@@ -415,6 +453,7 @@ final class CoachController: NSObject {
         updateCoachCard(card)
         updateStatusItem()
         settingsWindow?.update()
+        showSelfPivotNoticeIfDue()
     }
 
     /// What the coach card shows now, or nil while the coach isn't on for a call.
