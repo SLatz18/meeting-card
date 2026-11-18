@@ -87,12 +87,12 @@ public final class LocalLayer {
     /// The longest the user's first words back stay settled past the grace. A first reply after unmute
     /// ("Sorry, I was on mute, give me one second") runs about three seconds, so its comma onsets fall
     /// inside this; anything the user says after it is graded as usual, whatever their pauses.
-    static let firstWordsBackMaxS = 3.0
+    public static let firstWordsBackMaxS = 3.0
     /// How long the other side must be quiet before their next words end the first words back's
     /// exemption as a new utterance. A pause inside one of their sentences (a comma, a breath) runs to
     /// about 0.7 s: a live TTS take of "settle it on the next call, I just want the whole picture" paused
     /// 0.6 s at the comma, past `cut_in_utterance_gap_ms`.
-    static let othersNewUtteranceGapS = 1.0
+    public static let othersNewUtteranceGapS = 1.0
 
     struct CutIn {
         var onset: TimeInterval

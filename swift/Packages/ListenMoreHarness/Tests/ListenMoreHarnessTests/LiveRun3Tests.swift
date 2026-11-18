@@ -45,5 +45,9 @@ final class LiveRun3Tests: XCTestCase {
         let text = trace.explainCutIn(around: 30.0...31.6, config: config)
         XCTAssertTrue(text.contains("Them quiet 28.56-29.16 (0.60 s)"), text)
         XCTAssertTrue(text.contains("You quiet 28.80-29.12 (0.32 s), 29.94-30.38 (0.44 s)"), text)
+        let back = trace.explainFirstWordsBack(unmute: 27.98, config: config)
+        XCTAssertTrue(back.hasPrefix("first words back after Unmute at 27.98 s, 28.28-32.00 s:"), back)
+        XCTAssertTrue(back.contains("You's longest pause 0.44 s (29.94-30.38) (ends the exemption over 0.50 s)"), back)
+        XCTAssertTrue(back.contains("Them's longest pause 0.60 s (28.56-29.16) (a new utterance from 1.00 s)"), back)
     }
 }

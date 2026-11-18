@@ -19,7 +19,8 @@ public struct ScenarioResult: Sendable {
     public var billedSeconds: Double
     public var lastMeter: CostReading?
     public var judgeCalls: Int
-    /// For each missed or false interrupt: what the shadow local layer saw on the same audio.
+    /// For each missed or false interrupt, what the shadow local layer saw on the same audio; after each
+    /// Unmute, You's and Them's longest pauses in the first words back.
     public var diagnostics: [String] = []
 
     public var passed: Bool { checks.allSatisfy(\.passed) }
@@ -222,6 +223,9 @@ public enum Checks {
             }
             for c in match.falseCues where c.type == .interrupt {
                 diagnostics.append(String(format: "false interrupt at %.2f s: ", c.t) + shadow.explainCutIn(around: (c.t - 1.5)...c.t, config: r.config))
+            }
+            for unmute in r.applied where unmute.kind == .unmute {
+                diagnostics.append(shadow.explainFirstWordsBack(unmute: unmute.t, config: r.config))
             }
         }
         return ScenarioResult(scenario: s.name, summary: s.summary, mode: r.mode, transcription: tx, speakers: sp, cues: match,
