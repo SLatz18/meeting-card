@@ -307,8 +307,9 @@ final class CoachCardTests: XCTestCase {
 
     /// The coach's Mute shows the coach's state and is never a mic (that's Zoom's): waveform while the
     /// coach hears the user, the same waveform slashed while it doesn't, on the card, the pill and the
-    /// menu's Mute/Unmute items, in every state.
-    func testCoachMuteGlyphIsNeverAMic() {
+    /// menu's Mute/Unmute items, in every state. The mic-off status (the card's status line, the chip,
+    /// the menu's status line) is that same slashed waveform. Only Mute in Zoom keeps a mic.
+    func testCoachMuteGlyphIsNeverAMic() throws {
         let s = Theme.CoachCard.Symbols.self, m = Theme.Coach.menuSymbols
         XCTAssertEqual(s.coachHearing, "waveform")
         XCTAssertEqual(s.coachNotHearing, s.coachHearing + ".slash", "the same glyph, slashed")
@@ -327,6 +328,30 @@ final class CoachCardTests: XCTestCase {
         }
         for glyph in [m.mute, m.unmute] { XCTAssertFalse(glyph.hasPrefix("mic"), glyph) }
         XCTAssertTrue(s.mute.hasPrefix("mic") && s.unmute.hasPrefix("mic"), "Mute in Zoom keeps Zoom's mic, so the two never look alike")
+
+        // The mic-off status: one token, the coach's not-hearing glyph, on every status surface.
+        XCTAssertEqual(Theme.Coach.micOffSymbol, s.coachNotHearing)
+        XCTAssertEqual(s.micOff, s.coachNotHearing)
+        for glyph in [Theme.Coach.symbol, s.status, Theme.CallControls.mutedSymbol, Theme.Coach.micOffSymbol, s.micOff] {
+            XCTAssertFalse(glyph.hasPrefix("mic"), glyph)
+        }
+        let app = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("App")
+        func read(_ f: String) throws -> String { try String(contentsOf: app.appendingPathComponent(f), encoding: .utf8) }
+        XCTAssertTrue(try read("CoachCardView.swift").contains("self == .micOff ? Theme.CoachCard.Symbols.micOff : Theme.CoachCard.Symbols.status"),
+                      "the card's status line")
+        XCTAssertTrue(try read("CoachChip.swift").contains("mode == .micOff ? Theme.Coach.micOffSymbol : Theme.Coach.symbol"), "the chip")
+        XCTAssertTrue(try read("CoachController.swift").contains("case .micOff: m = note(CoachCopy.coachMicOff, Theme.Coach.micOffSymbol)"),
+                      "the menu's status line")
+        // No mic symbol literal anywhere in the coach UI but Mute in Zoom's two tokens.
+        let re = try NSRegularExpression(pattern: #""(mic(\.[a-z.]+)?)""#)
+        var found: [String] = []
+        for f in try FileManager.default.contentsOfDirectory(atPath: app.path) where f.hasPrefix("Coach") && f.hasSuffix(".swift") {
+            let text = try read(f)
+            found += re.matches(in: text, range: NSRange(text.startIndex..., in: text)).map { (text as NSString).substring(with: $0.range(at: 1)) }
+        }
+        let theme = try String(contentsOf: app.deletingLastPathComponent().appendingPathComponent("Core/Theme.swift"), encoding: .utf8)
+        found += re.matches(in: theme, range: NSRange(theme.startIndex..., in: theme)).map { (theme as NSString).substring(with: $0.range(at: 1)) }
+        XCTAssertEqual(Set(found), [s.mute, s.unmute], "only Mute in Zoom's mic.fill / mic.slash.fill")
     }
 
     func testCopy() {

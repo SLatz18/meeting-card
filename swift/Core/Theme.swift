@@ -279,8 +279,9 @@ public enum Theme {
         public static let symbol = "ear.badge.waveform"
         public static let pauseSymbol = "pause.fill"
         public static let resumeSymbol = "play.fill"
-        /// The coach's own Mute: the glyph on the chip, the card's status line and the menu's status line.
-        public static let micOffSymbol = "mic.slash"
+        /// The coach's own Mute as a status (the chip, the card's status line, the menu's status line):
+        /// the not-hearing glyph, never a mic.
+        public static let micOffSymbol = notHearingSymbol
         /// The coach's Mute button (card, pill and the menu's Mute/Unmute items) shows the coach's state,
         /// never the action and never a mic, so it can't pass for Zoom's mic: a waveform (the coach's
         /// glyph is an ear with one) while the coach hears the user, the same waveform slashed while it

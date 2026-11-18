@@ -34,9 +34,9 @@ final class CoachMicMuteTests: XCTestCase {
             XCTAssertEqual(CoachCardState(status: .micOff, mute: mute, mode: mode).sizeControl,
                            CoachCardState(status: .listening, mute: mute, mode: mode).sizeControl)
         }
-        XCTAssertEqual(Theme.Coach.micOffSymbol, "mic.slash")
+        XCTAssertEqual(Theme.Coach.micOffSymbol, Theme.Coach.notHearingSymbol, "the status shows the coach not hearing")
         XCTAssertEqual(s.micOff, Theme.Coach.micOffSymbol)
-        XCTAssertNotEqual(s.micOff, s.unmute, "the card's Mute button shows mic.slash.fill for Zoom's mute")
+        XCTAssertNotEqual(s.micOff, s.unmute, "never Mute in Zoom's mic.slash.fill")
         XCTAssertNotEqual(s.micOff, s.status)
         XCTAssertEqual(Theme.Coach.menuSymbols.mute, Theme.Coach.hearingSymbol, "the menu's Mute shows the coach hearing")
         XCTAssertEqual(Theme.Coach.menuSymbols.unmute, Theme.Coach.notHearingSymbol)
