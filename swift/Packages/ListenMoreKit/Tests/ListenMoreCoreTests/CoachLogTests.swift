@@ -1,4 +1,9 @@
 import XCTest
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 @testable import ListenMoreCore
 
 /// Collects what the coach logs, in memory.
@@ -274,6 +279,12 @@ final class CoachLogTests: XCTestCase {
         return dir.appendingPathComponent("App-Coach.log")
     }
 
+    /// Everything written so far (the file writes on its own queue).
+    func text(of file: CoachLogFile) throws -> String {
+        file.flush()
+        return try String(contentsOf: file.url, encoding: .utf8)
+    }
+
     func files(beside url: URL) -> [String] {
         ((try? FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)) ?? []).sorted()
     }
@@ -284,7 +295,7 @@ final class CoachLogTests: XCTestCase {
         let file = CoachLogFile(url: url, now: { now })
         file.write(CoachLogEntry(date: now, event: .coachEnabled(true)))
         file.write(CoachLogEntry(date: now, event: .keyCheck(.ok, source: .stored, httpStatus: 200)))
-        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { String($0.dropFirst(25)) }
+        let lines = try text(of: file).split(separator: "\n").map { String($0.dropFirst(25)) }
         XCTAssertEqual(lines, ["coach.enabled on=true", "key.check result=ok source=stored http=200"])
         let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(perms?.intValue, 0o600, "readable by the user only")
@@ -296,12 +307,14 @@ final class CoachLogTests: XCTestCase {
         let now = Date()
         let file = CoachLogFile(url: url, maxBytes: 1000, now: { now })
         for i in 0..<200 { file.write(CoachLogEntry(date: now, event: .micRouteRestart(count: i))) }
-        XCTAssertEqual(files(beside: url), ["App-Coach.log", "App-Coach.log.1"], "two files at most")
+        file.flush()
+        XCTAssertEqual(files(beside: url).filter { !$0.hasSuffix(".lock") }, ["App-Coach.log", "App-Coach.log.1"], "two log files at most")
+        file.flush()
         let current = try Data(contentsOf: url).count
         let old = try Data(contentsOf: file.rotatedURL).count
         XCTAssertLessThanOrEqual(current, 1000)
         XCTAssertLessThanOrEqual(old, 1000)
-        let newest = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").last.map(String.init)
+        let newest = try text(of: file).split(separator: "\n").last.map(String.init)
         XCTAssertEqual(newest.map { String($0.dropFirst(25)) }, "mic.routeRestart count=199", "the newest line is in the current file")
     }
 
@@ -318,14 +331,18 @@ final class CoachLogTests: XCTestCase {
         let clock = ClockBox(t0)
         let file = CoachLogFile(url: url, maxBytes: 100_000, maxAge: 3 * day, now: { clock.now })
         file.write(CoachLogEntry(date: t0, event: .coachEnabled(true)))
+        file.flush()
         file.write(CoachLogEntry(date: t0.addingTimeInterval(2 * day), event: .coachEnabled(false)))
+        file.flush()
         clock.now = t0.addingTimeInterval(2 * day + 7200)
         file.write(CoachLogEntry(date: clock.now, event: .micClosed))
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8).split(separator: "\n").count, 3, "nothing is old enough yet")
+        file.flush()
+        XCTAssertEqual(try text(of: file).split(separator: "\n").count, 3, "nothing is old enough yet")
 
         clock.now = t0.addingTimeInterval(3 * day + 7200)
         file.write(CoachLogEntry(date: clock.now, event: .micSilent))
-        let kept = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { String($0.dropFirst(25)) }
+        file.flush()
+        let kept = try text(of: file).split(separator: "\n").map { String($0.dropFirst(25)) }
         XCTAssertEqual(kept, ["coach.enabled on=false", "mic.closed", "mic.silent"], "the line from three days ago is gone")
 
         clock.now = t0.addingTimeInterval(10 * day)
@@ -339,12 +356,135 @@ final class CoachLogTests: XCTestCase {
         let clock = ClockBox(t0)
         let file = CoachLogFile(url: url, maxAge: 100, now: { clock.now })
         file.write(CoachLogEntry(date: t0, event: .coachEnabled(true)))
+        file.flush()
         clock.now = t0.addingTimeInterval(200)
         file.write(CoachLogEntry(date: clock.now, event: .coachEnabled(false)))
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8).split(separator: "\n").count, 2, "less than an hour since the last prune")
+        file.flush()
+        XCTAssertEqual(try text(of: file).split(separator: "\n").count, 2, "less than an hour since the last prune")
         clock.now = t0.addingTimeInterval(CoachLogFile.pruneInterval + 1)
         file.write(CoachLogEntry(date: clock.now, event: .micClosed))
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8).split(separator: "\n").count, 1)
+        file.flush()
+        XCTAssertEqual(try text(of: file).split(separator: "\n").count, 1)
+    }
+
+    /// Writing never waits for the disk: with the file's lock held by someone else the call still returns at once.
+    func testWriteReturnsWithoutWaitingForTheDisk() throws {
+        let url = try tempFile()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let lockFd = open(url.path + ".lock", O_RDWR | O_CREAT, 0o600)
+        XCTAssertGreaterThanOrEqual(lockFd, 0)
+        XCTAssertEqual(flock(lockFd, LOCK_EX), 0)
+        let now = Date()
+        let file = CoachLogFile(url: url, now: { now })
+        let start = Date()
+        for i in 0..<50 { file.write(CoachLogEntry(date: now, event: .micRouteRestart(count: i))) }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1, "the caller did not wait on the held lock")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "nothing is written while the lock is held")
+        flock(lockFd, LOCK_UN)
+        close(lockFd)
+        XCTAssertEqual(try text(of: file).split(separator: "\n").count, 50)
+    }
+
+    /// A backlog past the limit is dropped and reported, not queued without bound.
+    func testBacklogPastTheLimitIsDroppedAndReported() throws {
+        let url = try tempFile()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let lockFd = open(url.path + ".lock", O_RDWR | O_CREAT, 0o600)
+        XCTAssertEqual(flock(lockFd, LOCK_EX), 0)
+        let now = Date()
+        let file = CoachLogFile(url: url, maxPending: 5, now: { now })
+        for i in 0..<12 { file.write(CoachLogEntry(date: now, event: .micRouteRestart(count: i))) }
+        XCTAssertEqual(file.droppedCount, 7)
+        flock(lockFd, LOCK_UN)
+        close(lockFd)
+        let lines = try text(of: file).split(separator: "\n").map { String($0.dropFirst(25)) }
+        XCTAssertEqual(lines.filter { $0.hasPrefix("mic.routeRestart") }.count, 5)
+        XCTAssertEqual(lines.last, "log.dropped count=7")
+    }
+
+    /// Created 0600 (by the open that creates it), by every writer, with the lock file too.
+    func testFilesAreOwnerOnlyFromCreation() throws {
+        let url = try tempFile()
+        let now = Date()
+        let file = CoachLogFile(url: url, maxBytes: 600, now: { now })
+        for i in 0..<60 { file.write(CoachLogEntry(date: now, event: .micRouteRestart(count: i))) }
+        file.flush()
+        let dir = url.deletingLastPathComponent()
+        for name in try FileManager.default.contentsOfDirectory(atPath: dir.path) {
+            let perms = try FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent(name).path)[.posixPermissions] as? NSNumber
+            XCTAssertEqual(perms?.intValue, 0o600, name)
+        }
+    }
+
+    /// Two writers on one file (two app instances): O_APPEND keeps every line whole and in the file.
+    func testTwoWritersNeverInterleaveWithinALine() throws {
+        let url = try tempFile()
+        let now = Date()
+        let a = CoachLogFile(url: url, now: { now }), b = CoachLogFile(url: url, now: { now })
+        for i in 0..<300 {
+            a.write(CoachLogEntry(date: now, event: .micRouteRestart(count: i)))
+            b.write(CoachLogEntry(date: now, event: .micRouteRestart(count: 1000 + i)))
+        }
+        a.flush(); b.flush()
+        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines.count, 600)
+        for line in lines { XCTAssertNotNil(line.range(of: #"^\d{4}-\d\d-\d\dT[\d:.]+Z mic\.routeRestart count=\d+$"#, options: .regularExpression), line) }
+    }
+
+    /// If the rotation can't rename, the full file is removed (and if that fails, cut), so it never passes the cap.
+    func testFailedRotationStillHoldsTheCap() throws {
+        for removeWorks in [true, false] {
+            let url = try tempFile()
+            let now = Date()
+            let ops = CoachLogFile.Operations(rename: { _, _ in false }, remove: { u in removeWorks ? ((try? FileManager.default.removeItem(at: u)) != nil) : false })
+            let file = CoachLogFile(url: url, maxBytes: 1000, operations: ops, now: { now })
+            for i in 0..<300 { file.write(CoachLogEntry(date: now, event: .micRouteRestart(count: i))) }
+            file.flush()
+            XCTAssertLessThanOrEqual(try Data(contentsOf: url).count, 1000, "removeWorks=\(removeWorks)")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.rotatedURL.path))
+            let newest = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").last.map(String.init)
+            XCTAssertEqual(newest.map { String($0.dropFirst(25)) }, "mic.routeRestart count=299")
+        }
+    }
+
+    /// Pruning writes a temporary file and renames it over the original: a failed rename leaves the original whole, and
+    /// no temporary file is left behind.
+    func testPruneIsAtomicAndLeavesNothingBehind() throws {
+        let url = try tempFile()
+        let day: TimeInterval = 24 * 3600
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let clock = ClockBox(t0)
+        let file = CoachLogFile(url: url, maxAge: 3 * day, now: { clock.now })
+        file.write(CoachLogEntry(date: t0, event: .coachEnabled(true)))
+        file.write(CoachLogEntry(date: t0.addingTimeInterval(4 * day), event: .coachEnabled(false)))
+        file.flush()
+        let before = try Data(contentsOf: url)
+        clock.now = t0.addingTimeInterval(4 * day + 10)
+        file.prune()
+        XCTAssertEqual(try text(of: file).split(separator: "\n").count, 1)
+        XCTAssertFalse(files(beside: url).contains { $0.hasSuffix(".tmp") })
+        XCTAssertNotEqual(try Data(contentsOf: url), before)
+
+        let failing = try tempFile()
+        let ops = CoachLogFile.Operations(rename: { _, _ in false }, remove: { _ in true })
+        let f2 = CoachLogFile(url: failing, maxAge: 3 * day, operations: ops, now: { clock.now })
+        clock.now = t0
+        f2.write(CoachLogEntry(date: t0, event: .coachEnabled(true)))
+        f2.write(CoachLogEntry(date: t0.addingTimeInterval(4 * day), event: .coachEnabled(false)))
+        f2.flush()
+        let original = try Data(contentsOf: failing)
+        clock.now = t0.addingTimeInterval(4 * day + 10)
+        f2.prune()
+        XCTAssertEqual(try Data(contentsOf: failing), original, "a failed rename leaves the file as it was")
+        XCTAssertFalse(files(beside: failing).contains { $0.hasSuffix(".tmp") })
+    }
+
+    func testDiscardingSinkDropsEverything() {
+        let sink = DiscardingCoachLog()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        CoachLog.record(.coachEnabled(true))
+        CoachLog.flush()
     }
 
     func testRevealTarget() {

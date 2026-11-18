@@ -109,6 +109,8 @@ public enum GptLayerReason: String, Equatable, Sendable {
 /// transcript text, audio, the key, headers and request or response bodies cannot reach the file.
 public enum CoachLogEvent: Equatable, Sendable {
     case coachEnabled(Bool)
+    /// The log's backlog was full and `count` entries were dropped instead of written.
+    case logDropped(count: Int)
     /// "Show Coach in Screenshots" turned on or off.
     case screenshotSharing(Bool)
     /// The result of asking OpenAI about the key, with the HTTP status when it answered (a number only).
@@ -170,6 +172,7 @@ public enum CoachLogEvent: Equatable, Sendable {
     public var rendered: String {
         switch self {
         case .coachEnabled(let on): return line("coach.enabled", ("on", .flag(on)))
+        case .logDropped(let count): return line("log.dropped", ("count", .number(count)))
         case .screenshotSharing(let on): return line("coach.screenshots", ("on", .flag(on)))
         case .keyCheck(let result, let source, let status):
             return line("key.check", ("result", .word(result.rawValue)), ("source", .word(source.rawValue)), ("http", .number(status)))
@@ -314,6 +317,18 @@ public protocol StatusCarryingError: Error {
 
 public protocol CoachLogSink: AnyObject, Sendable {
     func write(_ entry: CoachLogEntry)
+    /// Waits for entries already handed over to be written (a sink that writes on another thread).
+    func flush()
+}
+
+public extension CoachLogSink {
+    func flush() {}
+}
+
+/// A sink that drops everything: UI snapshot runs install it so they never write the real log.
+public final class DiscardingCoachLog: CoachLogSink, @unchecked Sendable {
+    public init() {}
+    public func write(_ entry: CoachLogEntry) {}
 }
 
 /// The coach's diagnostics, local only. Nothing is written until a host installs a sink; the
@@ -324,6 +339,11 @@ public enum CoachLog {
 
     public static func install(_ sink: CoachLogSink?) {
         lock.withLock { Self.sink = sink }
+    }
+
+    /// Waits until the installed sink has written what it was given (the app is about to exit).
+    public static func flush() {
+        lock.withLock { sink }?.flush()
     }
 
     public static func record(_ event: CoachLogEvent, at date: Date = Date()) {

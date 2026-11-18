@@ -51,4 +51,24 @@ final class CoachLogWiringTests: XCTestCase {
         XCTAssertTrue(mic.contains("throw Self.failure(error, step: step)"))
         XCTAssertTrue(mic.contains("case let .openFailed(plan, step, status):"))
     }
+
+    /// UI snapshot runs build many controllers: every one is given a discarding sink, so none writes the real log.
+    func testSnapshotRunsNeverWriteTheRealLog() throws {
+        let snaps = try read("App/UISnapshots.swift")
+        let controllers = snaps.components(separatedBy: "CoachController(").count - 1
+        let discarding = snaps.components(separatedBy: "CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), ").count - 1
+        XCTAssertGreaterThanOrEqual(controllers, 10)
+        XCTAssertEqual(discarding, controllers, "every snapshot controller gets the discarding sink")
+        let controller = try read("App/CoachController.swift")
+        XCTAssertTrue(controller.contains("CoachLog.install(coachLogSink ?? coachLogFile)"))
+        XCTAssertTrue(controller.contains("coachLogSink: CoachLogSink? = nil"), "the app writes the file unless a sink is injected")
+    }
+
+    /// Quitting waits for the log's own thread to finish writing.
+    func testQuitFlushesTheLog() throws {
+        let controller = try read("App/CoachController.swift")
+        let quit = try XCTUnwrap(controller.components(separatedBy: "    func willQuit() {").dropFirst().first?.components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(quit.contains("service?.quit()"))
+        XCTAssertTrue(quit.contains("CoachLog.flush()"))
+    }
 }

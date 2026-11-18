@@ -92,13 +92,15 @@ final class CoachController: NSObject {
     /// The coach card is the pill (for the rest of this showing).
     private(set) var minimized = false
 
-    init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
+    /// `coachLogSink` replaces the log file as the destination of coach events: UI snapshot runs pass a discarding sink so
+    /// they never write the real log. nil (the app) writes `coachLogFile`.
+    init(defaults: UserDefaults = .standard, coachLogSink: CoachLogSink? = nil, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
          showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore(),
          coachLogFile: CoachLogFile = CoachLogFile(url: AppPaths.coachLog(for: .current))) throws {
         self.defaults = defaults
         self.coachLogFile = coachLogFile
         sharingRegistry = SharingRegistry(showInScreenshots: defaults.bool(forKey: Keys.showInScreenshots))
-        CoachLog.install(coachLogFile)
+        CoachLog.install(coachLogSink ?? coachLogFile)
         self.keychain = keychain
         typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
@@ -348,6 +350,7 @@ final class CoachController: NSObject {
     /// The app is quitting (Quit in the menu, Cmd-Q): a running session ends with reason `quit`.
     func willQuit() {
         service?.quit()
+        CoachLog.flush()
     }
 
     func joinHint(endsAt: Date?) {
