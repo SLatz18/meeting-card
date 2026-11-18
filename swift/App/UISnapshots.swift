@@ -276,6 +276,8 @@ enum UISnapshots {
         ("card-cue-linger-mic-off", shotState(.micOff, noZoomMute, nil, .card, lingering: roseNudge), nil),
         // Increase Contrast: the lingering glyph in the high-contrast held role.
         ("card-cue-linger-increased-contrast", shotState(.listening, noZoomMute, nil, .card, lingering: amberNudge, ic: true), nil),
+        // Paused with a cue still lingering from before: the cue is gone (a plain paused card).
+        ("card-cue-paused", shotState(.paused, noZoomMute, nil, .card, lingering: roseNudge), nil),
         ("card-increased-contrast", shotState(.listening, noZoomMute, amberNudge, .card, ic: true), nil),
         // Save transcripts on (#13c): the saving badge on the status line, and still there under a nudge.
         ("card-saving", shotState(.listening, noZoomMute, nil, .card, saving: true), nil),
@@ -302,6 +304,8 @@ enum UISnapshots {
         ("pill-cue-expired", shotState(.listening, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.expand),
         // Increase Contrast: the cue's bar at full strength, the glyph in the high-contrast tone.
         ("pill-nudge-increased-contrast", shotState(.listening, noZoomMute, roseNudge, .pill, ic: true), roseNudge.words),
+        // Muted in Zoom with a cue from before: no cue glyph, edge or tooltip (Expand coach).
+        ("pill-cue-muted", shotState(.muted, mutedMute, nil, .pill, lingering: roseNudge), CoachCardCopy.Tooltip.expand),
     ]
 
     /// Every PNG `coachCardShots` writes, per appearance (the CI gate checks for them).

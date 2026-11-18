@@ -456,6 +456,56 @@ final class CoachCardTests: XCTestCase {
         // That each is a real SF Symbol on the runner's macOS: CueDisplaySnapshotTests.testGlyphVocabulary.
     }
 
+    /// Pause, Zoom's mute, the coach's own Mute and the call's end drop the cue, during its words or its
+    /// linger: nothing is left to redraw (no timer), and it doesn't come back after Resume or unmute.
+    func testPauseMuteAndCallEndDropTheCue() {
+        let a = CoachNudge(kind: .missedQuestion, tone: .amber)
+        let leaving: [(CoachCardState.Status?, String)] = [(.paused, "Pause"), (.muted, "muted in Zoom"), (.micOff, "the coach's own Mute"),
+                                                           (.idle, "no session"), (nil, "the call ended: the card is gone")]
+        for (status, why) in leaving {
+            for at in [12.0, 16.0] {
+                var h = CoachNudgeHold()
+                h.show(a, now: 10)
+                XCTAssertFalse(h.follow(.listening), "listening keeps it")
+                XCTAssertNotNil(at < 14.5 ? h.active(now: at) : h.lingering(now: at), "\(why) at \(at): on show before")
+                XCTAssertTrue(h.follow(status), "\(why) at \(at): dropped")
+                XCTAssertNil(h.active(now: at))
+                XCTAssertNil(h.lingering(now: at))
+                XCTAssertNil(h.nextChange(now: at), "\(why): no step left to time")
+                XCTAssertFalse(h.follow(.listening))
+                for later in [at + 1, 20, 29] {
+                    XCTAssertNil(h.active(now: later), "\(why): never back after Resume or unmute")
+                    XCTAssertNil(h.lingering(now: later), "\(why): no lingering glyph after Resume or unmute")
+                }
+                XCTAssertFalse(h.follow(status), "nothing left to drop")
+            }
+        }
+    }
+
+    /// A state that isn't listening carries no cue: no words, no lingering glyph, no "Last cue" label,
+    /// no cue tooltip or edge on the pill, the status's own glyph.
+    func testOnlyAListeningStateCarriesACue() {
+        let s = Theme.CoachCard.Symbols.self
+        let r = CoachNudge(kind: .interrupt, tone: .rose), a = CoachNudge(kind: .monologue, tone: .amber)
+        for status in CoachCardState.Status.allCases where status != .listening {
+            for mode in [CoachCardState.Mode.card, .pill] {
+                for (nudge, lingering) in [(r, nil), (nil, a), (r, a)] as [(CoachNudge?, CoachNudge?)] {
+                    let st = CoachCardState(status: status, mute: Self.live, coachMicMuted: status == .micOff, nudge: nudge, lingering: lingering, mode: mode)
+                    XCTAssertNil(st.nudge, "\(status) \(mode)")
+                    XCTAssertNil(st.lingering, "\(status) \(mode)")
+                    XCTAssertNil(st.cue)
+                    XCTAssertNil(st.tone, "no colored edge or tint")
+                    XCTAssertEqual(st.pillTooltip, st.sizeControl.tooltip, "the size control's tooltip, not a cue's words")
+                    XCTAssertEqual(st.statusSymbol, status == .micOff ? s.micOff : s.status)
+                    XCTAssertEqual(CoachSurface.surface(for: st, transitioning: false), mode == .card ? .card : .pill)
+                }
+            }
+        }
+        let listening = CoachCardState(status: .listening, mute: Self.live, lingering: a, mode: .pill)
+        XCTAssertEqual(listening.lingering, a)
+        XCTAssertEqual(listening.pillTooltip, a.words)
+    }
+
     /// The lingering cue's VoiceOver label (draft copy until a writer approves it).
     func testLingerCopy() {
         XCTAssertTrue(CoachCardCopy.Linger.isDraft)

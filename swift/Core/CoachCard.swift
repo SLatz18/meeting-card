@@ -168,6 +168,16 @@ public struct CoachNudgeHold: Equatable, Sendable {
         return a < hold ? hold - a : linger - a
     }
 
+    /// A cue belongs to the listening it came in. Once the coach isn't listening (paused, muted in the
+    /// call app, the coach's own Mute, no session yet, or the card gone: nil) it's dropped, so it never
+    /// comes back as words or a lingering glyph after Resume or unmute. True if one was dropped.
+    @discardableResult
+    public mutating func follow(_ status: CoachCardState.Status?) -> Bool {
+        guard status != .listening, nudge != nil else { return false }
+        clear()
+        return true
+    }
+
     /// Drops a cue whose linger is over; true if one was dropped.
     @discardableResult
     public mutating func expire(now: TimeInterval) -> Bool {
@@ -238,8 +248,10 @@ public struct CoachCardState: Equatable, Sendable {
     public var micMuted: Bool
     /// The coach's own Mute is on (it stays on through Pause and Zoom's mute).
     public var coachMicMuted: Bool
+    /// A cue's words (only while listening).
     public var nudge: CoachNudge?
-    /// A cue after its words, whose glyph lingers in the status glyph (never set with `nudge`).
+    /// A cue after its words, whose glyph lingers in the status glyph (never set with `nudge`, and only
+    /// while listening).
     public var lingering: CoachNudge?
     public var mode: Mode
     public var increasedContrast: Bool
@@ -258,8 +270,9 @@ public struct CoachCardState: Equatable, Sendable {
         self.mute = mute
         self.micMuted = micMuted
         self.coachMicMuted = coachMicMuted
-        self.nudge = nudge
-        self.lingering = nudge == nil ? lingering : nil
+        let listening = status == .listening
+        self.nudge = listening ? nudge : nil
+        self.lingering = listening && nudge == nil ? lingering : nil
         self.mode = mode
         self.increasedContrast = increasedContrast
         self.savingBadge = savingBadge

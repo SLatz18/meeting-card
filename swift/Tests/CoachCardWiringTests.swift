@@ -143,6 +143,14 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(controller.contains("guard let wait = nudges.nextChange(now: ProcessInfo.processInfo.systemUptime) else { return }"))
         XCTAssertTrue(controller.contains("Timer(timeInterval: wait, repeats: false)"))
         XCTAssertTrue(controller.contains("nudge: nudges.active(now: now), lingering: nudges.lingering(now: now)"))
+        // A cue from before a pause, a mute or the call's end is dropped before the state is built, and
+        // its timer stops; hiding the card does both too.
+        let state = try XCTUnwrap(controller.components(separatedBy: "func coachCardState() -> CoachCardState? {").dropFirst().first?
+            .components(separatedBy: "\n    }").first)
+        let follow = try XCTUnwrap(state.range(of: "if nudges.follow(status) { stopNudgeTimer() }"))
+        let build = try XCTUnwrap(state.range(of: "nudge: nudges.active(now: now)"))
+        XCTAssertLessThan(follow.lowerBound, build.lowerBound, "dropped before the state reads it")
+        XCTAssertTrue(controller.contains("guard let s else {\n            nudges.clear()\n            stopNudgeTimer()"), "the card hides: cue and timer go")
         XCTAssertTrue(try read("App/CoachCardPanel.swift").contains("notification: .announcementRequested"))
     }
 
@@ -257,9 +265,10 @@ final class CoachCardWiringTests: XCTestCase {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
         let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
-        XCTAssertEqual(found.count, 32, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), the call-mode tip and the no-mic notice, the fullest button row over each tip row, and the cue's linger and expiry (with mic off and Increase Contrast)")
+        XCTAssertEqual(found.count, 34, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), the call-mode tip and the no-mic notice, the fullest button row over each tip row, and the cue's linger and expiry (with mic off and Increase Contrast)")
         for name in ["card-cue-linger-amber", "card-cue-linger-rose", "card-cue-expired", "card-cue-linger-mic-off", "card-cue-linger-increased-contrast",
-                     "pill-cue-linger-amber", "pill-cue-linger-rose", "pill-cue-expired", "pill-nudge-increased-contrast"] {
+                     "pill-cue-linger-amber", "pill-cue-linger-rose", "pill-cue-expired", "pill-nudge-increased-contrast",
+                     "card-cue-paused", "pill-cue-muted"] {
             XCTAssertTrue(found.contains(name), "\(name) has a shot")
         }
         XCTAssertTrue(found.contains("card-call-mode-tip"), "the call-mode tip card has a shot")

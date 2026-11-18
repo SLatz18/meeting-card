@@ -378,8 +378,7 @@ final class CoachController: NSObject {
 
     /// Redraws when a cue's words give way to its lingering glyph, and again when the glyph clears.
     private func scheduleNudgeStep() {
-        nudgeTimer?.invalidate()
-        nudgeTimer = nil
+        stopNudgeTimer()
         guard let wait = nudges.nextChange(now: ProcessInfo.processInfo.systemUptime) else { return }
         let t = Timer(timeInterval: wait, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -389,6 +388,11 @@ final class CoachController: NSObject {
         }
         RunLoop.main.add(t, forMode: .common)
         nudgeTimer = t
+    }
+
+    private func stopNudgeTimer() {
+        nudgeTimer?.invalidate()
+        nudgeTimer = nil
     }
 
     func showSettings() {
@@ -419,7 +423,9 @@ final class CoachController: NSObject {
                                callMode: listening && ((service?.mic as? MicCapture)?.headphonesInCallMode() ?? false))
         noMicTracker.update(call: service?.session.session?.startedAt,
                             callMode: listening && ((service?.mic as? MicCapture)?.noMicStatus ?? false))
-        guard enabled, let status = CoachCardState.Status(indicator) else { return nil }
+        let status = enabled ? CoachCardState.Status(indicator) : nil
+        if nudges.follow(status) { stopNudgeTimer() }
+        guard let status else { return nil }
         let now = ProcessInfo.processInfo.systemUptime
         nudges.expire(now: now)
         var state = CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
@@ -439,10 +445,11 @@ final class CoachController: NSObject {
 
     private func updateCoachCard(_ s: CoachCardState?) {
         guard let s else {
+            nudges.clear()
+            stopNudgeTimer()
             guard let c = coachCard, c.isShown else { return }
             let card = c.hide()
             minimized = false
-            nudges.clear()
             if let card, visibleCards().contains(where: { $0 === card }) { card.panel.orderFrontRegardless() }
             return
         }
