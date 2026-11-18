@@ -21,6 +21,25 @@ final class FakeMic: MicSource {
     func stop() {
         stopped += 1
         handler = nil
+        isMuted = false
+    }
+
+    /// Every `setMuted` call, in order.
+    var muted: [Bool] = []
+    private(set) var isMuted = false
+    /// Started and not muted: the device would be open.
+    var isOpen: Bool { handler != nil && !isMuted }
+
+    /// `failNext` also fails the next unmute's reopen (the device stays closed).
+    func setMuted(_ muted: Bool) -> Bool {
+        self.muted.append(muted)
+        isMuted = muted
+        if !muted && failNext {
+            failNext = false
+            isMuted = true
+            return false
+        }
+        return true
     }
 }
 

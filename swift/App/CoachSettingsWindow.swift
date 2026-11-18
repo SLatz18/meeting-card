@@ -1,5 +1,6 @@
 import AppKit
 import ListenMoreCore
+import ListenMoreMac
 import MeetingCardCore
 
 /// Call coach Settings: a standard titled window with grouped rows (the approved mock). Opened by
@@ -16,6 +17,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let startButton = NSButton(title: CoachCopy.startNow, target: nil, action: nil)
     private let toggleError = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let gptNote = CoachSettingsWindow.text(CoachCopy.gptOffNoKey, font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let noMicNote = CoachSettingsWindow.text(CoachCardCopy.NoMicNotice.settingsNote, font: Theme.Settings.helperFont,
+                                                     color: CoachSettingsWindow.color(.secondary))
     private let permissionNote = CoachSettingsWindow.text(CoachCopy.permissionDenied, font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let keyField = NSSecureTextField()
     private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
@@ -388,8 +391,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         startButton.controlSize = .small
         let toggleRow = Self.row(Self.text(CoachCopy.toggle, font: Theme.Settings.rowFont), toggle)
         let help = Self.text(CoachCopy.toggleHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
-        let g1 = Self.group([toggleRow, help, gptNote, toggleError, permissionNote, startButton])
-        for v in [toggleRow, help, gptNote, toggleError, permissionNote] { pin(v, in: g1) }
+        let g1 = Self.group([toggleRow, help, noMicNote, gptNote, toggleError, permissionNote, startButton])
+        for v in [toggleRow, help, noMicNote, gptNote, toggleError, permissionNote] { pin(v, in: g1) }
 
         callControlsSwitch.target = self
         callControlsSwitch.action = #selector(callControlsToggled(_:))
@@ -596,6 +599,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         permissionNote.isHidden = !(coach.enabled && coach.service?.captureProblem == true)
         anyAppBox.state = coach.anyApp ? .on : .off
         gptNote.isHidden = !(coach.enabled && !coach.keyStored)
+        noMicNote.isHidden = !(window.isVisible && NoMicNotice.showsSettingsNote(builtInMicPresent: CoreAudioRoutes().snapshot().builtInInput != nil))
         toggleError.stringValue = coach.enabled ? toggleMessage(coach) ?? "" : ""
         toggleError.isHidden = toggleError.stringValue.isEmpty
         keyStatus.isHidden = keyStatus.stringValue.isEmpty

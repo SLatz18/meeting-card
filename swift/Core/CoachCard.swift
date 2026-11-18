@@ -37,6 +37,36 @@ public enum CoachCardCopy {
     public enum Captions {
         public static let empty = "Captions will show here once someone talks."
     }
+
+    // MARK: call-mode tip (approved copy)
+
+    /// The tip under the card when the user's headphones may be in call mode. Generic on purpose: it
+    /// never names the call app or claims to know its settings.
+    public enum CallModeTip {
+        /// False once the strings below are approved.
+        public static let isDraft = false
+        public static let title = "Headphones sound quiet?"
+        public static let body = "Your headphones may be in call mode, which lowers sound quality and volume. To keep full volume, choose your Mac's mic in your call app."
+        public static let dismiss = "Got it"
+        /// What VoiceOver reads for the tip.
+        public static let accessibilityLabel = "Tip: your headphones may be in call mode, which lowers volume. Choose your Mac's mic in your call app to keep full volume."
+    }
+
+    // MARK: DRAFT: no-mic notice (not yet copy-reviewed; edit before release)
+
+    /// The notice under the card (in the tip's row) when Bluetooth headphones are used on a Mac with no
+    /// built-in mic, so mic-based cues are off. Generic on purpose: it never names the call app.
+    public enum NoMicNotice {
+        /// False once the strings below are approved.
+        public static let isDraft = true
+        public static let title = "Mic cues are off"
+        public static let body = "This Mac has no built-in mic, and Call coach doesn't use headset mics, so cues about how you speak are off with Bluetooth headphones."
+        public static let dismiss = "Got it"
+        /// What VoiceOver reads for the notice.
+        public static let accessibilityLabel = "Mic cues are off. This Mac has no built-in mic, and Call coach doesn't use headset mics, so cues about how you speak are off with Bluetooth headphones."
+        /// The line in Settings, on a Mac without a built-in mic.
+        public static let settingsNote = "On a Mac without a built-in mic, Call coach can't hear you while you use Bluetooth headphones, so cues about how you speak are off. Wired headphones or speakers keep them."
+    }
 }
 
 // MARK: nudges
@@ -186,9 +216,14 @@ public struct CoachCardState: Equatable, Sendable {
     /// The saving badge's label on the card's status line while a transcript is being written
     /// (Save transcripts on, #13c); nil shows nothing.
     public var savingBadge: String?
+    /// The full card shows the call-mode tip row (headphones in call mode); the pill never does.
+    public var callModeTip: Bool
+    /// The full card shows the no-mic notice in the same row (mic cues are off); it wins over the call-mode tip.
+    public var noMicNotice: Bool
 
     public init(status: Status, mute: MuteControlPresentation, micMuted: Bool = false, coachMicMuted: Bool = false,
-                nudge: CoachNudge? = nil, mode: Mode = .card, increasedContrast: Bool = false, savingBadge: String? = nil) {
+                nudge: CoachNudge? = nil, mode: Mode = .card, increasedContrast: Bool = false, savingBadge: String? = nil,
+                callModeTip: Bool = false, noMicNotice: Bool = false) {
         self.status = status
         self.mute = mute
         self.micMuted = micMuted
@@ -197,7 +232,12 @@ public struct CoachCardState: Equatable, Sendable {
         self.mode = mode
         self.increasedContrast = increasedContrast
         self.savingBadge = savingBadge
+        self.callModeTip = callModeTip
+        self.noMicNotice = noMicNotice
     }
+
+    /// The card's extra row shows: the no-mic notice or the call-mode tip.
+    public var tipRow: Bool { callModeTip || noMicNotice }
 
     /// The coach glyph takes the live tint only while listening.
     public var live: Bool { status == .listening }

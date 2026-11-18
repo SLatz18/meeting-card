@@ -180,7 +180,7 @@ final class PrivacyGuardTests: XCTestCase {
 
     func testPublicLogArgumentsAreNotContent() throws {
         let allowed = ["stage", "count", "active", "kind", "code", "isVoiceProcessingEnabled", "reason", "paused",
-                       "frames", "cues", "status", "enabled", "indicator"]
+                       "frames", "cues", "status", "enabled", "indicator", "ducking", "route", "micSource", "voiceProcessing"]
         let re = try NSRegularExpression(pattern: #"\\\(([^)]*)\)?[^)]*, privacy: \.public\)"#)
         for (name, text) in try allSources() {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {

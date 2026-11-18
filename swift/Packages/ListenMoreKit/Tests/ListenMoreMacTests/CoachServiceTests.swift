@@ -18,6 +18,7 @@ final class CoachServiceTests: XCTestCase {
         var starts = 0
         func start(sampleRate: Int, handler: @escaping @Sendable ([Float]) -> Void) throws { running = true; starts += 1 }
         func stop() { running = false }
+        func setMuted(_ muted: Bool) -> Bool { true }
     }
 
     final class FakeCall: CallSource, @unchecked Sendable {

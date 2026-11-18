@@ -79,6 +79,10 @@ final class CoachController: NSObject {
     private(set) var coachCard: CoachCardPresenter?
     private var nudges = CoachNudgeHold()
     private var nudgeTimer: Timer?
+    /// Shows the headphones-in-call-mode tip on the card at most once per call.
+    private var callModeTracker = CallModeHintTracker()
+    /// Shows the mic-cues-off notice (Bluetooth headphones, no built-in mic) at most once per call.
+    private var noMicTracker = OncePerCallNotice()
     /// The coach card is the pill (for the rest of this showing).
     private(set) var minimized = false
 
@@ -244,6 +248,9 @@ final class CoachController: NSObject {
                                       judgeProvider: { Self.storedJudgeProvider(defaults) })
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
                              allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine)
+        #if MEETINGCARD_TEST_ID
+        CoachDebugReadout.shared.attach(mic: s.mic as? MicCapture, coach: self)
+        #endif
         s.fallbackScreen = { [weak self] in self?.cardScreen() }
         s.hostWindowNumber = { [weak self] in self?.hostWindowNumber() }
         s.onChange = { [weak self] in self?.refresh() }
@@ -395,14 +402,27 @@ final class CoachController: NSObject {
 
     /// What the coach card shows now, or nil while the coach isn't on for a call.
     func coachCardState() -> CoachCardState? {
+        let listening = enabled && indicator == .listening
+        callModeTracker.update(call: service?.session.session?.startedAt,
+                               callMode: listening && ((service?.mic as? MicCapture)?.headphonesInCallMode() ?? false))
+        noMicTracker.update(call: service?.session.session?.startedAt,
+                            callMode: listening && ((service?.mic as? MicCapture)?.noMicStatus ?? false))
         guard enabled, let status = CoachCardState.Status(indicator) else { return nil }
         let now = ProcessInfo.processInfo.systemUptime
         nudges.expire(now: now)
-        return CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
-                              nudge: nudges.active(now: now),
-                              mode: minimized ? .pill : .card,
-                              increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
-                              savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
+        var state = CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
+                                   nudge: nudges.active(now: now),
+                                   mode: minimized ? .pill : .card,
+                                   increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
+                                   savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
+        state.callModeTip = callModeTracker.visible
+        state.noMicNotice = noMicTracker.visible
+        return state
+    }
+
+    func dismissCallModeTip() {
+        if noMicTracker.visible { noMicTracker.dismiss() } else { callModeTracker.dismiss() }
+        refresh()
     }
 
     private func updateCoachCard(_ s: CoachCardState?) {
@@ -425,7 +445,8 @@ final class CoachController: NSObject {
                                      mute: { [weak self] in self?.toggleMute() },
                                      muteMic: { [weak self] in self?.toggleMicMuted() },
                                      pause: { [weak self] in self?.pauseOrResume() },
-                                     resize: { [weak self] in self?.toggleMinimized() })
+                                     resize: { [weak self] in self?.toggleMinimized() },
+                                     dismissCallModeTip: { [weak self] in self?.dismissCallModeTip() })
         p.callScreen = { [weak self] in self?.service?.glowScreen }
         return p
     }
@@ -458,7 +479,16 @@ final class CoachController: NSObject {
     func menu(for items: [CoachMenuItem]) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for entry in items { menu.addItem(menuItem(entry)) }
+        #if MEETINGCARD_TEST_ID
+        menu.delegate = CoachDebugReadout.shared
+        #endif
+        for entry in items {
+            menu.addItem(menuItem(entry))
+            #if MEETINGCARD_TEST_ID
+            if entry == .settings { menu.addItem(CoachDebugReadout.shared.menuItem()) }
+            if case .status = entry { menu.addItem(CoachDebugReadout.shared.statusMenuItem()) }
+            #endif
+        }
         addTranscriptItems(to: menu)
         menu.addItem(feedbackMenuItem())
         return menu

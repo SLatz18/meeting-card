@@ -11,9 +11,13 @@ Swift-native inside the app: no helper process, no interpreter.
   streaming VAD, local rules (interrupt, talk-over, monologue, talk share, prosody), text rules,
   cue policy and cooldowns, the GPT layer (rolling in-memory transcript, judge, budget cap), the
   judge providers (`JudgeProvider`: the GPT judge, the default, or `TypeSafeJudge` for TypeSafe System One), the
-  engine (`LocalCoachEngine`), the Core Audio trigger (`CoachTrigger`, `AudioActivitySignal`) and
-  `CoachSession`, which reaches capture, rendering and the key store only through protocols.
-- `ListenMoreMac` (macOS only): mic capture (AVAudioEngine with voice processing), call audio
+  engine (`LocalCoachEngine`), the Core Audio trigger (`CoachTrigger`, `AudioActivitySignal`), the mic
+  policy (`MicPlan`, `MicRestartPolicy`, `RoutedMic`) and `CoachSession`, which reaches capture,
+  rendering and the key store only through protocols.
+- `ListenMoreMac` (macOS only): mic capture (AVAudioEngine, routed by `MicPlan`: no voice processing
+  on headphones, the built-in mic with Bluetooth output, voice processing with other-audio ducking
+  at its minimum by `MicProcessing` on speakers; reopened on route changes by `RoutedMic` and
+  `CoreAudioRoutes`), call audio
   (ScreenCaptureKit audio-only, Chromium helper fallback, Core Audio process tap), the Core Audio
   running-state provider, URLSession transports (ephemeral, no cache or cookies), Keychain store,
   glow overlay and `CoachService`. The host injects the glow style and the Keychain service name.
@@ -44,7 +48,9 @@ caption UI: the host renders the lines (MeetingCard: `CaptionFeedView` in its ca
 
 A host can pass an optional `CallStateProvider` (to `CoachService`, `CoachSession` or `CoachMonitor`)
 reporting each call app's state as started, ended or muted. An ended call stops the session after
-`ended_stop_after_s` (3 s) instead of waiting for Core Audio's 30 s stop; a muted app holds the
+`ended_stop_after_s` (3 s) instead of waiting for Core Audio's 30 s stop. The coach releases the
+mic on the first poll that sees the ended report, and if the report flips back within those 3 s
+only the mic reopens. A muted app holds the
 session's capture (the pause path) until unmute; without a provider, Core Audio alone decides.
 `CoachSession.setMicMuted` (`CoachService.setMicMuted` / `micMuted`) is the coach's own Mute: it stops the
 user's mic engine only, so call audio keeps being captured, captioned as Them and coached, and the
