@@ -1,0 +1,41 @@
+import Foundation
+
+/// Settings words for saved transcripts as Obsidian notes. Every string is a PLACEHOLDER pending copy
+/// review (listed for the writer in the PR); the note's own words are the Kit's `NoteWording`.
+public enum TranscriptCopy {
+    public static let saveTo = "Save transcripts to"
+    /// %@: the vault folder's name.
+    public static let inVault = "In the Obsidian vault \u{201C}%@\u{201D}."
+    public static let notInVault = "Not in an Obsidian vault: notes are plain Markdown files."
+    public static let fileNameLabel = "File name"
+    public static let fileNameHelp = "Use {date}, {time}, {title} and {app}."
+    public static let tagsLabel = "Tags"
+    public static let tagsHelp = "Separate tags with commas."
+    public static let dailyNoteToggle = "Link from the daily note"
+    public static let dailyNoteHelp = "Adds one line to the day\u{2019}s note. Nothing already in it is changed."
+    public static let dailyNotePathLabel = "Daily note path"
+    public static let dailyNoteStyleLabel = "Show the call as"
+    public static let dailyNoteLink = "Link"
+    public static let dailyNoteEmbed = "Embed"
+    public static let retentionLabel = "Keep transcripts"
+    public static let retentionForever = "Forever"
+    public static let retentionYear = "1 year"
+    /// %d: a number of days.
+    public static let retentionDays = "%d days"
+    public static let retentionHelp = "Older notes saved by MeetingCard are removed after each call and at launch. Notes you\u{2019}ve edited since are kept."
+    public static let deleteThisCall = "Delete This Call\u{2019}s Transcript"
+    public static let deleteThisCallMenu = "Delete This Call\u{2019}s Transcript\u{2026}"
+    public static let deleteConfirmBody = "The note is removed from the folder. A link in the daily note stays. This can\u{2019}t be undone."
+
+    public static func vaultStatus(_ vaultName: String?) -> String {
+        vaultName.map { String(format: inVault, $0) } ?? notInVault
+    }
+
+    public static func retention(_ days: Int?) -> String {
+        switch days {
+        case nil: retentionForever
+        case 365?: retentionYear
+        case let d?: String(format: retentionDays, d)
+        }
+    }
+}
