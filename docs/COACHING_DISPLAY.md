@@ -31,8 +31,8 @@ status glyph after the words go, put the glyph state on the pill, and leave capt
 ## 1. Cue inventory (from the code)
 
 ListenMoreCore defines eight cue types (`CueType` in `ListenMoreCore/CuePolicy.swift`; the card mirrors them as
-`CoachNudge.Kind`); seven can be raised today (`self_pivot` is defined and displayable, but nothing raises it
-yet). Thresholds are the built-in config (`ListenMoreCore/DefaultConfig.swift`).
+`CoachNudge.Kind`); all eight can be raised (`self_pivot`, the ask-back cue, only by its own judge). Thresholds
+are the built-in config (`ListenMoreCore/DefaultConfig.swift`).
 
 | Cue | Source and trigger | Tone | Priority | Urgency | Mid-sentence? | Card words (shipped) |
 |---|---|---|---|---|---|---|
@@ -42,7 +42,7 @@ yet). Thresholds are the built-in config (`ListenMoreCore/DefaultConfig.swift`).
 | `aggressive` | Transcript rule (`TextRules.heat`, needs a key): absolutes, frustration words, profanity, contradiction openers and repeated clauses, scored over 15 s windows; vetoed by an apology or a personal topic; once per user turn; never in the first 5 minutes of a call; lexicon-only heat also needs a loudness or speaking-rate rise. The TypeSafe judge can also decide it. | rose | 4 | next sentence | no: soften the next sentence | Ease the tone |
 | `monologue` | Local audio (`LocalLayer.monologue`): the user's run passes 60 s (soft) and 90 s (strong); soft earlier (from 30 s) when the run is 2.5× the user's median run; both doubled right after a how/why question; none during the user's slot in a round of updates. | amber | 5 | now | yes: wrap up | Pause and hand over |
 | `not_listening` | GPT judge (or TypeSafe) on the user's reply right after the other side made a point of at least 4 words; confidence at least 0.85; skipped during a run of 30 s or more. **Off by default in MeetingCard** (`CoachController.configOverrides` disables it). | amber | 6 | next turn | no | Respond to their point |
-| `self_pivot` | Not raised yet: the type, its glyph (`person.fill.questionmark`) and its draft words are in place, and **off in MeetingCard** (`CoachController.configOverrides` disables it). It will follow the end of the other side's turn, so its shelf life is 10 s from the turn's end; the caption anchor is the user's own line. | amber | 7 | next turn | no | Ask how they feel (draft) |
+| `self_pivot` | The ask-back cue: raised by the self-pivot judge after the user answers a personal share with their own story and asks nothing back. On in MeetingCard behind Settings → Remind me to ask back and a one-time notice. It follows the end of the user's reply, so its shelf life is 10 s from there; the caption anchor is the user's own line. | amber | 7 | next turn | no | Ask about them |
 | `talk_share` | Local audio (`LocalLayer.talkShare`): the user's share of speech over a rolling 10 min passes 70% (1:1) or 65% (group), once at least 5 min of speech has been heard; re-arms below the limit minus 5 points. | amber | 8 | trend | no | Leave room for others |
 
 How cues reach the card (`CuePolicy`, applied in the engine's pipeline and again in `CoachSession`): one cue at a

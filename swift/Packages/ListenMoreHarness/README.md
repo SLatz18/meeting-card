@@ -111,6 +111,20 @@ audio, where You's onsets fell, whether Them were talking, and Them's longest ra
 | `no-key` | No key: local cues only (the `interrupt` still fires), captions unavailable, no transcription or judge traffic (X3). |
 | `cost-cap` | A tiny `gpt.budget_usd_per_call`: transcription stops at the cap, captions say so, the local `interrupt` still fires (T5). |
 
+The self-pivot (ask-back) cue has four scripts of its own, outside the nine (`Scenarios.selfPivot`,
+`--scenario self-pivot-group` and so on): a group-call pivot (another voice reacts first), an
+acknowledgment followed by the user's own story, and two look-alikes (moved on to the standup, asked
+back). Every scenario checks zero self-pivot candidates, judge calls and cues except on the line a
+script declares, and that every judge request sent `store: false`; the cost log's `judge` entry
+splits `self_pivot_calls` / `self_pivot_usd` from `other_calls` / `other_usd`.
+
+**Self-pivot precision run** (`lm-pivot-eval`, `swift/scripts/self-pivot-precision.sh`): a positive
+and a negative set of synthetic exchanges through the real gate and self-pivot lane with
+MeetingCard's config. It reports false self_pivot cues on the negatives (bar: 0), recall against the
+gate's shadow recall, store false on every request, and no case text in any output or log line.
+`--dry-run` uses the offline stub (CI runs only that, in `PivotEvalTests`); the paid run needs
+`OPENAI_API_KEY` in the environment and `LISTEN_MORE_PAID_RUN=1`, and is run by hand only.
+
 Every scenario also checks You/Them attribution, the caption feed (at most three lines labelled You
 and Them, cleared when the call ends: X1), stream routing (no loud audio on the wrong transcriber),
 persistence (keep-nothing, or exactly one opt-in transcript deleted at teardown), the disk audit, and
