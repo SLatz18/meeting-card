@@ -98,6 +98,8 @@ public struct RunServices: @unchecked Sendable {
     /// Offline lockstep: how long the runner waits for the engine or the caption feed to catch up with a
     /// frame before it counts a barrier timeout. Tests shorten it.
     public var barrierTimeoutS = 10.0
+    /// Test hook: the transcript store under the counting wrapper (default: the file store).
+    public var transcriptStore: TranscriptStore?
 }
 
 public struct CaptionRecord: Sendable {
@@ -186,6 +188,8 @@ public struct RunRecord: @unchecked Sendable {
     /// The recorder's last file before teardown (nil when nothing was ever written).
     public var recorderLastURL: URL?
     public var barrierTimeouts = 0
+    /// Of those, the waits for a final transcript to reach the caption feed.
+    public var finalsBarrierTimeouts = 0
     public var problems: [String] = []
     /// The same audio replayed through `LocalLayer` afterwards (diagnostics for local cues).
     public var shadow: ShadowTrace?
@@ -199,6 +203,8 @@ public struct RunRecord: @unchecked Sendable {
     public var diskViolations: [String] = []
     /// Files outside the run directory that hold the scenario's script text (a transcript anywhere else).
     public var textLeaks: [String] = []
+    /// Everything in the scenario's run directory (paths relative to it) when the scenario ended, before the wipe.
+    public var runDirEntries: [String] = []
     public var workDirWiped = false
 
     init(scenario: Scenario, mode: Mode, timeline: Timeline, config: ListenMoreConfig) {
@@ -242,7 +248,7 @@ public final class ScenarioRun: CoachSessionDelegate {
     let call = HarnessCall()
     let audioState = HarnessAudioState()
     let renderer = HarnessRenderer()
-    let store = CountingTranscriptStore()
+    let store: CountingTranscriptStore
     let finalsDelivered = AsyncCounter()
     var origin = 0.0
     var record: RunRecord!
@@ -257,6 +263,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         self.workDir = workDir
         transcriptsDir = workDir.appendingPathComponent("transcripts", isDirectory: true)
         clock = services.clock
+        store = CountingTranscriptStore(inner: services.transcriptStore ?? FileTranscriptStore())
     }
 
     var now: Double { clock.now() - origin }
@@ -340,6 +347,7 @@ public final class ScenarioRun: CoachSessionDelegate {
                 if let server = services.offlineServer, session.gptStopped == nil, capturing {
                     if !(await finalsDelivered.wait(atLeast: server.finalsSent.current - droppedFinals, timeout: services.barrierTimeoutS)) {
                         record.barrierTimeouts += 1
+                        record.finalsBarrierTimeouts += 1
                         droppedFinals = server.finalsSent.current - finalsDelivered.current
                     }
                 }

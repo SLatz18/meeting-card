@@ -26,6 +26,11 @@ public struct HarnessOptions {
     public var ignoredControls: Set<ControlKind>
     /// Test hook: the offline judge answers not_listening to requests whose transcript has this text.
     public var offlineNotListeningOn: String?
+    /// Test hook: the transcript store under the harness's counting wrapper (default: the file store).
+    public var transcriptStore: TranscriptStore?
+    /// Test hook: called with the scenario and its run directory when the scenario ends, before the
+    /// directory is inspected and wiped (simulates something writing there).
+    public var afterRun: ((Scenario, URL) -> Void)?
 
     public init(mode: Mode = .offline, scenarios: [Scenario] = Scenarios.all, outputDirectory: URL,
                 environment: [String: String] = ProcessInfo.processInfo.environment, liveBackend: LiveBackend? = nil,
@@ -102,16 +107,19 @@ public enum Harness {
         var clipCache: [String: [Float]] = [:]
         for scenario in o.scenarios {
             log("\(scenario.name): running (\(o.mode.rawValue))")
-            var scenarioOverrides = runOverrides
-            if let budget = scenario.budgetUsd { scenarioOverrides = deepMerge(scenarioOverrides, ["gpt": ["budget_usd_per_call": budget]]) }
-            let config = scenarioOverrides.isEmpty ? base : try ListenMoreConfig.load(overrides: scenarioOverrides)
-            let engineConfig = o.engineOverrides.isEmpty ? config
-                : try ListenMoreConfig.load(overrides: deepMerge(scenarioOverrides, o.engineOverrides))
-            let dir = try RunDirectory.create()
-            let audit = DiskAudit(roots: DiskAudit.defaultRoots() + [o.outputDirectory], exclude: dir.url)
+            var scenarioDir: RunDirectory?
+            var scenarioAudit: DiskAudit?
             var record: RunRecord
             var meteredHTTP: MeteredHTTP?
             do {
+                var scenarioOverrides = runOverrides
+                if let budget = scenario.budgetUsd { scenarioOverrides = deepMerge(scenarioOverrides, ["gpt": ["budget_usd_per_call": budget]]) }
+                let config = scenarioOverrides.isEmpty ? base : try ListenMoreConfig.load(overrides: scenarioOverrides)
+                let engineConfig = o.engineOverrides.isEmpty ? config
+                    : try ListenMoreConfig.load(overrides: deepMerge(scenarioOverrides, o.engineOverrides))
+                let created = try RunDirectory.create()
+                scenarioDir = created
+                scenarioAudit = DiskAudit(roots: DiskAudit.defaultRoots() + [o.outputDirectory], exclude: created.url)
                 var services: RunServices
                 switch o.mode {
                 case .offline:
@@ -125,14 +133,18 @@ public enum Harness {
                 services.ignoredControls = o.ignoredControls
                 services.judgeOn = o.judgeOn
                 services.segmentedSpeech = o.mode == .live || o.offlineVoices == .espeak
-                record = try await ScenarioRun(scenario: scenario, services: services, workDir: dir.url).run()
+                services.transcriptStore = o.transcriptStore
+                record = try await ScenarioRun(scenario: scenario, services: services, workDir: created.url).run()
+                o.afterRun?(scenario, created.url)
+                record.runDirEntries = created.entries()
             } catch {
-                dir.wipe()
+                scenarioDir?.wipe()
                 // What was spent and scored so far is still written before the error goes up.
                 try? writeOutputs(writer, results: results, cost: cost, options: o, base: base,
                                   failure: "\(scenario.name) stopped: \(writer.scrub("\(error)", context: "error"))")
                 throw error
             }
+            guard let dir = scenarioDir, let audit = scenarioAudit else { throw HarnessError.script("run directory was not created") }
             record.workDirWiped = dir.wipe()
             record.diskViolations = audit.violations()
             record.textLeaks = audit.filesContaining(scenario.lines.flatMap { [$0.text, $0.words.prefix(4).joined(separator: " ")] })

@@ -5,9 +5,9 @@ import ListenMoreCore
 import Glibc
 #endif
 
-/// Tests for the review's required items and nits: live windows, keep-nothing, the cost log on a live
-/// error, the audio-signature guard, and the socket client's SIGPIPE handling.
-final class ReviewFixesTests: XCTestCase {
+/// Safety and persistence checks: live mute and pause windows, keep-nothing and the run directory, the cost
+/// log on a live error, the audio-signature guard, and the socket client's SIGPIPE handling.
+final class HarnessSafetyChecksTests: XCTestCase {
     let config = try! ListenMoreConfig.builtIn()
 
     func record(_ s: Scenario, mode: Mode) throws -> RunRecord {
@@ -19,7 +19,7 @@ final class ReviewFixesTests: XCTestCase {
 
     func ingest(_ t: Double, _ stream: AudioStream = .mic) -> MeteredEngine.Ingest { .init(t: t, stream: stream, samples: 320) }
 
-    // MARK: live mute and pause windows (item 6)
+    // MARK: live mute and pause windows
 
     /// Live mode has no barrier: frames queued before Mute are still ingested and sent for a few
     /// milliseconds to tens of milliseconds after it. The window starts when the engine handled the
@@ -79,7 +79,7 @@ final class ReviewFixesTests: XCTestCase {
         XCTAssertEqual(Checks.evaluate(r).check("unmute grace: no false cue")?.passed, false)
     }
 
-    // MARK: keep-nothing (item 7)
+    // MARK: keep-nothing
 
     func testKeepNothingFailsWhenARecorderFileExistsOrTheScriptTextIsOnDisk() throws {
         let s = Scenarios.silenceToStop
@@ -129,6 +129,94 @@ final class ReviewFixesTests: XCTestCase {
         XCTAssertEqual(audit.filesContaining([]), [])
     }
 
+    // MARK: the run directory
+
+    func offlineRun(_ scenarios: [Scenario], configure: (inout HarnessOptions) -> Void = { _ in }) async throws -> [ScenarioResult] {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: out) }
+        var options = HarnessOptions(mode: .offline, scenarios: scenarios, outputDirectory: out, environment: [:])
+        configure(&options)
+        return try await Harness.run(options).results
+    }
+
+    static func shortScenario(_ name: String, saving: Bool) -> Scenario {
+        Scenario(name: name, summary: "short exchange", lines: [
+            Line("a1", .themA, "The draft is ready for a first look.", .at(0.3)),
+            Line("y1", .you, "Thanks, I will read it after lunch.", .after("a1", gap: 1.0)),
+        ], saving: saving, tail: 1.5)
+    }
+
+    /// A store that also drops a file next to its folder (in the run directory, which the audit skips and
+    /// the harness wipes). Its writes go through the counting wrapper, which only sees the URLs it was given.
+    final class SiblingWritingStore: TranscriptStore {
+        private let inner = FileTranscriptStore()
+        func prepare(folder: URL) throws { try inner.prepare(folder: folder) }
+        func exists(_ url: URL) -> Bool { inner.exists(url) }
+        func write(_ text: String, to url: URL) throws {
+            try inner.write(text, to: url)
+            let stray = url.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("stray.md")
+            try inner.write(text, to: stray)
+        }
+        func remove(_ url: URL) throws { try inner.remove(url) }
+    }
+
+    @MainActor
+    func testAStoreWritingNextToItsFolderFailsASavingRun() async throws {
+        let scenario = Self.shortScenario("saves", saving: true)
+        let clean = try await offlineRun([scenario])
+        XCTAssertEqual(clean.first?.check("transcript stays in the run dir")?.passed, true, clean.first?.check("transcript stays in the run dir")?.detail ?? "")
+
+        let bad = try await offlineRun([scenario]) { $0.transcriptStore = SiblingWritingStore() }
+        let check = try XCTUnwrap(bad.first?.check("transcript stays in the run dir"))
+        XCTAssertFalse(check.passed, "a file beside the transcripts folder")
+        XCTAssertTrue(check.detail.contains("stray.md"), check.detail)
+    }
+
+    @MainActor
+    func testAnythingInTheRunDirOfAKeepNothingRunIsNamed() async throws {
+        let scenario = Self.shortScenario("keeps-nothing", saving: false)
+        let clean = try await offlineRun([scenario])
+        XCTAssertEqual(clean.first?.check("keep-nothing")?.passed, true, clean.first?.check("keep-nothing")?.detail ?? "")
+
+        let beside = try await offlineRun([scenario]) { o in
+            o.afterRun = { _, dir in try? "notes".write(to: dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8) }
+        }
+        let a = try XCTUnwrap(beside.first?.check("keep-nothing"))
+        XCTAssertFalse(a.passed)
+        XCTAssertTrue(a.detail.contains("notes.md"), a.detail)
+
+        let inside = try await offlineRun([scenario]) { o in
+            o.afterRun = { _, dir in
+                let folder = dir.appendingPathComponent("transcripts", isDirectory: true)
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try? "notes".write(to: folder.appendingPathComponent("Call 1.md"), atomically: true, encoding: .utf8)
+            }
+        }
+        let b = try XCTUnwrap(inside.first?.check("keep-nothing"))
+        XCTAssertFalse(b.passed, "a transcript in the folder of a run that saves nothing")
+        XCTAssertTrue(b.detail.contains("transcripts/Call 1.md"), b.detail)
+    }
+
+    func testRunDirectoryRules() throws {
+        func result(_ s: Scenario, _ entries: [String], check name: String) throws -> Bool {
+            var r = try record(s, mode: .offline)
+            r.runDirEntries = entries
+            if s.saving {
+                let folder = URL(fileURLWithPath: "/tmp/run/transcripts")
+                r.transcriptsFolder = folder
+                r.storeWritten = [folder.appendingPathComponent("Call 1.md")]
+            }
+            return try XCTUnwrap(Checks.evaluate(r).check(name)).passed
+        }
+        let keep = Scenarios.silenceToStop, save = Scenarios.muteUnmute
+        XCTAssertTrue(try result(keep, [], check: "keep-nothing"))
+        XCTAssertTrue(try result(keep, ["transcripts"], check: "keep-nothing"), "an empty transcripts folder is allowed")
+        XCTAssertFalse(try result(keep, ["transcripts", "transcripts/Call 1.md"], check: "keep-nothing"))
+        XCTAssertFalse(try result(keep, ["other"], check: "keep-nothing"))
+        XCTAssertTrue(try result(save, ["transcripts", "transcripts/Call 1.md"], check: "transcript stays in the run dir"))
+        XCTAssertFalse(try result(save, ["transcripts", "transcripts/Call 1.md", "stray.md"], check: "transcript stays in the run dir"))
+    }
+
     // MARK: audio signature (nit)
 
     func testHeifAndAvifImagesAreNotAudio() {
@@ -141,7 +229,7 @@ final class ReviewFixesTests: XCTestCase {
         }
     }
 
-    // MARK: the cost log survives a live error (item 8)
+    // MARK: the cost log survives a live error
 
     final class FlakyOpenAI: HTTPTransport, @unchecked Sendable {
         private let inner = LiveWiringTests.FakeOpenAI()
@@ -161,6 +249,37 @@ final class ReviewFixesTests: XCTestCase {
             }
             return try await inner.post(url: url, headers: headers, body: body, timeout: timeout)
         }
+    }
+
+    /// The failure can come before the scenario runs: a throw while loading its config or creating its run
+    /// directory still writes what was scored and spent so far.
+    @MainActor
+    func testACostLogIsWrittenWhenTheNextScenarioCannotCreateItsRunDirectory() async throws {
+        let first = Self.shortScenario("first", saving: false)
+        let second = Self.shortScenario("second", saving: false)
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-blocker-\(UUID().uuidString)")
+        let originalTmp = ProcessInfo.processInfo.environment["TMPDIR"]
+        defer {
+            if let originalTmp { setenv("TMPDIR", originalTmp, 1) } else { unsetenv("TMPDIR") }
+            try? FileManager.default.removeItem(at: out)
+            try? FileManager.default.removeItem(at: blocker)
+        }
+        var options = HarnessOptions(mode: .offline, scenarios: [first, second], outputDirectory: out, environment: [:])
+        options.afterRun = { scenario, _ in
+            guard scenario.name == "first" else { return }
+            FileManager.default.createFile(atPath: blocker.path, contents: Data())
+            setenv("TMPDIR", blocker.path, 1)
+        }
+        do {
+            _ = try await Harness.run(options)
+            XCTFail("the second scenario's run directory cannot be created")
+        } catch {}
+        let cost = try String(contentsOf: out.appendingPathComponent("cost-log.jsonl"), encoding: .utf8)
+        XCTAssertTrue(cost.contains("\"first\""), "the first scenario's entries are logged: \(cost)")
+        let results = try String(contentsOf: out.appendingPathComponent("results.md"), encoding: .utf8)
+        XCTAssertTrue(results.contains("INCOMPLETE: second stopped"), results)
+        XCTAssertTrue(results.contains("| first |"), results)
     }
 
     @MainActor
@@ -192,13 +311,14 @@ final class ReviewFixesTests: XCTestCase {
         XCTAssertTrue(cost.contains("\"first\""), cost)
         let results = try String(contentsOf: out.appendingPathComponent("results.md"), encoding: .utf8)
         XCTAssertTrue(results.contains("INCOMPLETE: second stopped"), results)
-        XCTAssertTrue(results.contains("first"), "the finished scenario is in the table")
+        XCTAssertTrue(results.contains("| first |"), "the finished scenario has its row in the table: \(results)")
+        XCTAssertFalse(results.contains("| second |"), "the failed scenario has no row")
         for n in names {
             XCTAssertFalse(try String(contentsOf: out.appendingPathComponent(n), encoding: .utf8).contains(canary), n)
         }
     }
 
-    // MARK: SIGPIPE (item 3)
+    // MARK: SIGPIPE
 
     #if canImport(CHarnessTLS)
     /// Creating the socket connector makes the process ignore SIGPIPE, so a write to a peer that already

@@ -107,8 +107,8 @@ final class SocketTeardownOrderTests: XCTestCase {
             }
             let key = request?.headers["sec-websocket-key"] ?? ""
             let reply = Array("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(WebSocketCodec.accept(for: key))\r\n\r\n".utf8)
-            _ = reply.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
             lock.withLock { conn = fd }
+            _ = reply.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
             var parser = WebSocketCodec.Parser()
             parser.push(request?.rest ?? [])
             while true {

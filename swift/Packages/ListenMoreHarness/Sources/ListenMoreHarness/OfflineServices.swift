@@ -52,7 +52,7 @@ public final class ScriptedRealtime: WebSocketConnector, @unchecked Sendable {
 
     /// Test hook: the next `n` final transcripts are counted as sent but never delivered, as when the GPT
     /// layer drops a final (text from a muted You, or after the layer is disabled).
-    public func dropNextFinals(_ n: Int) { lock.withLock { dropsRemaining = n } }
+    func dropNextFinals(_ n: Int) { lock.withLock { dropsRemaining = n } }
 
     func shouldDeliverFinal() -> Bool {
         lock.withLock {

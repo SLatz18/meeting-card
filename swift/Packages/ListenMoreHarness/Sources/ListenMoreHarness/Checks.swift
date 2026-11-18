@@ -90,10 +90,15 @@ public enum Checks {
 
         // Persistence.
         let everFiles = r.transcripts.flatMap(\.files)
+        // The run directory may hold only the transcripts folder (and, saving, what is in it).
+        let strays = r.runDirEntries.filter { e in
+            r.scenario.saving ? !(e == "transcripts" || e.hasPrefix("transcripts/")) : e != "transcripts"
+        }
+        let strayNote = strays.isEmpty ? "" : "; run dir holds unexpected entries: \(strays.prefix(5).joined(separator: ", "))"
         if !s.saving {
             let untouched = r.storePrepared.isEmpty && r.storeWritten.isEmpty && r.recorderLastURL == nil
-            check("keep-nothing", untouched && r.transcripts.allSatisfy { !$0.folderExists } && r.textLeaks.isEmpty,
-                  "saving off: transcript store asked to prepare \(r.storePrepared.count) folders and write \(r.storeWritten.count) files; folder never created: \(r.transcripts.allSatisfy { !$0.folderExists }); files outside the run dir holding the script's text: \(r.textLeaks.count)")
+            check("keep-nothing", untouched && r.transcripts.allSatisfy { !$0.folderExists } && r.textLeaks.isEmpty && strays.isEmpty,
+                  "saving off: transcript store asked to prepare \(r.storePrepared.count) folders and write \(r.storeWritten.count) files; folder never created: \(r.transcripts.allSatisfy { !$0.folderExists }); files outside the run dir holding the script's text: \(r.textLeaks.count)\(strayNote)")
         } else if s.checks.contains(.deleteMidCall) {
             let deleted = r.deleteResults.first?.deleted == true
             let afterDelete = r.transcripts.drop { $0.phase != "after-delete" }
@@ -112,8 +117,8 @@ public enum Checks {
         }
         if s.saving, let folder = r.transcriptsFolder?.standardizedFileURL.path {
             let outside = r.storeWritten.filter { !$0.standardizedFileURL.path.hasPrefix(folder + "/") }
-            check("transcript stays in the run dir", !r.storeWritten.isEmpty && outside.isEmpty && r.textLeaks.isEmpty,
-                  "\(r.storeWritten.count) writes, \(outside.count) outside the run's folder, \(r.textLeaks.count) other files holding the script's text")
+            check("transcript stays in the run dir", !r.storeWritten.isEmpty && outside.isEmpty && r.textLeaks.isEmpty && strays.isEmpty,
+                  "\(r.storeWritten.count) writes, \(outside.count) outside the run's folder, \(r.textLeaks.count) other files holding the script's text\(strayNote)")
         }
         check("no-traffic-after-close", r.sockets.sendsAfterClose == 0, "\(r.sockets.sendsAfterClose) sends on a closed transcription socket")
         check("no-audio-on-disk", r.diskViolations.isEmpty && r.workDirWiped,
@@ -126,8 +131,8 @@ public enum Checks {
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))
 
         // Scenario-specific. Offline the windows are exact (lockstep). Live, frames already queued when a
-        // control was applied still drain: engine frames count from when the engine handled the control,
-        // transcriber traffic half a second after that; captions count from the control itself.
+        // control was applied still drain: engine frames count from when the engine handled the control;
+        // transcriber traffic and captions half a second after that.
         func window(_ w: ClosedRange<Double>, from marks: [Double], slack: Double = 0) -> ClosedRange<Double> {
             let handled = live ? marks.first { $0 >= w.lowerBound - 0.05 && $0 <= w.upperBound } ?? w.lowerBound : w.lowerBound
             let lo = handled + (live ? slack : 0) + 1e-6

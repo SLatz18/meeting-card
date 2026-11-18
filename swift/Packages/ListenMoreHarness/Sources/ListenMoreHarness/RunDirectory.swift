@@ -55,6 +55,11 @@ public struct RunDirectory {
         pid == getpid() || kill(pid, 0) == 0 || errno == EPERM
     }
 
+    /// Every file and folder in the directory, as paths relative to it, sorted.
+    public func entries() -> [String] {
+        ((try? FileManager.default.subpathsOfDirectory(atPath: url.path)) ?? []).sorted()
+    }
+
     /// Removes the directory; true when it's gone.
     @discardableResult
     public func wipe() -> Bool {

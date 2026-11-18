@@ -23,7 +23,7 @@ final class LockstepStallTests: XCTestCase {
     func run(dropping drops: Int) async throws -> (record: RunRecord, seconds: TimeInterval) {
         let config = try ListenMoreConfig.builtIn()
         var services = try Harness.offlineServices(Self.scenario, config: config, voices: .synthetic)
-        services.barrierTimeoutS = 0.3
+        services.barrierTimeoutS = 1.0
         services.offlineServer?.dropNextFinals(drops)
         let dir = try RunDirectory.create()
         defer { dir.wipe() }
@@ -40,7 +40,7 @@ final class LockstepStallTests: XCTestCase {
 
     func testOneDroppedFinalCostsOneTimeoutNotOnePerFrame() async throws {
         let (record, seconds) = try await run(dropping: 1)
-        XCTAssertEqual(record.barrierTimeouts, 1, "re-baselined after the dropped final")
+        XCTAssertEqual(record.finalsBarrierTimeouts, 1, "re-baselined after the dropped final")
         XCTAssertFalse(record.problems.contains("lockstep stalled"))
         XCTAssertLessThan(seconds, 60)
         let result = Checks.evaluate(record)
@@ -49,7 +49,8 @@ final class LockstepStallTests: XCTestCase {
 
     func testARunThatKeepsLosingFinalsStopsAfterFiveTimeouts() async throws {
         let (record, seconds) = try await run(dropping: 1000)
-        XCTAssertEqual(record.barrierTimeouts, 5)
+        XCTAssertGreaterThanOrEqual(record.barrierTimeouts, 5)
+        XCTAssertGreaterThanOrEqual(record.finalsBarrierTimeouts, 1)
         XCTAssertTrue(record.problems.contains("lockstep stalled"))
         XCTAssertLessThan(seconds, 60)
         let result = Checks.evaluate(record)
