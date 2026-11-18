@@ -109,6 +109,35 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var heatPersonal: [String]
         public var closingPhrases: [String]
         public var closingQuietS: Double
+        /// Self-pivot gate (`PivotGate`, shadow counters only). Their turn shares something personal: at
+        /// least `pivot_share_min_words`, a share marker, and a share word or a `heat_personal` topic,
+        /// with no invitation for the user to share and no question at its end.
+        public var pivotShareMinWords: Int
+        public var pivotShareMarkers: [String]
+        public var pivotShareWords: [String]
+        /// Phrases that hand the floor to the other person, anywhere in a turn (with `question_open_invites`):
+        /// in their turn an invitation to share, in the user's reply a question back.
+        public var pivotInvites: [String]
+        /// The user's reply starts within this long of their last speech and runs at least
+        /// `pivot_reply_min_words`, with a pivot opener or mostly first person: at least
+        /// `pivot_first_person_min_words` first-person words, and that share of first- plus second-person words.
+        public var pivotReplyMaxStartS: Double
+        public var pivotReplyMinWords: Int
+        public var pivotOpeners: [String]
+        public var pivotFirstPerson: [String]
+        public var pivotSecondPerson: [String]
+        public var pivotFirstPersonMinWords: Int
+        public var pivotFirstPersonShare: Double
+        /// A sentence or clause starting with one of these (after any lead-in word) asks a question.
+        public var pivotQuestionOpeners: [String]
+        public var pivotQuestionLeadIns: [String]
+        /// The turn ends when they start talking or the user is quiet this long; the user's last
+        /// transcript gets `pivot_transcript_wait_s` past the turn end to arrive.
+        public var pivotTurnEndGapS: Double
+        public var pivotTranscriptWaitS: Double
+        /// No candidate within `pivot_rearm_s` of the last one, and at most `pivot_max_per_call` per call.
+        public var pivotRearmS: Double
+        public var pivotMaxPerCall: Int
         public var confirmWords: [String]
         public var numberWords: [String]
         public var stopwords: [String]
@@ -290,6 +319,10 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         guard audio.sampleRate * audio.frameMs % 1000 == 0 else { throw ConfigError.invalid("frame_ms must divide sample_rate") }
         guard gpt.store == false else { throw ConfigError.invalid("gpt.store must be false") }
         try judge.typesafe.validate()
+        guard text.pivotShareMinWords > 0, text.pivotReplyMinWords > 0, text.pivotReplyMaxStartS >= 0,
+              text.pivotFirstPersonMinWords > 0, (0...1).contains(text.pivotFirstPersonShare),
+              text.pivotTurnEndGapS > 0, text.pivotTranscriptWaitS >= 0, text.pivotRearmS >= 0,
+              text.pivotMaxPerCall >= 0 else { throw ConfigError.invalid("bad text.pivot limits") }
         guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,
               trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS else { throw ConfigError.invalid("bad trigger timing") }
     }
