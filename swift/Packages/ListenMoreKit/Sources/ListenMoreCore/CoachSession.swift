@@ -364,16 +364,23 @@ public final class CoachSession {
             fallback.reset()
             callLevel.reset()
             let key: APIKey?
-            do {
-                key = try keys.readKey()
-                CoachLog.record(.keyRead(key == nil ? .absent : .present))
-            } catch {
+            var availability = KeyAvailability.absent
+            if (keys as? KeyGateStateProviding)?.gateState == .rejected {
                 key = nil
-                CoachLog.record(.keyRead(.unreadable))
-                delegate?.coachSession(self, didReport: .keyUnreadable)
+                availability = .rejected
+            } else {
+                do {
+                    key = try keys.readKey()
+                    availability = key == nil ? .absent : .present
+                    CoachLog.record(.keyRead(key == nil ? .absent : .present, status: nil, at: .call))
+                } catch {
+                    key = nil
+                    CoachLog.record(.keyRead(.unreadable, status: CoachLog.status(of: error), at: .call))
+                    delegate?.coachSession(self, didReport: .keyUnreadable)
+                }
             }
             gateGeneration = gate.openNew()
-            engine.start(config: config, apiKey: key)
+            engine.start(config: config, apiKey: key, keyAvailability: availability)
             // Muted before it starts (the user's Mute or a pending call end), so the device never
             // opens even briefly; the gate stays closed until `setMicDevice(on: true)` reopens it.
             micDeviceOff = micShouldBeOff
@@ -630,8 +637,8 @@ public final class EngineQueue: @unchecked Sendable {
         set { queue.sync { engine.delegate = newValue } }
     }
 
-    public func start(config: ListenMoreConfig, apiKey: APIKey?) {
-        queue.async { self.engine.start(config: config, apiKey: apiKey) }
+    public func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability) {
+        queue.async { self.engine.start(config: config, apiKey: apiKey, keyAvailability: keyAvailability) }
     }
 
     public func ingest(_ stream: AudioStream, samples: [Float], time: TimeInterval) {

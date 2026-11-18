@@ -115,16 +115,27 @@ extension GptTransports {
     }
 }
 
+/// What asking OpenAI about a key came to: the classification, and the HTTP status when it answered.
+public struct KeyCheckOutcome: Equatable, Sendable {
+    public var check: KeyCheck
+    public var httpStatus: Int?
+}
+
 /// Checks a key the user typed before it is saved (GET /v1/models over an ephemeral session).
 public enum KeyValidator {
     public static func check(_ text: String, session: URLSession? = nil) async -> KeyCheck {
-        guard let key = APIKey(text) else { return .empty }
+        await checkWithStatus(text, session: session).check
+    }
+
+    public static func checkWithStatus(_ text: String, session: URLSession? = nil) async -> KeyCheckOutcome {
+        guard let key = APIKey(text) else { return KeyCheckOutcome(check: .empty, httpStatus: nil) }
         do {
             let s = session ?? URLSession(configuration: EphemeralSession.configuration())
             let (_, response) = try await s.data(for: KeyCheck.request(key))
-            return KeyCheck.classify(httpStatus: (response as? HTTPURLResponse)?.statusCode)
+            let status = (response as? HTTPURLResponse)?.statusCode
+            return KeyCheckOutcome(check: KeyCheck.classify(httpStatus: status), httpStatus: status)
         } catch {
-            return .unreachable
+            return KeyCheckOutcome(check: .unreachable, httpStatus: nil)
         }
     }
 }

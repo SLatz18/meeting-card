@@ -64,11 +64,24 @@ public enum KeyCheckSource: String, Equatable, Sendable {
 }
 
 public enum KeyReadState: String, Equatable, Sendable {
-    /// A key was read from the Keychain for this call.
     case present
+    /// The Keychain has no key.
     case absent
-    /// The Keychain refused or failed.
+    /// The Keychain refused or failed (the OSStatus is logged with it): not the same as no key.
     case unreadable
+}
+
+/// Where a Keychain read happened.
+public enum KeyReadContext: String, Equatable, Sendable {
+    /// Loading the stored key when the coach starts or the key is checked.
+    case stored
+    /// Handing the key to a call's engine.
+    case call
+}
+
+public enum KeyStoreAction: String, Equatable, Sendable {
+    case save
+    case remove
 }
 
 public enum CaptureMethod: String, Equatable, Sendable {
@@ -102,8 +115,10 @@ public enum PermissionState: String, Equatable, Sendable {
 /// Why the GPT layer (transcription and the cue judge) is on or off for a call.
 public enum GptLayerReason: String, Equatable, Sendable {
     case keyPresent
-    /// No key was handed to the engine: none stored, or the stored one was rejected.
+    /// No key was handed to the engine: none stored, or it could not be read.
     case noKey
+    /// A key is stored but OpenAI rejected it, so it is withheld from the engine.
+    case keyRejected
     /// The engine was built without network transports (local cues only).
     case noTransports
 }
@@ -113,8 +128,13 @@ public enum GptLayerReason: String, Equatable, Sendable {
 /// transcript text, audio, the key, headers and request or response bodies cannot reach the file.
 public enum CoachLogEvent: Equatable, Sendable {
     case coachEnabled(Bool)
-    case keyCheck(KeyCheck, source: KeyCheckSource)
-    case keyRead(KeyReadState)
+    /// The result of asking OpenAI about the key, with the HTTP status when it answered (a number only).
+    case keyCheck(KeyCheck, source: KeyCheckSource, httpStatus: Int?)
+    case keyRead(KeyReadState, status: Int?, at: KeyReadContext)
+    /// Whether the stored key is withheld from calls (rejected) or let through (unchecked, accepted).
+    case keyGate(KeyGateState)
+    /// Saving or removing the key in the Keychain; `status` is the OSStatus of a failure.
+    case keyStore(KeyStoreAction, ok: Bool, status: Int?)
     case callDetected(bundleId: LogToken?)
     case callEnded(bundleId: LogToken?, reason: CoachStopReason)
     case sessionStarted(reason: CoachStartReason, bundleId: LogToken?)
@@ -145,8 +165,13 @@ public enum CoachLogEvent: Equatable, Sendable {
     public var rendered: String {
         switch self {
         case .coachEnabled(let on): return line("coach.enabled", ("on", .flag(on)))
-        case .keyCheck(let result, let source): return line("key.check", ("result", .word(result.rawValue)), ("source", .word(source.rawValue)))
-        case .keyRead(let state): return line("key.read", ("state", .word(state.rawValue)))
+        case .keyCheck(let result, let source, let status):
+            return line("key.check", ("result", .word(result.rawValue)), ("source", .word(source.rawValue)), ("http", .number(status)))
+        case .keyRead(let state, let status, let context):
+            return line("key.read", ("result", .word(state.rawValue)), ("status", .number(status)), ("at", .word(context.rawValue)))
+        case .keyGate(let state): return line("key.gate", ("state", .word(state.rawValue)))
+        case .keyStore(let action, let ok, let status):
+            return line("key.store", ("action", .word(action.rawValue)), ("result", .word(ok ? "ok" : "failed")), ("status", .number(status)))
         case .callDetected(let app): return line("call.detected", ("app", .token(app)))
         case .callEnded(let app, let reason): return line("call.ended", ("app", .token(app)), ("reason", .word(reason.rawValue)))
         case .sessionStarted(let reason, let app):
@@ -250,6 +275,11 @@ public struct CoachLogEntry: Equatable, Sendable {
     }
 }
 
+/// An error that carries a numeric status (an OSStatus) and nothing else worth logging.
+public protocol StatusCarryingError: Error {
+    var statusCode: Int { get }
+}
+
 public protocol CoachLogSink: AnyObject, Sendable {
     func write(_ entry: CoachLogEntry)
 }
@@ -284,6 +314,14 @@ public enum CoachLog {
         if let u = error as? URLError { return (nil, LogToken("URLError\(u.code.rawValue)")) }
         let ns = error as NSError
         return (nil, LogToken("\(ns.domain):\(ns.code)"))
+    }
+
+    /// The OSStatus or code an error carries, without any message text: a `StatusCarryingError`'s status,
+    /// or the code of an `NSOSStatusErrorDomain` error.
+    public static func status(of error: Error) -> Int? {
+        if let e = error as? StatusCarryingError { return e.statusCode }
+        let ns = error as NSError
+        return ns.domain == NSOSStatusErrorDomain ? ns.code : nil
     }
 
     /// The error's domain and code, for failures with no HTTP side (capture start).

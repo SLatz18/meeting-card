@@ -42,3 +42,77 @@ public enum KeyNotice: Equatable, Sendable {
         }
     }
 }
+
+/// What the host knows about the stored key's standing with OpenAI. Only `rejected` withholds it.
+public enum KeyGateState: String, Equatable, Sendable {
+    /// Not asked yet, or the last check could not reach OpenAI: the key is used.
+    case unchecked
+    /// OpenAI accepted it.
+    case accepted
+    /// OpenAI refused it (401 or 403): GPT cues stay off until it is replaced.
+    case rejected
+
+    /// The state after a check result: a refusal withholds the key; an answer of "ok" clears it; no
+    /// answer (unreachable) or no key leaves it unchecked.
+    public static func after(_ check: KeyCheck) -> KeyGateState {
+        switch check {
+        case .ok: .accepted
+        case .rejected: .rejected
+        case .unreachable, .empty: .unchecked
+        }
+    }
+}
+
+/// A key provider that can say whether it is withholding the key for being rejected.
+public protocol KeyGateStateProviding {
+    var gateState: KeyGateState { get }
+}
+
+/// Whether a call's engine got a key, and if not, why.
+public enum KeyAvailability: Equatable, Sendable {
+    case present
+    case absent
+    case rejected
+}
+
+/// Whether a key is stored, kept by the host and updated only when the key is loaded, saved or
+/// removed. A refresh tick reads this value, never the Keychain: reading the item returns the secret,
+/// which is not something to do once a second.
+public struct KeyPresence: Equatable, Sendable {
+    public private(set) var stored = false
+    /// The last load failed: the Keychain refused, which is not the same as having no key.
+    public private(set) var unreadable = false
+
+    public init() {}
+
+    /// Reads the key once and records what was there: `stored` for a key, nothing stored for none, and
+    /// `unreadable` for a Keychain failure (logged with its OSStatus). Returns the key, if any.
+    public mutating func load(from provider: APIKeyProvider, at context: KeyReadContext = .stored) -> APIKey? {
+        do {
+            let key = try provider.readKey()
+            stored = key != nil
+            unreadable = false
+            CoachLog.record(.keyRead(key == nil ? .absent : .present, status: nil, at: context))
+            return key
+        } catch {
+            unreadable = true
+            CoachLog.record(.keyRead(.unreadable, status: CoachLog.status(of: error), at: context))
+            return nil
+        }
+    }
+
+    public mutating func saved() {
+        stored = true
+        unreadable = false
+    }
+
+    public mutating func removed() {
+        stored = false
+        unreadable = false
+    }
+
+    /// The field placeholder to set now, or nil when it already matches. No Keychain access.
+    public func placeholder(shown: KeyPlaceholder?) -> KeyPlaceholder? {
+        KeyPlaceholder.refresh(shown: shown, hasKey: stored)
+    }
+}

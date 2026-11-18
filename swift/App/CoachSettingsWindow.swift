@@ -617,7 +617,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     /// Sets the key field's placeholder from the Keychain when it differs from what is shown: after a save,
     /// after a delete, and whenever the window is shown or refreshed. Only whether a key is stored is read.
     private func refreshKeyField() {
-        guard let next = KeyPlaceholder.refresh(shown: shownKeyPlaceholder, hasKey: coach.hasKey) else { return }
+        guard let next = coach.keyPresence.placeholder(shown: shownKeyPlaceholder) else { return }
         shownKeyPlaceholder = next
         switch next {
         case .saved: keyField.placeholderString = CoachCopy.keySavedPlaceholder

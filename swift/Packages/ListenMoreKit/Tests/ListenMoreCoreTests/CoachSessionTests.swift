@@ -455,12 +455,49 @@ final class CoachSessionTests: XCTestCase {
         let lines = sink.lines
         XCTAssertEqual(lines.first, "call.detected app=company.thebrowser.dia")
         XCTAssertTrue(lines.contains("session.started reason=audio app=company.thebrowser.dia"))
-        XCTAssertTrue(lines.contains("key.read state=present"))
+        XCTAssertTrue(lines.contains("key.read result=present at=call"))
         XCTAssertTrue(lines.contains("mic.muted on=true"))
         XCTAssertTrue(lines.contains("session.paused on=true"))
         XCTAssertTrue(lines.contains("call.ended app=company.thebrowser.dia reason=audioEnded"))
         XCTAssertTrue(lines.contains("session.stopped reason=audioEnded"))
         XCTAssertFalse(lines.contains { $0.contains("sk-") || $0.contains("test-not-real") })
+    }
+
+    /// A Keychain failure is "unreadable" with its OSStatus, never "absent"; a rejected key is withheld and
+    /// the GPT layer's reason says so.
+    func testCoachLogSeparatesUnreadableAbsentAndRejectedKeys() async {
+        struct Failing: APIKeyProvider, StatusCarryingError {
+            var statusCode: Int { -25308 }
+            func readKey() throws -> APIKey? { throw self }
+        }
+        struct Rejected: APIKeyProvider, KeyGateStateProviding {
+            var gateState: KeyGateState { .rejected }
+            func readKey() throws -> APIKey? { nil }
+        }
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        for keys in [Failing() as APIKeyProvider, Rejected()] {
+            engine = RecordingEngine()
+            let settings = { () -> TriggerSettings in
+                var t = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+                t.startAfterS = 0
+                return t
+            }()
+            let signal = WindowTitleSignal(probe: probe, targets: config.captureTargets, meetTitleRegex: config.meetTitleRegex)
+            let clock = clock
+            let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: signal, keys: keys,
+                                 renderer: renderer, settings: settings, wallClock: { clock.now() })
+            meetInDia()
+            s.tick()
+            let started = await eventually { self.engine.startedWithKey == [false] }
+            XCTAssertTrue(started)
+            s.stopForThisCall()
+            endMeeting()
+            s.tick()
+        }
+        XCTAssertEqual(sink.lines.filter { $0.hasPrefix("key.read") }, ["key.read result=unreadable status=-25308 at=call"],
+                       "a rejected key's gate does not read the Keychain, and an unreadable one is not absent")
     }
 
     /// A failed call-audio start is logged with its error domain and code.
@@ -475,7 +512,7 @@ final class CoachSessionTests: XCTestCase {
         let logged = await eventually { sink.lines.contains { $0.hasPrefix("callAudio.failed") } }
         XCTAssertTrue(logged)
         XCTAssertTrue(sink.lines.contains("callAudio.failed stage=parentApps domain=FakeCall code=2"), "\(sink.lines)")
-        XCTAssertTrue(sink.lines.contains("key.read state=absent"))
+        XCTAssertTrue(sink.lines.contains("key.read result=absent at=call"))
     }
 
     func testIndicatorOnWhilePrewarmedThenListening() async {

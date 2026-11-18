@@ -104,7 +104,7 @@ final class CoachController: NSObject {
         super.init()
         callControls.isEnabled = callControlsOn
         callControlsModel.onChange = { [weak self] in self?.refresh() }
-        keyStored = keychain.hasKey
+        _ = keyPresence.load(from: keychain)
         typeSafeKeyStored = typeSafeKeychain.hasKey
         CoachLog.record(.coachEnabled(enabled))
         if enabled {
@@ -118,13 +118,17 @@ final class CoachController: NSObject {
     var anyApp: Bool { defaults.bool(forKey: Keys.anyApp) }
     var onboarded: Bool { defaults.bool(forKey: Keys.onboarded) }
     var callControlsOn: Bool { defaults.bool(forKey: Keys.callControls) }
-    var hasKey: Bool { keychain.hasKey }
     /// GPT cues can run: a key is stored and OpenAI hasn't rejected it.
     var gptAvailable: Bool { keyStored && !keyGate.rejected }
     /// Captions and transcripts read the GPT cues' transcription: the coach is on with a usable key.
     var transcriptKeyUsable: Bool { enabled && gptAvailable }
-    /// Whether a key is in the Keychain, kept current by key actions (refresh runs every second).
-    var keyStored = false
+    /// Whether a key is in the Keychain: loaded once, then updated by save and remove. Refresh runs every
+    /// second and reads this, never the Keychain (reading the item returns the secret).
+    var keyPresence = KeyPresence()
+    var keyStored: Bool {
+        get { keyPresence.stored }
+        set { if newValue { keyPresence.saved() } else { keyPresence.removed() } }
+    }
     var typeSafeKeyStored = false
 
     /// The cue judge the next call uses: the user's pick, else the config's (gpt).
@@ -175,18 +179,21 @@ final class CoachController: NSObject {
 
     /// Flags a stored key OpenAI rejects (GPT cues stay off until it is replaced); local cues are unaffected.
     func checkStoredKey(completion: @escaping (KeyCheck?) -> Void = { _ in }) {
-        keyStored = hasKey
-        guard let key = try? keychain.readKey() else {
-            keyGate.rejected = false
-            CoachLog.record(.keyCheck(.empty, source: .stored))
+        guard let key = keyPresence.load(from: keychain) else {
+            // Nothing stored, or the Keychain refused (logged with its status by `load`); either way there is
+            // nothing to ask OpenAI about, and a refusal is not "no key".
+            if !keyPresence.unreadable {
+                keyGate.record(.empty)
+                CoachLog.record(.keyCheck(.empty, source: .stored, httpStatus: nil))
+            }
             completion(nil)
             return
         }
         Task { @MainActor in
-            let check = await KeyValidator.check(key.value)
-            CoachLog.record(.keyCheck(check, source: .stored))
-            self.keyGate.rejected = check == .rejected
-            self.keyProblem = check == .ok ? nil : check
+            let outcome = await KeyValidator.checkWithStatus(key.value)
+            CoachLog.record(.keyCheck(outcome.check, source: .stored, httpStatus: outcome.httpStatus))
+            self.keyGate.record(outcome.check)
+            self.keyProblem = outcome.check == .ok ? nil : outcome.check
             self.refresh()
             completion(self.keyProblem)
         }

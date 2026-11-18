@@ -25,9 +25,12 @@ final class CoachLogTests: XCTestCase {
         let app = LogToken("us.zoom.xos")
         return [
             .coachEnabled(true), .coachEnabled(false),
-            .keyCheck(.ok, source: .stored), .keyCheck(.rejected, source: .save), .keyCheck(.unreachable, source: .save),
-            .keyCheck(.empty, source: .stored),
-            .keyRead(.present), .keyRead(.absent), .keyRead(.unreadable),
+            .keyCheck(.ok, source: .stored, httpStatus: 200), .keyCheck(.rejected, source: .save, httpStatus: 401),
+            .keyCheck(.unreachable, source: .save, httpStatus: nil), .keyCheck(.empty, source: .stored, httpStatus: nil),
+            .keyRead(.present, status: nil, at: .call), .keyRead(.absent, status: nil, at: .stored),
+            .keyRead(.unreadable, status: -25308, at: .stored),
+            .keyGate(.unchecked), .keyGate(.accepted), .keyGate(.rejected),
+            .keyStore(.save, ok: true, status: nil), .keyStore(.remove, ok: false, status: -25244),
             .callDetected(bundleId: app), .callDetected(bundleId: nil),
             .callEnded(bundleId: app, reason: .audioEnded), .callEnded(bundleId: nil, reason: .manual),
             .sessionStarted(reason: .audio, bundleId: app), .sessionStarted(reason: .manual, bundleId: nil),
@@ -48,7 +51,8 @@ final class CoachLogTests: XCTestCase {
             .transcriberTransport(httpStatus: 403, urlErrorCode: -1011, closeCode: -1),
             .transcriberTransport(httpStatus: nil, urlErrorCode: nil, closeCode: 1006),
             .captionSegments(me: 3, others: 12),
-            .gptLayer(enabled: true, reason: .keyPresent), .gptLayer(enabled: false, reason: .noKey), .gptLayer(enabled: false, reason: .noTransports),
+            .gptLayer(enabled: true, reason: .keyPresent), .gptLayer(enabled: false, reason: .noKey), .gptLayer(enabled: false, reason: .keyRejected),
+            .gptLayer(enabled: false, reason: .noTransports),
             .gptStopped(reason: .error), .gptStopped(reason: .budgetCap),
             .judgeStopped(kind: .auth, httpStatus: 401), .judgeStopped(kind: .timeout, httpStatus: nil),
         ]
@@ -64,7 +68,13 @@ final class CoachLogTests: XCTestCase {
 
     func testRenderedFields() {
         XCTAssertEqual(CoachLogEvent.coachEnabled(true).rendered, "coach.enabled on=true")
-        XCTAssertEqual(CoachLogEvent.keyCheck(.rejected, source: .save).rendered, "key.check result=rejected source=save")
+        XCTAssertEqual(CoachLogEvent.keyCheck(.rejected, source: .save, httpStatus: 401).rendered, "key.check result=rejected source=save http=401")
+        XCTAssertEqual(CoachLogEvent.keyCheck(.unreachable, source: .stored, httpStatus: nil).rendered, "key.check result=unreachable source=stored")
+        XCTAssertEqual(CoachLogEvent.keyRead(.unreadable, status: -25308, at: .stored).rendered, "key.read result=unreadable status=-25308 at=stored")
+        XCTAssertEqual(CoachLogEvent.keyRead(.absent, status: nil, at: .call).rendered, "key.read result=absent at=call", "no key is not a failure")
+        XCTAssertEqual(CoachLogEvent.keyGate(.rejected).rendered, "key.gate state=rejected")
+        XCTAssertEqual(CoachLogEvent.keyStore(.save, ok: false, status: -25244).rendered, "key.store action=save result=failed status=-25244")
+        XCTAssertEqual(CoachLogEvent.gptLayer(enabled: false, reason: .keyRejected).rendered, "gpt.layer enabled=false reason=keyRejected")
         XCTAssertEqual(CoachLogEvent.callAudioFailed(stage: .processTap, domain: LogToken("OSStatus"), code: -50).rendered,
                        "callAudio.failed stage=processTap domain=OSStatus code=-50")
         XCTAssertEqual(CoachLogEvent.transcriberError(speaker: .others, model: LogToken("gpt-live-transcribe"), httpStatus: 401,
@@ -153,6 +163,21 @@ final class CoachLogTests: XCTestCase {
         XCTAssertEqual(sink.lines.count, 1)
     }
 
+    /// The GPT layer's reason tells a rejected key from a missing one.
+    func testEngineSaysWhyTheGptLayerIsOff() throws {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let config = try TestConfig.load()
+        let engine = LocalCoachEngine(transports: .none)
+        engine.start(config: config, apiKey: nil, keyAvailability: .rejected)
+        engine.start(config: config, apiKey: nil, keyAvailability: .absent)
+        engine.start(config: config, apiKey: nil)
+        engine.stop()
+        XCTAssertEqual(sink.lines, ["gpt.layer enabled=false reason=keyRejected", "gpt.layer enabled=false reason=noKey",
+                                    "gpt.layer enabled=false reason=noKey"])
+    }
+
     func testDescribeErrorsWithoutMessageText() {
         struct Leaky: Error, CustomStringConvertible { var description: String { "Bearer sk-leak" } }
         XCTAssertEqual(CoachLog.describe(GptError.http(401)).httpStatus, 401)
@@ -193,9 +218,9 @@ final class CoachLogTests: XCTestCase {
         let now = Date()
         let file = CoachLogFile(url: url, now: { now })
         file.write(CoachLogEntry(date: now, event: .coachEnabled(true)))
-        file.write(CoachLogEntry(date: now, event: .keyCheck(.ok, source: .stored)))
+        file.write(CoachLogEntry(date: now, event: .keyCheck(.ok, source: .stored, httpStatus: 200)))
         let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { String($0.dropFirst(25)) }
-        XCTAssertEqual(lines, ["coach.enabled on=true", "key.check result=ok source=stored"])
+        XCTAssertEqual(lines, ["coach.enabled on=true", "key.check result=ok source=stored http=200"])
         let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(perms?.intValue, 0o600, "readable by the user only")
     }

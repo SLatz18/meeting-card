@@ -66,4 +66,72 @@ final class KeyFeedbackTests: XCTestCase {
             }
         }
     }
+
+    // MARK: presence and the gate
+
+    final class CountingKeys: APIKeyProvider {
+        var key: APIKey?
+        var failure: Error?
+        var reads = 0
+        func readKey() throws -> APIKey? {
+            reads += 1
+            if let failure { throw failure }
+            return key
+        }
+    }
+
+    /// A refresh tick uses the cached presence: loading reads the Keychain once, and a thousand ticks
+    /// (placeholder decisions, as the Settings window makes every second) read it zero more times.
+    func testRefreshTicksNeverReadTheKeychain() throws {
+        let keys = CountingKeys()
+        keys.key = APIKey("sk-test-not-real")
+        var presence = KeyPresence()
+        _ = presence.load(from: keys)
+        XCTAssertEqual(keys.reads, 1)
+        var shown: KeyPlaceholder?
+        for _ in 0..<1000 {
+            if let next = presence.placeholder(shown: shown) { shown = next }
+        }
+        XCTAssertEqual(shown, .saved)
+        XCTAssertEqual(keys.reads, 1, "the ticks did not touch the provider")
+    }
+
+    func testSaveAndRemoveUpdateThePresenceWithoutReading() {
+        let keys = CountingKeys()
+        var presence = KeyPresence()
+        presence.saved()
+        XCTAssertEqual(presence.placeholder(shown: .empty), .saved)
+        presence.removed()
+        XCTAssertEqual(presence.placeholder(shown: .saved), .empty)
+        XCTAssertEqual(keys.reads, 0)
+    }
+
+    func testLoadSeparatesAbsentFromUnreadable() {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        struct Refused: StatusCarryingError { var statusCode: Int { -25308 } }
+        let keys = CountingKeys()
+        var presence = KeyPresence()
+        XCTAssertNil(presence.load(from: keys))
+        XCTAssertFalse(presence.stored)
+        XCTAssertFalse(presence.unreadable)
+        keys.failure = Refused()
+        XCTAssertNil(presence.load(from: keys))
+        XCTAssertTrue(presence.unreadable, "a refusal is not the same as no key")
+        XCTAssertEqual(sink.lines, ["key.read result=absent at=stored", "key.read result=unreadable status=-25308 at=stored"])
+        keys.failure = nil
+        keys.key = APIKey("sk-test-not-real")
+        XCTAssertNotNil(presence.load(from: keys))
+        XCTAssertTrue(presence.stored)
+        XCTAssertFalse(presence.unreadable)
+        XCTAssertFalse(sink.lines.contains { $0.contains("sk-") })
+    }
+
+    func testGateStateAfterEachCheck() {
+        XCTAssertEqual(KeyGateState.after(.ok), .accepted)
+        XCTAssertEqual(KeyGateState.after(.rejected), .rejected)
+        XCTAssertEqual(KeyGateState.after(.unreachable), .unchecked, "no answer leaves the key in use")
+        XCTAssertEqual(KeyGateState.after(.empty), .unchecked)
+    }
 }

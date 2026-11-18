@@ -18,9 +18,17 @@ public struct KeychainStore: APIKeyProvider {
     public static let typeSafeAccount = "TYPESAFE_API_KEY"
     public static let accessibility = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
-    public enum KeychainError: Error, Equatable {
+    public enum KeychainError: StatusCarryingError, Equatable {
         case unexpectedStatus(OSStatus)
         case badData(String)
+
+        /// The OSStatus, or 0 for a value that could not be decoded.
+        public var statusCode: Int {
+            switch self {
+            case .unexpectedStatus(let status): return Int(status)
+            case .badData: return 0
+            }
+        }
     }
 
     public enum Location: Equatable {

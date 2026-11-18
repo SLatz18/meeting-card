@@ -9,26 +9,49 @@ extension CoachController {
     /// usable key the coach stays on with local cues only; a saved key is used from the next call.
     func saveKey(_ text: String, completion: @escaping (KeyCheck) -> Void) {
         guard let key = APIKey(text) else {
-            try? keychain.delete()
-            keyStored = hasKey
-            keyGate.rejected = false
+            removeKey()
+            keyGate.record(.empty)
             keyProblem = nil
-            CoachLog.record(.keyCheck(.empty, source: .save))
+            CoachLog.record(.keyCheck(.empty, source: .save, httpStatus: nil))
             refresh()
             completion(.empty)
             return
         }
         Task { @MainActor in
-            let check = await KeyValidator.check(key.value)
-            CoachLog.record(.keyCheck(check, source: .save))
+            let outcome = await KeyValidator.checkWithStatus(key.value)
+            let check = outcome.check
+            CoachLog.record(.keyCheck(check, source: .save, httpStatus: outcome.httpStatus))
             if check != .rejected {
-                try? self.keychain.save(key)
-                self.keyStored = self.hasKey
-                self.keyGate.rejected = false
+                self.storeKey(key)
+                self.keyGate.record(check)
             }
             self.keyProblem = check == .ok ? nil : check
             self.refresh()
             completion(check)
+        }
+    }
+
+    /// Saves the key and records it as stored; a failed save is logged with its OSStatus and the presence
+    /// is read back once, so it never claims a key that is not there.
+    private func storeKey(_ key: APIKey) {
+        do {
+            try keychain.save(key)
+            keyPresence.saved()
+            CoachLog.record(.keyStore(.save, ok: true, status: nil))
+        } catch {
+            CoachLog.record(.keyStore(.save, ok: false, status: CoachLog.status(of: error)))
+            _ = keyPresence.load(from: keychain)
+        }
+    }
+
+    private func removeKey() {
+        do {
+            try keychain.delete()
+            keyPresence.removed()
+            CoachLog.record(.keyStore(.remove, ok: true, status: nil))
+        } catch {
+            CoachLog.record(.keyStore(.remove, ok: false, status: CoachLog.status(of: error)))
+            _ = keyPresence.load(from: keychain)
         }
     }
 
@@ -47,11 +70,22 @@ extension CoachController {
 
 /// The key as the coach service sees it: the Keychain item, withheld while OpenAI rejects it so
 /// GPT cues stay off and local cues keep running.
-final class CoachKeyGate: APIKeyProvider {
+final class CoachKeyGate: APIKeyProvider, KeyGateStateProviding {
     let store: KeychainStore
-    var rejected = false
+    private(set) var state: KeyGateState = .unchecked
 
     init(_ store: KeychainStore) { self.store = store }
+
+    var gateState: KeyGateState { state }
+    var rejected: Bool { state == .rejected }
+
+    /// Moves the gate to what a check result means (see `KeyGateState.after`) and logs a change.
+    func record(_ check: KeyCheck) {
+        let next = KeyGateState.after(check)
+        guard next != state else { return }
+        state = next
+        CoachLog.record(.keyGate(next))
+    }
 
     func readKey() throws -> APIKey? { rejected ? nil : try store.readKey() }
 }
