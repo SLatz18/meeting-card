@@ -187,7 +187,7 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertLessThan(write.upperBound, refresh.lowerBound, "the setting is written before the refresh")
         let refreshBody = try XCTUnwrap(src.components(separatedBy: "    func refresh() {").dropFirst().first?
             .components(separatedBy: "\n    }\n").first)
-        XCTAssertTrue(refreshBody.contains("settingsWindow?.update()"), "an open Settings window follows")
+        XCTAssertTrue(refreshBody.contains("settingsWindow?.refresh()"), "an open Settings window follows, through its gated refresh")
         let settings = try read("App/CoachSettingsWindow.swift")
         XCTAssertTrue(settings.contains("toggle.state = coach.enabled ? .on : .off"))
         let present = try XCTUnwrap(settings.components(separatedBy: "func present() {").dropFirst().first?

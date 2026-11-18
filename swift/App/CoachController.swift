@@ -413,7 +413,7 @@ final class CoachController: NSObject {
         if let reason = service?.gptStopped { transcript.gptStopped(reason) }
         updateCoachCard(card)
         updateStatusItem()
-        settingsWindow?.update()
+        settingsWindow?.refresh()
     }
 
     /// What the coach card shows now, or nil while the coach isn't on for a call.
