@@ -128,8 +128,7 @@ public enum Checks {
         if !r.judgeOn {
             check("judge off: 0 judge calls", r.judgeCalls == 0, "\(r.judgeCalls) judge calls (not_listening not exercised)")
         }
-        let problems = r.problems.filter { $0 != "transcriberClearRejected" }
-        check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))
+        check("session-problems", r.problems.isEmpty, r.problems.isEmpty ? "none reported" : r.problems.joined(separator: ", "))
 
         // Scenario-specific. Offline the windows are exact (lockstep). Live, frames already queued when a
         // control was applied still drain: engine frames count from when the engine handled the control;

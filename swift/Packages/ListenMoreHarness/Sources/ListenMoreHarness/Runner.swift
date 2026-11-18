@@ -534,10 +534,16 @@ public final class ScenarioRun: CoachSessionDelegate {
         record?.meterLog.append((now, reading))
     }
 
-    /// The scripted call stream is digital silence wherever nobody on the call speaks, so a session that
-    /// reports a silent call (the coach log's silent-call report) is following the script, not failing.
-    /// Any other reported problem is one.
-    static func isSessionProblem(_ report: String) -> Bool { !report.hasPrefix("callAudioSilent(") }
+    /// Reports that are not session problems. The scripted call stream is digital silence wherever nobody
+    /// on the call speaks, so a session that reports digital silence is following the script, not failing.
+    /// A call that delivered no buffers at all (`noBuffers`) is still a problem. The transcriber refusing
+    /// `input_audio_buffer.clear` after Mute is expected on the scripted server.
+    static let ignoredReports: Set<String> = [
+        "callAudioSilent(ListenMoreCore.SilenceKind.digitalSilence)",
+        "transcriberClearRejected",
+    ]
+
+    static func isSessionProblem(_ report: String) -> Bool { !ignoredReports.contains(report) }
 
     public func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) {
         let report = String(describing: problem)

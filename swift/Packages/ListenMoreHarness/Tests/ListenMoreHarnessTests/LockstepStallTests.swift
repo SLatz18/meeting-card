@@ -44,9 +44,12 @@ final class LockstepStallTests: XCTestCase {
         XCTAssertFalse(record.problems.contains("lockstep stalled"))
     }
 
-    /// A reported silent call isn't a session problem on the scripted streams; any other report still is.
+    /// Digital silence on the call isn't a session problem on the scripted streams; a call that delivered
+    /// no buffers and any other report still is.
     func testASilentCallReportIsNotASessionProblem() {
         XCTAssertFalse(ScenarioRun.isSessionProblem("callAudioSilent(ListenMoreCore.SilenceKind.digitalSilence)"))
+        XCTAssertFalse(ScenarioRun.isSessionProblem("transcriberClearRejected"))
+        XCTAssertTrue(ScenarioRun.isSessionProblem("callAudioSilent(ListenMoreCore.SilenceKind.noBuffers)"))
         XCTAssertTrue(ScenarioRun.isSessionProblem("keyUnreadable"))
         XCTAssertTrue(ScenarioRun.isSessionProblem("lockstep stalled"))
     }
