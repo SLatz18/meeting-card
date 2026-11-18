@@ -22,6 +22,8 @@ harnessDependencies.append("CHarnessTLS")
 targets += [
     .target(name: "ListenMoreHarness", dependencies: harnessDependencies),
     .executableTarget(name: "lm-harness", dependencies: ["ListenMoreHarness"]),
+    // The self-pivot precision run (paid unless --dry-run); never run by CI.
+    .executableTarget(name: "lm-pivot-eval", dependencies: ["ListenMoreHarness"]),
     .testTarget(name: "ListenMoreHarnessTests", dependencies: ["ListenMoreHarness"]),
 ]
 
@@ -30,6 +32,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "lm-harness", targets: ["lm-harness"]),
+        .executable(name: "lm-pivot-eval", targets: ["lm-pivot-eval"]),
     ],
     dependencies: [
         .package(path: "../ListenMoreKit"),
