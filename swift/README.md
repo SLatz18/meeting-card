@@ -69,6 +69,7 @@ Login Items, switch MeetingCardSwift off (the app never unregisters or re-enable
 
 ## Known gaps
 
+- Coach mic and transcription (a Mac test showed a call with no mic and a transcription layer that stopped 3 s in): a failed first mic open is now logged and retried (at most three tries per 30 s while the session runs and isn't muted), and a short or rejected transcription commit no longer stops the layer. Not yet known: which step failed in that test, and whether a built-in mic that delivers nothing was a closed lid or voice processing. The set-aside line now carries buffer counts to tell them apart; a failed open's step and status aren't in the log yet. The coach's diagnostics log is not on `main`, so these events reach the system log only (subsystem `com.listenmore.kit`), and a refused commit is not logged at all, until that log lands.
 - Tall stacks: cards stack upward with no clamp, so 5+ cards (sooner with Next up lines: each adds 18pt) can run past `visibleFrame.maxY` and off the top of the screen. Not built: #8's "+N more" cap (show the first N cards and a "+N more" stub) is the planned fix; no clamping until then.
 
 ## Known edge cases (parity notes from the Python prototype)

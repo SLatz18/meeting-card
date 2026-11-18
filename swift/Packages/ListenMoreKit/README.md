@@ -17,7 +17,8 @@ Swift-native inside the app: no helper process, no interpreter.
 - `ListenMoreMac` (macOS only): mic capture (AVAudioEngine, routed by `MicPlan`: no voice processing
   on headphones, the built-in mic with Bluetooth output, voice processing with other-audio ducking
   at its minimum by `MicProcessing` on speakers; reopened on route changes by `RoutedMic` and
-  `CoreAudioRoutes`), call audio
+  `CoreAudioRoutes`, which also retries an open that failed, at most three times per 30 s while the
+  session runs unmuted), call audio
   (ScreenCaptureKit audio-only, Chromium helper fallback, Core Audio process tap), the Core Audio
   running-state provider, URLSession transports (ephemeral, no cache or cookies), Keychain store,
   glow overlay and `CoachService`. The host injects the glow style and the Keychain service name.
