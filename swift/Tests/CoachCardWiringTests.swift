@@ -174,10 +174,10 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertEqual(Theme.CoachCard.lingerGlyphText, .secondary, "a system label color: Increase Contrast darkens it")
     }
 
-    /// not_listening nudges are off unless MeetingCard turns them on.
+    /// not_listening and self_pivot nudges are off unless MeetingCard turns them on.
     func testNotListeningIsOffByDefault() throws {
         let controller = try read("App/CoachController.swift")
-        XCTAssertTrue(controller.contains("static let configOverrides: [String: Any] = [\"cues\": [\"disabled\": [CueType.notListening.rawValue]]]"))
+        XCTAssertTrue(controller.contains("static let configOverrides: [String: Any] = [\"cues\": [\"disabled\": [CueType.notListening.rawValue, CueType.selfPivot.rawValue]]]"))
         XCTAssertTrue(controller.contains("config = try ListenMoreConfig.load(overrides: Self.configOverrides)"))
     }
 

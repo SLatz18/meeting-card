@@ -536,6 +536,76 @@ final class CoachCardTests: XCTestCase {
                        "Coach on, listening. Let them finish", "the pill's label while the words hold: unchanged")
     }
 
+    /// The self-pivot cue: draft words and VoiceOver line, the glyph, the 4.5 s words then the glyph to 20 s, the
+    /// pill's tooltip, and nothing in any status but listening.
+    func testSelfPivotCueIsShownLikeAnyOther() {
+        let c = CoachCardCopy.SelfPivot.self
+        XCTAssertTrue(c.isDraft, "the VoiceOver line is still a placeholder")
+        XCTAssertEqual(c.words, "Ask how they feel")
+        XCTAssertEqual(c.announcement, "Call coach: ask how they feel about it.", "placeholder, pending final copy")
+        XCTAssertEqual(CoachNudge.Kind.selfPivot.rawValue, "self_pivot", "the Kit's CueType raw value")
+        let n = CoachNudge(kind: .selfPivot, tone: .amber)
+        XCTAssertEqual(n.words, c.words)
+        XCTAssertEqual(n.announcement, c.announcement)
+        XCTAssertEqual(Theme.CoachCard.Symbols.cue(.selfPivot), "person.fill.questionmark")
+        XCTAssertEqual(CoachCardCopy.Linger.accessibilityLabel(status: "Coach on, listening", words: n.words),
+                       "Coach on, listening. Last cue: Ask how they feel.", "the existing lingering template")
+
+        var h = CoachNudgeHold()
+        XCTAssertTrue(h.show(n, now: 10, status: .listening))
+        XCTAssertEqual(h.active(now: 14.49), n)
+        XCTAssertNil(h.active(now: 14.5), "the words show 4.5 s")
+        XCTAssertEqual(h.lingering(now: 14.5), n)
+        XCTAssertEqual(h.lingering(now: 29.99), n, "then the glyph lingers to 20 s")
+        XCTAssertNil(h.lingering(now: 30))
+
+        let words = CoachCardState(status: .listening, mute: Self.live, nudge: n, mode: .pill)
+        XCTAssertEqual(words.statusSymbol, "person.fill.questionmark")
+        XCTAssertEqual(words.pillTooltip, n.words, "the pill's tooltip is the words")
+        XCTAssertEqual(words.pillWidth, Theme.CoachPill.width)
+        let linger = CoachCardState(status: .listening, mute: Self.live, lingering: n, mode: .pill)
+        XCTAssertEqual(linger.statusSymbol, "person.fill.questionmark")
+        XCTAssertEqual(linger.pillTooltip, n.words)
+    }
+
+    /// The self-pivot cue's words outside listening: not shown, not kept, and nothing on the card or the pill.
+    func testSelfPivotWordsAreNotShownOutsideListening() {
+        let n = CoachNudge(kind: .selfPivot, tone: .amber)
+        for status in CoachCardState.Status.allCases where status != .listening {
+            var held = CoachNudgeHold()
+            XCTAssertFalse(held.show(n, now: 10, status: status), "\(status): not shown")
+            XCTAssertNil(held.nudge, "\(status): not kept")
+            XCTAssertNil(held.active(now: 10))
+            XCTAssertNil(held.lingering(now: 16), "\(status): nothing after Resume or unmute either")
+            for mode in [CoachCardState.Mode.card, .pill] {
+                let st = CoachCardState(status: status, mute: Self.live, coachMicMuted: status == .micOff, nudge: n, mode: mode)
+                XCTAssertNil(st.nudge, "\(status) \(mode)")
+                XCTAssertNil(st.cue, "\(status) \(mode)")
+                XCTAssertNil(st.tone, "no colored edge or tint")
+                XCTAssertEqual(st.pillTooltip, st.sizeControl.tooltip, "\(status) \(mode): not the words")
+                XCTAssertNotEqual(st.statusSymbol, "person.fill.questionmark", "\(status) \(mode)")
+            }
+        }
+    }
+
+    /// The self-pivot cue's lingering glyph outside listening: none, however it is handed in.
+    func testSelfPivotLingerIsNotShownOutsideListening() {
+        let n = CoachNudge(kind: .selfPivot, tone: .amber)
+        for status in CoachCardState.Status.allCases where status != .listening {
+            for mode in [CoachCardState.Mode.card, .pill] {
+                let st = CoachCardState(status: status, mute: Self.live, coachMicMuted: status == .micOff, lingering: n, mode: mode)
+                XCTAssertNil(st.lingering, "\(status) \(mode)")
+                XCTAssertNil(st.cue, "\(status) \(mode)")
+                XCTAssertNil(st.tone)
+                XCTAssertEqual(st.pillTooltip, st.sizeControl.tooltip, "\(status) \(mode): not the words")
+                XCTAssertNotEqual(st.statusSymbol, "person.fill.questionmark", "\(status) \(mode)")
+            }
+        }
+        let listening = CoachCardState(status: .listening, mute: Self.live, lingering: n, mode: .card)
+        XCTAssertEqual(listening.lingering, n, "the same state in listening does show it")
+        XCTAssertNil(listening.nudge, "a linger is not a nudge: no band, no tint")
+    }
+
     /// The pill's cue glyph in its tone stays visible on the pill's surface (3:1 for graphics) in
     /// light and dark.
     func testCueGlyphToneContrastOnThePill() {

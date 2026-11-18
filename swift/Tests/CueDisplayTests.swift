@@ -128,7 +128,7 @@ final class CueDisplayTests: XCTestCase {
         let yield = CoachNudge.Kind.allCases.filter { $0.direction == .yield }
         let engage = CoachNudge.Kind.allCases.filter { $0.direction == .engage }
         XCTAssertEqual(Set(yield), [.interrupt, .talkOver, .monologue, .talkShare])
-        XCTAssertEqual(Set(engage), [.missedQuestion, .notListening])
+        XCTAssertEqual(Set(engage), [.missedQuestion, .notListening, .selfPivot])
         XCTAssertEqual(CoachNudge.Kind.aggressive.direction, .tone)
         for a in CoachNudge.Kind.allCases {
             for b in CoachNudge.Kind.allCases {
@@ -136,6 +136,216 @@ final class CueDisplayTests: XCTestCase {
                 XCTAssertEqual(a.direction.conflicts(with: b.direction), expected, "\(a) \(b)")
             }
         }
+    }
+
+    /// The self-pivot cue: amber, engage, acted on at the next turn (not mid-sentence), 10 s from the end of the turn
+    /// it follows, anchored on the user's own line, ranked right after not_listening.
+    func testSelfPivotCueDisplayProperties() throws {
+        let k = CoachNudge.Kind.selfPivot
+        XCTAssertEqual(k.tone, .amber)
+        XCTAssertEqual(k.direction, .engage)
+        XCTAssertEqual(k.urgency, .nextTurn)
+        XCTAssertFalse(k.actionableMidSentence)
+        XCTAssertEqual(k.shelfLife, 10)
+        XCTAssertEqual(k.anchor, .you)
+        let order = CoachNudge.Kind.priorityOrder
+        XCTAssertEqual(order.firstIndex(of: k), try XCTUnwrap(order.firstIndex(of: .notListening)) + 1)
+        XCTAssertEqual(order.last, .talkShare)
+        XCTAssertEqual(k.priority, order.firstIndex(of: k))
+        XCTAssertTrue(k.direction.conflicts(with: CoachNudge.Kind.interrupt.direction), "it asks the user to talk: it conflicts with yielding")
+        XCTAssertFalse(k.direction.conflicts(with: CoachNudge.Kind.missedQuestion.direction))
+
+        // Held past its shelf life (measured from the turn's end, its onset) it is dropped, not shown late.
+        let events = [CueEvent(t: 1, onset: 0, kind: .interrupt), CueEvent(t: 4, onset: 3, kind: k)]
+        XCTAssertEqual(CueDisplayPacer.frame(at: 11, events: events).decisions.last, .shown(k, at: 11, waited: 7))
+        let late = [CueEvent(t: 1, onset: 0, kind: .interrupt), CueEvent(t: 4, onset: 0.5, kind: k)]
+        XCTAssertEqual(CueDisplayPacer.frame(at: 11, events: late).decisions.last, .stale(k, at: 11))
+    }
+
+    // MARK: scanning the sources for switches over the cue enums
+
+    /// Where the cue enums are switched over: the app, its Core, and the Kit's sources (not its tests).
+    static let sourceDirs = ["App", "Core", "Packages/ListenMoreKit/Sources/ListenMoreCore", "Packages/ListenMoreKit/Sources/ListenMoreMac"]
+
+    /// Every Swift source file under `sourceDirs`, as paths relative to the swift directory.
+    func sourceFiles() throws -> [String] {
+        try Self.sourceDirs.flatMap { dir -> [String] in
+            let root = Self.swiftDir.appendingPathComponent(dir).resolvingSymlinksInPath()
+            let names = try XCTUnwrap(FileManager.default.enumerator(atPath: root.path), dir).compactMap { $0 as? String }
+            return names.filter { $0.hasSuffix(".swift") }.sorted().map { "\(dir)/\($0)" }
+        }
+    }
+
+    /// `src` with comments and string literals (raw and multi-line too) blanked, newlines kept, so a brace or a
+    /// keyword inside one is never read as code.
+    static func stripped(_ src: String) -> String {
+        let c = Array(src), n = c.count
+        var out: [Character] = []
+        var i = 0
+        func blank(_ ch: Character) { out.append(ch == "\n" ? "\n" : " ") }
+        while i < n {
+            if c[i] == "/", i + 1 < n, c[i + 1] == "/" {
+                while i < n, c[i] != "\n" { blank(c[i]); i += 1 }
+            } else if c[i] == "/", i + 1 < n, c[i + 1] == "*" {
+                var depth = 0
+                repeat {
+                    if i + 1 < n, c[i] == "/", c[i + 1] == "*" { depth += 1; blank(c[i]); blank(c[i + 1]); i += 2 }
+                    else if i + 1 < n, c[i] == "*", c[i + 1] == "/" { depth -= 1; blank(c[i]); blank(c[i + 1]); i += 2 }
+                    else { blank(c[i]); i += 1 }
+                } while depth > 0 && i < n
+            } else if c[i] == "#" || c[i] == "\"" {
+                var hashes = 0
+                var j = i
+                while j < n, c[j] == "#" { hashes += 1; j += 1 }
+                guard j < n, c[j] == "\"" else { out.append(c[i]); i += 1; continue }
+                let multi = j + 2 < n && c[j + 1] == "\"" && c[j + 2] == "\""
+                let quote = String(repeating: "\"", count: multi ? 3 : 1) + String(repeating: "#", count: hashes)
+                let close = Array(quote)
+                var k = j + close.count - hashes
+                while k < n {
+                    if hashes == 0, c[k] == "\\" { k += 2; continue }
+                    if k + close.count <= n, Array(c[k..<(k + close.count)]) == close { k += close.count; break }
+                    k += 1
+                }
+                for idx in i..<min(k, n) { blank(c[idx]) }
+                i = min(k, n)
+            } else {
+                out.append(c[i]); i += 1
+            }
+        }
+        return String(out)
+    }
+
+    /// The bodies of the `switch` statements in `code` (already stripped), outermost and nested alike. A body holds
+    /// only its own arms: the text of a switch nested inside it is blanked, so each switch is judged on its own.
+    static func switchBodies(_ code: String) -> [String] {
+        let chars = Array(code)
+        let word = Array("switch")
+        var ranges: [Range<Int>] = []
+        var i = 0
+        while i + word.count < chars.count {
+            let before = i == 0 ? " " : chars[i - 1]
+            let after = chars[i + word.count]
+            guard Array(chars[i..<(i + word.count)]) == word, !(before.isLetter || before.isNumber || before == "_" || before == "."),
+                  !(after.isLetter || after.isNumber || after == "_") else { i += 1; continue }
+            guard let open = chars[i...].firstIndex(of: "{") else { break }
+            var depth = 0, j = open
+            while j < chars.count {
+                if chars[j] == "{" { depth += 1 } else if chars[j] == "}" { depth -= 1; if depth == 0 { break } }
+                j += 1
+            }
+            ranges.append((open + 1)..<min(j, chars.count))
+            i += word.count
+        }
+        return ranges.map { r in
+            var own = Array(chars[r])
+            for inner in ranges where inner != r && inner.lowerBound >= r.lowerBound && inner.upperBound <= r.upperBound {
+                for k in inner where own[k - r.lowerBound] != "\n" { own[k - r.lowerBound] = " " }
+            }
+            return String(own)
+        }
+    }
+
+    /// The cases only `LocalEvent.Kind` has. It shares `interrupt`, `talkOver`, `monologue` and `talkShare` with the
+    /// cue enums, so those four can't tell the two apart; these can.
+    static let localEventOnlyCases = ["prosody", "meOnset", "meOffset", "othersOnset", "othersOffset"]
+
+    /// The cue enums' case names (`CueType`, `CoachNudge.Kind`).
+    static let cueCases = ["interrupt", "talkOver", "aggressive", "notListening", "selfPivot", "missedQuestion", "monologue", "talkShare"]
+
+    /// A switch over a cue enum (`CueType`, `CoachNudge.Kind`): it names a cue case in an arm and none that only
+    /// `LocalEvent.Kind` has. A switch naming only the four shared names is taken for a cue switch, so a new one
+    /// with a `default:` can't hide behind `LocalEvent.Kind`; a real `LocalEvent.Kind` switch that names only
+    /// those four must be exhaustive too.
+    static func switchesOverCues(_ body: String) -> Bool {
+        func names(_ cases: [String]) -> Bool {
+            body.range(of: #"\bcase\b[^:]*\.(\#(cases.joined(separator: "|")))\b"#, options: .regularExpression) != nil
+        }
+        return names(cueCases) && !names(localEventOnlyCases)
+    }
+
+    /// A catch-all arm: `default:`, `case _:`, a wildcard in a list of patterns, or a bare binding.
+    static func hasCatchAll(_ body: String) -> Bool {
+        let patterns = [#"\bdefault\s*:"#,
+                        #"\bcase\b[^:]*(?<![\w.])_(?![\w])[^:]*:"#,
+                        #"\bcase\s+(let|var)\s+\w+\s*(where[^:]*)?:"#,
+                        #"\bcase\s+[a-z_]\w*\s*(where[^:]*)?:"#]
+        return patterns.contains { body.range(of: $0, options: .regularExpression) != nil }
+    }
+
+    /// The scanner itself: it finds a switch over the cue enums and every spelling of a catch-all, and passes a
+    /// switch that names every case.
+    func testScannerSpotsCatchAllArms() {
+        func flagged(_ src: String) -> [Bool] {
+            Self.switchBodies(Self.stripped(src)).filter(Self.switchesOverCues).map(Self.hasCatchAll)
+        }
+        XCTAssertEqual(flagged("switch k { case .aggressive: 1\n case .interrupt: 2 }"), [false])
+        XCTAssertEqual(flagged("switch k { case .aggressive: 1\n default: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .aggressive: 1\n case _: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .aggressive: 1\n case .interrupt, _: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case let other: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case other: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case _ where x: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .x: switch j { case .notListening: 1\n default: 2 } }"), [true], "a nested switch is judged on its own")
+        XCTAssertEqual(flagged("switch k { case .notListening: switch j { case .a: 1\n default: 2 } }"), [false], "and so is the outer one")
+        XCTAssertEqual(flagged("switch k { case .aggressive: switch j { case .prosody: 1\n case .meOnset: 2 }\n default: 3 }"), [true],
+                       "a nested LocalEvent.Kind switch doesn't make the outer one a LocalEvent.Kind switch")
+        XCTAssertEqual(flagged("switch k { case .missedQuestion: 1 } // default: _\nlet s = \"default:\""), [false], "comments and strings don't count")
+        XCTAssertEqual(flagged("switch s { case \"not_listening\": 1\n default: 2 }"), [], "a switch over a String isn't one over the enums")
+        XCTAssertEqual(flagged("switch e { case .prosody: 1\n case .interrupt: 2\n default: 3 }"), [], "LocalEvent.Kind: it has cases the cues don't")
+        XCTAssertEqual(flagged("switch e { case .interrupt, .talkOver: 1\n case .monologue: 2\n default: 3 }"), [true],
+                       "naming only the four names the two enums share still counts as a cue switch")
+        XCTAssertEqual(flagged("switch e { case .talkShare: 1\n default: 2 }"), [true])
+        XCTAssertEqual(flagged("switch e { case .interrupt: 1\n case .talkOver: 2\n case .monologue: 3\n case .talkShare: 4 }"), [false])
+    }
+
+    /// No `default:`, `case _:` or other catch-all in any switch over the cue enums, wherever it is: a new cue type
+    /// fails to compile until every switch handles it. The files come from scanning the sources, not a list.
+    func testCueSwitchesHaveNoCatchAll() throws {
+        var checked = Set<String>()
+        for file in try sourceFiles() {
+            let switches = Self.switchBodies(Self.stripped(try read(file))).filter(Self.switchesOverCues)
+            if !switches.isEmpty { checked.insert(file) }
+            for body in switches { XCTAssertFalse(Self.hasCatchAll(body), "\(file): a switch over the cue enums has a catch-all arm") }
+        }
+        for file in ["Core/CoachCard.swift", "Core/CueDisplay.swift", "Core/Theme.swift", "Packages/ListenMoreKit/Sources/ListenMoreCore/Config.swift"] {
+            XCTAssertTrue(checked.contains(file), "the scan finds the switches in \(file)")
+        }
+    }
+
+    /// The self-pivot cue stays off in MeetingCard, and nothing in the code raises it yet. The files that may name
+    /// it are the ones that define, colour, rank, draw or disable it; every other source file under `sourceDirs`
+    /// is scanned (the judges, the engines, the rules, the session, the pipeline and the views included), so a new
+    /// file that raises it fails here without anyone adding it to a list. PivotGate.swift (#39) is picked up
+    /// the same way once this is restacked onto it: that PR's allowance for it belongs in `mayNameSelfPivot`.
+    static let mayNameSelfPivot: Set<String> = [
+        "App/CoachController.swift",
+        "Core/CoachCard.swift", "Core/CueDisplay.swift", "Core/Theme.swift",
+        "Packages/ListenMoreKit/Sources/ListenMoreCore/Config.swift",
+        "Packages/ListenMoreKit/Sources/ListenMoreCore/CuePolicy.swift",
+        "Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift",
+    ]
+
+    func testSelfPivotIsDisabledAndNeverRaised() throws {
+        let controller = try read("App/CoachController.swift")
+        XCTAssertTrue(controller.contains("CueType.selfPivot.rawValue"))
+        let files = try sourceFiles()
+        for file in Self.mayNameSelfPivot { XCTAssertTrue(files.contains(file), "\(file) is a source file") }
+        for file in ["LocalLayer", "TextRules", "GptLayer", "CoachPipeline", "EngineBridge", "CoachSession", "TypeSafeJudge", "JudgeProvider",
+                     "LocalCoachEngine", "SystemOne"].map({ "Packages/ListenMoreKit/Sources/ListenMoreCore/\($0).swift" }) {
+            XCTAssertTrue(files.contains(file), "the scan covers \(file)")
+        }
+        for file in files where !Self.mayNameSelfPivot.contains(file) {
+            let code = try read(file)
+            XCTAssertFalse(code.contains(".selfPivot") || code.contains("self_pivot"), "\(file) raises or shows the self-pivot cue")
+        }
+        // The controller may name it only to disable it: its comment and the one configOverrides line, nothing else.
+        let naming = controller.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.contains(".selfPivot") || $0.contains("self_pivot") }
+        XCTAssertEqual(naming.filter { !$0.hasPrefix("///") }.count, 1, "one non-comment line names the cue in CoachController.swift")
+        XCTAssertTrue(naming.allSatisfy { $0.hasPrefix("///") || $0.hasPrefix("static let configOverrides: [String: Any] = ") },
+                      "CoachController.swift names the cue only in configOverrides: \(naming)")
+        XCTAssertEqual(controller.components(separatedBy: ".selfPivot").count - 1, 1, "exactly one .selfPivot in CoachController.swift")
     }
 
     /// Words for the hold, then the linger (glyph, row mark) fading to nothing.
@@ -308,7 +518,7 @@ final class CueDisplayTests: XCTestCase {
         // The test-only files, found in the tree: their first #if mentions MEETINGCARD_TEST_ID and they end in #endif.
         var found: [String] = []
         for dir in ["App", "Core"] {
-            let root = Self.swiftDir.appendingPathComponent(dir)
+            let root = Self.swiftDir.appendingPathComponent(dir).resolvingSymlinksInPath()
             let files = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
             for case let url as URL in files where url.pathExtension == "swift" {
                 let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
@@ -324,7 +534,8 @@ final class CueDisplayTests: XCTestCase {
         // Excluded by file name: no other source may share one.
         var names: [String: Int] = [:]
         for dir in ["App", "Core"] {
-            let files = try XCTUnwrap(FileManager.default.enumerator(at: Self.swiftDir.appendingPathComponent(dir), includingPropertiesForKeys: nil))
+            let root = Self.swiftDir.appendingPathComponent(dir).resolvingSymlinksInPath()
+            let files = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
             for case let url as URL in files where url.pathExtension == "swift" { names[url.lastPathComponent, default: 0] += 1 }
         }
         for name in listed { XCTAssertEqual(names[name], 1, "\(name): exactly one file by that name") }

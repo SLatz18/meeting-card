@@ -490,6 +490,7 @@ public enum Theme {
                 case .talkOver: "bubble.left.and.bubble.right.fill"
                 case .aggressive: "thermometer.medium"
                 case .notListening: "arrowshape.turn.up.left.fill"
+                case .selfPivot: "person.fill.questionmark"
                 case .missedQuestion: "questionmark.bubble.fill"
                 case .monologue: "timer"
                 case .talkShare: "chart.pie.fill"

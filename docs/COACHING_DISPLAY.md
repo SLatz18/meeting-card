@@ -30,8 +30,9 @@ status glyph after the words go, put the glyph state on the pill, and leave capt
 
 ## 1. Cue inventory (from the code)
 
-ListenMoreCore can emit seven cue types (`CueType` in `ListenMoreCore/CuePolicy.swift`; the card mirrors them as
-`CoachNudge.Kind`). Thresholds are the built-in config (`ListenMoreCore/DefaultConfig.swift`).
+ListenMoreCore defines eight cue types (`CueType` in `ListenMoreCore/CuePolicy.swift`; the card mirrors them as
+`CoachNudge.Kind`); seven can be raised today (`self_pivot` is defined and displayable, but nothing raises it
+yet). Thresholds are the built-in config (`ListenMoreCore/DefaultConfig.swift`).
 
 | Cue | Source and trigger | Tone | Priority | Urgency | Mid-sentence? | Card words (shipped) |
 |---|---|---|---|---|---|---|
@@ -41,7 +42,8 @@ ListenMoreCore can emit seven cue types (`CueType` in `ListenMoreCore/CuePolicy.
 | `aggressive` | Transcript rule (`TextRules.heat`, needs a key): absolutes, frustration words, profanity, contradiction openers and repeated clauses, scored over 15 s windows; vetoed by an apology or a personal topic; once per user turn; never in the first 5 minutes of a call; lexicon-only heat also needs a loudness or speaking-rate rise. The TypeSafe judge can also decide it. | rose | 4 | next sentence | no: soften the next sentence | Ease the tone |
 | `monologue` | Local audio (`LocalLayer.monologue`): the user's run passes 60 s (soft) and 90 s (strong); soft earlier (from 30 s) when the run is 2.5× the user's median run; both doubled right after a how/why question; none during the user's slot in a round of updates. | amber | 5 | now | yes: wrap up | Pause and hand over |
 | `not_listening` | GPT judge (or TypeSafe) on the user's reply right after the other side made a point of at least 4 words; confidence at least 0.85; skipped during a run of 30 s or more. **Off by default in MeetingCard** (`CoachController.configOverrides` disables it). | amber | 6 | next turn | no | Respond to their point |
-| `talk_share` | Local audio (`LocalLayer.talkShare`): the user's share of speech over a rolling 10 min passes 70% (1:1) or 65% (group), once at least 5 min of speech has been heard; re-arms below the limit minus 5 points. | amber | 7 | trend | no | Leave room for others |
+| `self_pivot` | Not raised yet: the type, its glyph (`person.fill.questionmark`) and its draft words are in place, and **off in MeetingCard** (`CoachController.configOverrides` disables it). It will follow the end of the other side's turn, so its shelf life is 10 s from the turn's end; the caption anchor is the user's own line. | amber | 7 | next turn | no | Ask how they feel (draft) |
+| `talk_share` | Local audio (`LocalLayer.talkShare`): the user's share of speech over a rolling 10 min passes 70% (1:1) or 65% (group), once at least 5 min of speech has been heard; re-arms below the limit minus 5 points. | amber | 8 | trend | no | Leave room for others |
 
 How cues reach the card (`CuePolicy`, applied in the engine's pipeline and again in `CoachSession`): one cue at a
 time; **no cue within 20 s of any other cue** (`cues.global_cooldown_s`) and none within 20 s of the same type
@@ -153,7 +155,7 @@ widens.
 - **Small or collapsed**: the best fit: the pill keeps its size and shape; the glyph carries the cue.
 - **VoiceOver**: the announcement fires on show; while the glyph lingers, the status reads "Coach on, listening.
   Last cue: Let them finish, 12 s ago." (placeholder).
-- **Trade-off**: calmest, and a later glance still catches a recent cue. But a glyph has to be learned (seven of
+- **Trade-off**: calmest, and a later glance still catches a recent cue. But a glyph has to be learned (eight of
   them), and decoding it takes longer than reading the words, which matters most for the urgent cues.
 
 ### D. Caption-anchored — prototyped
@@ -278,7 +280,7 @@ and don't build caption anchoring (D) or the stack (B) now. Keep the 10 s displa
 1. **Card**: words for the hold plus a lingering glyph (recommended), or the glyph state on the card too?
 2. **Pill**: glyph only with words on hover (recommended), or keep the shipped widening pill?
 3. **N = 10 s**: fine as a display gate? (It never acts under the shipped 20 s policy.)
-4. **Glyph set**: are the seven glyphs right, in particular the thermometer for heat and the timer for monologue?
+4. **Glyph set**: are the eight glyphs right, in particular the thermometer for heat and the timer for monologue?
 5. **Copy**: the writer needs the strings listed in the PR (ages, VoiceOver labels, the lab's labels).
 
 ## Comparing the options on a Mac

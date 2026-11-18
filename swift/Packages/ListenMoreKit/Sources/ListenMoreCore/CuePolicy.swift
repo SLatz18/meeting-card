@@ -8,6 +8,7 @@ public enum CueType: String, CaseIterable, Equatable, Sendable {
     case talkOver = "talk_over"
     case aggressive
     case notListening = "not_listening"
+    case selfPivot = "self_pivot"
     case missedQuestion = "missed_question"
     case monologue
     case talkShare = "talk_share"

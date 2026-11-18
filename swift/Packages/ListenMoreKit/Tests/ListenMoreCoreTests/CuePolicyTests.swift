@@ -88,6 +88,47 @@ final class CuePolicyTests: XCTestCase {
         XCTAssertNotNil(p.offer(.interrupt, t: 1, onset: 1, source: .local), "other cues are unaffected and no cooldown was used")
     }
 
+    /// self_pivot is a cue type of its own: amber, ranked right after not_listening, off by host choice, and not
+    /// something either judge can decide (nothing raises it yet).
+    func testSelfPivotCueType() {
+        XCTAssertEqual(CueType.selfPivot.rawValue, "self_pivot")
+        XCTAssertEqual(CueType(rawValue: "self_pivot"), .selfPivot)
+        XCTAssertTrue(CueType.allCases.contains(.selfPivot))
+        XCTAssertFalse(CueType.judged.contains(.selfPivot))
+        XCTAssertNil(CueType(gptLabel: "self_pivot"))
+        for provider in [JudgeProviderKind.gpt, .typesafe] {
+            XCTAssertNil(CueType(judgeLabel: "self_pivot", provider: provider), "\(provider)")
+            XCTAssertFalse(CueType.decided(by: provider).contains(.selfPivot), "\(provider)")
+        }
+        XCTAssertEqual(config.cues.colors["self_pivot"], .amber)
+        let p = CuePolicy(config: config.cues)
+        XCTAssertEqual(p.offer(.selfPivot, t: 0, onset: 0, source: .text)?.color, .amber)
+
+        var cues = config.cues
+        cues.disabled = ["self_pivot"]
+        let off = CuePolicy(config: cues)
+        XCTAssertNil(off.offer(.selfPivot, t: 0, onset: 0, source: .text))
+        XCTAssertEqual(off.suppressed, 0, "not held: never offered")
+    }
+
+    /// The shipped priority puts self_pivot right after not_listening: of cues raised together it beats
+    /// talk_share and loses to not_listening.
+    func testSelfPivotRanksRightAfterNotListening() {
+        let order = config.cues.priority
+        let i = order.firstIndex(of: "not_listening")
+        XCTAssertNotNil(i)
+        XCTAssertEqual(order.firstIndex(of: "self_pivot"), i.map { $0 + 1 })
+        XCTAssertEqual(order.last, "talk_share")
+        let both = CuePolicy(config: config.cues).offerMany([CueSuggestion(type: .talkShare, t: 5, onset: 4, source: .local),
+                                                             CueSuggestion(type: .selfPivot, t: 5, onset: 4, source: .text)])
+        XCTAssertEqual(both.map(\.type), [.selfPivot])
+        let pair = CuePolicy(config: config.cues)
+        XCTAssertEqual(pair.offerMany([CueSuggestion(type: .selfPivot, t: 5, onset: 4, source: .text),
+                                       CueSuggestion(type: .notListening, t: 5, onset: 4, source: .gpt, confidence: 0.9)]).map(\.type),
+                       [.notListening])
+        XCTAssertEqual(pair.held.map(\.type), [.selfPivot])
+    }
+
     func testJudgeOnlyDecidesNotListening() {
         XCTAssertEqual(CueType(gptLabel: "not_listening"), .notListening)
         for label in ["none", "interrupting", "aggressive", "missed_question"] {
