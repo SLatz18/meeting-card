@@ -87,6 +87,12 @@ case "${1:-}" in
         [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
       done
     done
+    # Saved transcripts as Obsidian notes: the transcript settings, and with a vault, the daily-note line and retention.
+    for s in transcript-settings transcript-settings-obsidian; do
+      for a in light dark; do
+        [[ -s "$OUT/packet-$s-$a.png" ]] || { echo "missing packet-$s-$a.png" >&2; missing=1; }
+      done
+    done
     # Start Coach while off shows in Settings at once (UISnapshots.startToggleCheck), light and dark.
     for a in light dark; do
       grep -q "coach check start-toggle-$a before=off open=on reopened=on fresh=on" "$OUT/coach-shots.log" \
