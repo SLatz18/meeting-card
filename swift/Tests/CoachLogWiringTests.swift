@@ -71,4 +71,16 @@ final class CoachLogWiringTests: XCTestCase {
         XCTAssertTrue(quit.contains("service?.quit()"))
         XCTAssertTrue(quit.contains("CoachLog.flush()"))
     }
+
+    /// The log can contain device names, and both the README and the menu item say so.
+    func testDeviceNamesAreDisclosed() throws {
+        let readme = try String(contentsOf: Self.swiftDir.deletingLastPathComponent().appendingPathComponent("README.md"), encoding: .utf8)
+        let line = try XCTUnwrap(readme.components(separatedBy: "\n").first { $0.hasPrefix("- Coach log:") })
+        XCTAssertTrue(line.contains("audio devices"))
+        XCTAssertTrue(line.contains("you gave"))
+        XCTAssertFalse(readme.contains("pkill"), "Quit is in the menu")
+        let copy = try read("App/CoachCopy.swift")
+        let help = try XCTUnwrap(copy.components(separatedBy: "\n").first { $0.contains("static let menuShowCoachLogHelp") })
+        XCTAssertTrue(help.contains("audio devices"))
+    }
 }

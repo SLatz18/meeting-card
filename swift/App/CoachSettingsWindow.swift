@@ -22,6 +22,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let permissionNote = CoachSettingsWindow.text(CoachCopy.permissionDenied, font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let keyField = NSSecureTextField()
     private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
+    /// The note under the key field, as a kind (so it can be cleared when the call it names ends).
+    private var keyNoticeKind: KeyNotice?
     private let keyNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
     /// The placeholder the key field shows now (never the key), so it is redrawn only when the Keychain differs.
     private var shownKeyPlaceholder: KeyPlaceholder?
@@ -148,6 +150,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     func present() {
         window.center()
+        keyNoticeKind = nil
         keyNote.stringValue = ""
         scrollToTopOnNextFit = true
         update()
@@ -647,6 +650,11 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     }
 
     private func applyState() {
+        // A note that names "this call" or "the next call" goes when that call has ended.
+        if !(coach.service?.isCapturing ?? false), let kind = keyNoticeKind, kind.clearedAtCallEnd != kind {
+            keyNoticeKind = kind.clearedAtCallEnd
+            keyNote.stringValue = keyNoticeKind.map(Self.noteText) ?? ""
+        }
         screenshotsSwitch.state = coach.showInScreenshots ? .on : .off
         toggle.state = coach.enabled ? .on : .off
         startButton.isHidden = !(coach.enabled && (coach.indicator == .hidden || coach.indicator == .on))
@@ -740,6 +748,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         var keyStatusEmpty: Bool
         var keyNoteEmpty: Bool
         var windowVisible: Bool
+        var capturing: Bool
         var noMicNote: Bool
         var callControlsOn: Bool
         var callNeeds: CoachController.CallControlsNeeds
@@ -775,6 +784,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             keyStatusEmpty: keyStatus.stringValue.isEmpty,
             keyNoteEmpty: keyNote.stringValue.isEmpty,
             windowVisible: visible,
+            capturing: coach.service?.isCapturing ?? false,
             noMicNote: visible && NoMicNotice.showsSettingsNote(builtInMicPresent: CoreAudioRoutes().snapshot().builtInInput != nil),
             callControlsOn: coach.callControlsOn,
             callNeeds: visible ? coach.callControlsNeeds() : CoachController.CallControlsNeeds(),
@@ -838,10 +848,12 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     @objc private func keyEntered(_ sender: NSSecureTextField) {
         let text = sender.stringValue
         sender.stringValue = ""
+        let hadKey = coach.keyStored
         coach.saveKey(text) { [weak self] check in
             guard let self else { return }
             self.keyStatus.stringValue = self.message(check) ?? ""
-            self.keyNote.stringValue = KeyNotice.after(check, callCapturing: self.coach.service?.isCapturing ?? false).map(Self.noteText) ?? ""
+            self.keyNoticeKind = KeyNotice.after(check, callCapturing: self.coach.service?.isCapturing ?? false, hadKey: hadKey)
+            self.keyNote.stringValue = self.keyNoticeKind.map(Self.noteText) ?? ""
             self.update()
         }
     }

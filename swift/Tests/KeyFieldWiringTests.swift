@@ -22,7 +22,10 @@ final class KeyFieldWiringTests: XCTestCase {
         XCTAssertTrue(update.contains("refreshKeyField()"), "every refresh, including when the window is shown")
         let present = try XCTUnwrap(src.components(separatedBy: "    func present() {").dropFirst().first?.components(separatedBy: "\n    }\n").first)
         XCTAssertTrue(present.contains("update()"))
-        XCTAssertTrue(src.contains("KeyNotice.after(check, callCapturing: self.coach.service?.isCapturing ?? false)"))
+        XCTAssertTrue(src.contains("KeyNotice.after(check, callCapturing: self.coach.service?.isCapturing ?? false, hadKey: hadKey)"))
+        XCTAssertTrue(src.contains("let hadKey = coach.keyStored"), "read before the save changes it")
+        XCTAssertTrue(src.contains("kind.clearedAtCallEnd"), "a call-specific note is cleared when the call ends")
+        XCTAssertTrue(src.contains("var capturing: Bool"), "the call ending is a change the refresh sees")
         let copy = try read("App/CoachCopy.swift")
         XCTAssertTrue(copy.contains("static let keySavedNextCallNote = \"Key saved. It will be used from your next call.\""))
     }

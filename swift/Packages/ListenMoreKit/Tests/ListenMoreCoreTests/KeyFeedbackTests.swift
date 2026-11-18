@@ -46,6 +46,23 @@ final class KeyFeedbackTests: XCTestCase {
         XCTAssertEqual(KeyNotice.after(.unreachable, callCapturing: true), .savedForNextCall)
     }
 
+    /// Removing a key that was never stored says nothing; one that was says so.
+    func testRemoveNoticeOnlyWhenAKeyExisted() {
+        XCTAssertNil(KeyNotice.after(.empty, callCapturing: false, hadKey: false))
+        XCTAssertNil(KeyNotice.after(.empty, callCapturing: true, hadKey: false))
+        XCTAssertEqual(KeyNotice.after(.empty, callCapturing: false, hadKey: true), .removed)
+        XCTAssertEqual(KeyNotice.after(.empty, callCapturing: true, hadKey: true), .removedAfterThisCall)
+        XCTAssertEqual(KeyNotice.after(.ok, callCapturing: false, hadKey: false), .saved, "saving needs no earlier key")
+    }
+
+    /// The "next call" and "this call" notes go when the call ends; the others stay.
+    func testCallSpecificNotesAreClearedAtCallEnd() {
+        XCTAssertNil(KeyNotice.savedForNextCall.clearedAtCallEnd)
+        XCTAssertNil(KeyNotice.removedAfterThisCall.clearedAtCallEnd)
+        XCTAssertEqual(KeyNotice.saved.clearedAtCallEnd, .saved)
+        XCTAssertEqual(KeyNotice.removed.clearedAtCallEnd, .removed)
+    }
+
     func testDelete() {
         XCTAssertEqual(KeyNotice.after(.empty, callCapturing: false), .removed)
         XCTAssertEqual(KeyNotice.after(.empty, callCapturing: true), .removedAfterThisCall)

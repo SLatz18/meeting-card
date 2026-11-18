@@ -30,14 +30,25 @@ public enum KeyNotice: Equatable, Sendable {
     /// The key is removed, but this call's GPT layer already holds it and keeps it until the call ends.
     case removedAfterThisCall
 
+    /// What is still true once the call ends: a note about "this call" or "the next call" is cleared,
+    /// since that call is over.
+    public var clearedAtCallEnd: KeyNotice? {
+        switch self {
+        case .saved, .removed: self
+        case .savedForNextCall, .removedAfterThisCall: nil
+        }
+    }
+
     /// The notice for the result of a key action, or nil when nothing changed (a rejected key is not
-    /// saved, and its error line is the message). `callCapturing`: capture is running right now.
+    /// saved, and its error line is the message). `callCapturing`: capture is running right now. `hadKey`:
+    /// a key was stored before the action (removing a key that was never there says nothing).
     /// The key is read only when capture starts (`CoachSession.startCapture`) and handed to the
     /// engine for that call, so while capture runs a change cannot reach it.
-    public static func after(_ check: KeyCheck, callCapturing: Bool) -> KeyNotice? {
+    public static func after(_ check: KeyCheck, callCapturing: Bool, hadKey: Bool = true) -> KeyNotice? {
         switch check {
         case .rejected: nil
-        case .empty: callCapturing ? .removedAfterThisCall : .removed
+        // Blank text with no key stored removed nothing: there is nothing to confirm.
+        case .empty: !hadKey ? nil : callCapturing ? .removedAfterThisCall : .removed
         case .ok, .unreachable: callCapturing ? .savedForNextCall : .saved
         }
     }
