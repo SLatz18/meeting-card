@@ -72,12 +72,19 @@ jobs:
       - name: Cue display prototype only in the test build
         working-directory: swift
         run: |
+          set -euo pipefail
           bins() { echo "$1/Contents/MacOS/MeetingCardSwift" "$1/Contents/Frameworks/MeetingCardCore.framework/MeetingCardCore"; }
-          shipping=build/dd/Build/Products/Release/MeetingCardSwift.app
-          testbuild=build/dd-test/Build/Products/Release/MeetingCardSwift.app
+          read -ra shipping <<<"$(bins build/dd/Build/Products/Release/MeetingCardSwift.app)"
+          read -ra testbuild <<<"$(bins build/dd-test/Build/Products/Release/MeetingCardSwift.app)"
+          # A missing or empty binary has no markers to find: fail rather than count it as clean.
+          for b in "${shipping[@]}" "${testbuild[@]}"; do
+            test -s "$b" || { echo "missing binary: $b"; exit 1; }
+          done
+          shipping_strings=$(strings -a "${shipping[@]}")
+          test_strings=$(strings -a "${testbuild[@]}")
           for marker in "MeetingCard cue display prototype" "Cue Display Prototype" "CueDisplayPacer" "CueDisplayLabView" "CueTimeline" "CoachCueDisplayLab"; do
-            in_shipping=$(strings -a $(bins "$shipping") | grep -c "$marker" || true)
-            in_test=$(strings -a $(bins "$testbuild") | grep -c "$marker" || true)
+            in_shipping=$(grep -c -- "$marker" <<<"$shipping_strings" || true)
+            in_test=$(grep -c -- "$marker" <<<"$test_strings" || true)
             echo "$marker: shipping $in_shipping, test build $in_test"
             test "$in_shipping" -eq 0
             test "$in_test" -gt 0
