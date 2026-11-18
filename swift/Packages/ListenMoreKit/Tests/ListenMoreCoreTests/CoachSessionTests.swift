@@ -243,6 +243,37 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertTrue(renderer.rendered.isEmpty)
     }
 
+    /// A call that never starts says why in the log, once per change and once per ten seconds otherwise; the
+    /// line when it does start says so, with the timer.
+    func testCoachLogExplainsWhyNoSessionStarts() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let (s, provider) = audioSession()
+        s.permissionSummary = { .notGranted }
+        func detect() -> [String] { sink.lines.filter { $0.hasPrefix("detect.check") } }
+        provider.inputRunning = false
+        for _ in 0..<45 { clock.advance(0.5); s.tick() }
+        XCTAssertEqual(detect().count, 3, "a change, then one heartbeat each ten seconds: \(detect())")
+        XCTAssertTrue(detect().allSatisfy { $0.contains("reason=inputDeviceIdle") && $0.hasSuffix("perm=notGranted") })
+
+        provider.inputRunning = true
+        provider.processes = [AudioProcessState(pid: 50, bundleId: "us.zoom.xos", isRunningInput: true, isRunningOutput: false),
+                              AudioProcessState(pid: 61, bundleId: "com.example.recorder", isRunningInput: true, isRunningOutput: true)]
+        clock.advance(0.5); s.tick()
+        XCTAssertEqual(detect().last, "detect.check micApp=us.zoom.xos callAudio=false result=notMet reason=noCallAudio perm=notGranted")
+
+        provider.processes = [AudioProcessState(pid: 50, bundleId: "us.zoom.xos", isRunningInput: true, isRunningOutput: true)]
+        clock.advance(0.5); s.tick()
+        XCTAssertEqual(detect().last, "detect.check micApp=us.zoom.xos callAudio=true result=notMet reason=startTimer timerS=0 perm=notGranted")
+        poll(s, seconds: 3)
+        XCTAssertEqual(s.indicator, .listening)
+        XCTAssertTrue(detect().contains { $0.contains("result=met reason=started") && $0.contains("timerS=3") }, "\(detect())")
+        clock.advance(0.5); s.tick()
+        XCTAssertTrue(detect().last?.contains("reason=inSession") ?? false)
+        XCTAssertFalse(sink.lines.contains { $0.contains("sk-") })
+    }
+
     func testHelperFallbackEscalates() async {
         let s = makeSession()
         meetInDia()

@@ -75,6 +75,7 @@ public final class CoachService: CoachSessionDelegate {
                                signal: AudioActivitySignal(provider: provider), keys: keys, renderer: glow,
                                settings: settings, enabled: enabled, callState: callState)
         session.delegate = self
+        session.permissionSummary = { Self.permissionSummary() }
         glow.placement = { [weak self] in
             guard let self else { return .init(screen: nil) }
             let screen = self.locateScreen(self.session.session?.appKey, self.fallbackScreen())
@@ -160,6 +161,16 @@ public final class CoachService: CoachSessionDelegate {
             }
         }
         onChange?()
+    }
+
+    /// Granted when both the mic and screen recording are; unknown while the mic's answer is still pending.
+    static func permissionSummary() -> PermissionSummary {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return CGPreflightScreenCaptureAccess() ? .granted : .notGranted
+        case .denied, .restricted: return .notGranted
+        case .notDetermined: return .unknown
+        @unknown default: return .unknown
+        }
     }
 
     /// What the OS says about the two permissions a call needs, when a session starts. There is no public

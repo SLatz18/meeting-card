@@ -213,6 +213,11 @@ public struct CoachTrigger: Sendable {
 
     public var isActive: Bool { session != nil }
     public var isCapturing: Bool { session.map { !$0.held } ?? false }
+    /// Seconds each app has had its input and output running together, for the diagnostics.
+    public func startTimers(now: Double) -> [String: Double] {
+        qualifyingSince.mapValues { max(0, now - $0) }
+    }
+
     /// The session's app reports its call ended; the session itself ends `endedStopAfterS` later.
     public var callEndPending: Bool { session != nil && endedSince != nil }
 

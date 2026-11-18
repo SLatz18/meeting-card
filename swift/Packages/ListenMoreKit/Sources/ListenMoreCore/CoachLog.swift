@@ -149,6 +149,9 @@ public enum CoachLogEvent: Equatable, Sendable {
     case callAudioStarted(stage: CaptureStage, method: CaptureMethod, targets: Int)
     case callAudioFailed(stage: CaptureStage, domain: LogToken, code: Int)
     case callAudioStopped(code: Int)
+    /// One call-detection check: which app holds the mic, whether it plays audio, and why a session did
+    /// or did not start.
+    case detectCheck(DetectionCheck)
     case permission(PermissionKind, PermissionState)
     case transcriberConnected(speaker: Speaker, model: LogToken)
     case transcriberDisconnected(speaker: Speaker)
@@ -195,6 +198,10 @@ public enum CoachLogEvent: Equatable, Sendable {
         case .callAudioFailed(let stage, let domain, let code):
             return line("callAudio.failed", ("stage", .word(stage.name)), ("domain", .token(domain)), ("code", .number(code)))
         case .callAudioStopped(let code): return line("callAudio.stopped", ("code", .number(code)))
+        case .detectCheck(let c):
+            return line("detect.check", ("micApp", .word(c.micApp?.value ?? "none")), ("callAudio", .flag(c.callAudio)),
+                        ("result", .word(c.result.rawValue)), ("reason", .word(c.reason.rawValue)), ("timerS", .number(c.timerSeconds)),
+                        ("perm", .word(c.permission.rawValue)))
         case .permission(let kind, let state): return line("permission", ("kind", .word(kind.rawValue)), ("state", .word(state.rawValue)))
         case .transcriberConnected(let speaker, let model):
             return line("transcriber.connected", ("speaker", .word(Self.name(speaker))), ("model", .token(model)))

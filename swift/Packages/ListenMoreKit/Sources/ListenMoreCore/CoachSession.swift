@@ -110,6 +110,9 @@ public final class CoachSession {
     private let micGate = AudioGate()
     private var fallback = CaptureFallbackPolicy()
     private let callLevel = CallLevelMeter()
+    private var detectionThrottle = DetectionLogThrottle()
+    /// What the host knows about the permissions a call needs; shown beside each detection check.
+    public var permissionSummary: () -> PermissionSummary = { .unknown }
     private var shownAt: [CueType: TimeInterval] = [:]
     private var timer: Timer?
     private var callTask: Task<Void, Never>?
@@ -292,12 +295,25 @@ public final class CoachSession {
         let reading = signal.poll(trigger.settings)
         let actions = trigger.tick(liveApps: reading.liveApps, inputRunning: reading.inputRunning, now: wallClock(),
                                    callStates: callState?.callStates() ?? [:])
+        logDetection(actions)
         apply(actions)
         // A manual session adopting the call app changes what to capture without an action.
         let captureChanged = actions.isEmpty && syncCapture()
         let micChanged = syncMic()
         if actions.isEmpty && (captureChanged || micChanged || indicator != before) { changed() }
         checkCallFallback()
+    }
+
+    /// One detection check, logged when what was seen or decided changes, else once per ten seconds.
+    private func logDetection(_ actions: [TriggerAction]) {
+        guard let snapshot = signal.detectionSnapshot() else { return }
+        let now = wallClock()
+        let started = actions.contains { if case .start = $0 { return true } else { return false } }
+        let check = DetectionDiagnostics.evaluate(snapshot: snapshot, settings: trigger.settings, enabled: trigger.enabled,
+                                                  inSession: trigger.session != nil, suppressed: trigger.suppressed,
+                                                  startTimers: trigger.startTimers(now: now), started: started,
+                                                  permission: permissionSummary())
+        if detectionThrottle.shouldLog(check, now: now) { CoachLog.record(.detectCheck(check)) }
     }
 
     private func apply(_ actions: [TriggerAction]) {
