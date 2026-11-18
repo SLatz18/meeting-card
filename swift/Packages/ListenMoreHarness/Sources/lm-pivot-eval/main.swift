@@ -91,8 +91,8 @@ func main() async -> Int32 {
         say("cost log: \(dir.appendingPathComponent("cost-log.jsonl").path)")
         say("false self_pivot cues on negatives: \(report.falseCues.count) of \(report.negatives.count) (bar: 0)")
         say(String(format: "recall %.0f%% vs shadow %.0f%%", report.recall * 100, report.shadowRecall * 100))
-        say("requests \(report.requests), without store false \(report.storeViolations), cue judge requests \(report.otherJudgeRequests), "
-            + "cases with an uncounted request \(report.requestMismatches.count)")
+        say("judge calls \(report.judgeCalls), posts \(report.posts), without store false \(report.storeViolations), "
+            + "cue judge requests \(report.otherJudgeRequests), cases whose posts differ from the posts counted \(report.postMismatches.count)")
         say("self_pivot_usd total \(PivotEval.usd(report.selfPivotUsd)) (per case in SUMMARY.md and cost-log.jsonl)")
         say("outputs carrying case text: \(report.snippetLeaks.count); failed calls: \(report.failures.count)")
         if !keyLeaks.isEmpty { say("FAIL: secret material reached output files (scrubbed): \(keyLeaks.joined(separator: ", "))") }

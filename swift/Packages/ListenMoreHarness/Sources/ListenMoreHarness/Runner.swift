@@ -168,8 +168,9 @@ public struct RunRecord: @unchecked Sendable {
     public var micOfferedWhileMuted = 0
     public var micMuteCalls: [Bool] = []
     public var judgeCalls = 0
-    /// Self-pivot judge requests on the wire, and judge requests that didn't send `store: false`.
-    public var selfPivotJudgeCalls = 0
+    /// Self-pivot judge HTTP posts on the wire (a judge call posts once, or twice after a `401 incorrect_hostname`),
+    /// and judge requests that didn't send `store: false`.
+    public var selfPivotPosts = 0
     public var storeViolations = 0
     /// Each engine run's last GPT layer snapshot (nil without one), in start order.
     public var engineSnapshots: [GptLayer.Snapshot?] = []
@@ -215,7 +216,9 @@ public struct RunRecord: @unchecked Sendable {
 
     /// Summed over the call's engine runs.
     public var pivotCandidates: Int { engineSnapshots.compactMap { $0?.pivotCandidates }.reduce(0, +) }
-    public var selfPivotEngineCalls: Int { engineSnapshots.compactMap { $0?.selfPivotJudgeCalls }.reduce(0, +) }
+    /// The engine's own count of self-pivot posts (to compare with the wire's), and of judge calls (apart).
+    public var selfPivotEnginePosts: Int { engineSnapshots.compactMap { $0?.selfPivotPosts }.reduce(0, +) }
+    public var selfPivotEngineJudgeCalls: Int { engineSnapshots.compactMap { $0?.selfPivotJudgeCalls }.reduce(0, +) }
 
     public func samples(_ stream: AudioStream, in window: ClosedRange<Double>) -> Int {
         engineIngests.filter { $0.stream == stream && window.contains($0.t) }.reduce(0) { $0 + $1.samples }
@@ -393,7 +396,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.micOfferedWhileMuted = mic.offeredWhileMuted
         record.micMuteCalls = mic.muteCalls
         record.judgeCalls = services.judgeCalls()
-        record.selfPivotJudgeCalls = services.traffic.selfPivotCalls
+        record.selfPivotPosts = services.traffic.selfPivotCalls
         record.storeViolations = services.traffic.storeViolations
         record.engineSnapshots = engine.snapshots
         record.selfPivotYes = services.selfPivotYes

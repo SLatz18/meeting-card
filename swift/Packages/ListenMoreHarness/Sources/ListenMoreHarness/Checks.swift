@@ -130,10 +130,10 @@ public enum Checks {
             && JudgeProviders.judgesSelfPivot(r.config.judge.provider)
         let shown = r.cues.filter { $0.type == .selfPivot }.count
         let wantShown = !live && judgesSelfPivot && r.selfPivotYes ? 1 : 0
-        let selfPivotOK = r.pivotCandidates == (declared ? 1 : 0) && r.selfPivotJudgeCalls == (judgesSelfPivot ? 1 : 0)
-            && r.selfPivotEngineCalls == r.selfPivotJudgeCalls && (live ? shown <= 1 : shown == wantShown)
+        let selfPivotOK = r.pivotCandidates == (declared ? 1 : 0) && r.selfPivotPosts == (judgesSelfPivot ? 1 : 0)
+            && r.selfPivotEnginePosts == r.selfPivotPosts && r.selfPivotEngineJudgeCalls == (judgesSelfPivot ? 1 : 0) && (live ? shown <= 1 : shown == wantShown)
         check("self-pivot", selfPivotOK,
-              "candidates \(r.pivotCandidates), judge calls \(r.selfPivotJudgeCalls) (engine \(r.selfPivotEngineCalls)), cues \(shown)")
+              "candidates \(r.pivotCandidates), posts \(r.selfPivotPosts) (engine \(r.selfPivotEnginePosts)), judge calls \(r.selfPivotEngineJudgeCalls), cues \(shown)")
         check("judge store false", r.storeViolations == 0, "\(r.storeViolations) judge requests without store false")
         let problems = r.problems.filter { $0 != "transcriberClearRejected" }
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))

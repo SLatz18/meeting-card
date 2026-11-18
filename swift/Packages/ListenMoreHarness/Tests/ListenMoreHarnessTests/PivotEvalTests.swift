@@ -39,10 +39,11 @@ final class PivotEvalTests: XCTestCase {
         XCTAssertEqual(r.recall, 0)
         XCTAssertEqual(r.positives.filter { !$0.candidate }.map(\.name), ["plural-own-story-gate-miss"])
         XCTAssertEqual(r.negatives.filter(\.candidate).map(\.name), ["name-only-redirect"])
-        XCTAssertEqual(r.requests, r.outcomes.filter(\.candidate).count, "one request per candidate")
-        XCTAssertEqual(r.requests, 12, "12 judged cases, 12 requests")
-        XCTAssertTrue(r.outcomes.allSatisfy { $0.requests == ($0.candidate ? 1 : 0) && $0.requests == $0.judgeCalls })
-        XCTAssertTrue(r.requestMismatches.isEmpty)
+        XCTAssertEqual(r.posts, r.outcomes.filter(\.candidate).count, "one post per candidate")
+        XCTAssertEqual(r.posts, 12, "12 judged cases, 12 posts")
+        XCTAssertEqual(r.judgeCalls, 12, "and 12 judge calls")
+        XCTAssertTrue(r.outcomes.allSatisfy { $0.posts == ($0.candidate ? 1 : 0) && $0.posts == $0.countedPosts && $0.judgeCalls == $0.posts })
+        XCTAssertTrue(r.postMismatches.isEmpty)
         XCTAssertEqual(r.storeViolations, 0)
         XCTAssertEqual(r.otherJudgeRequests, 0)
         XCTAssertTrue(r.snippetLeaks.isEmpty)
@@ -61,9 +62,9 @@ final class PivotEvalTests: XCTestCase {
         }
         let summary = try read("SUMMARY.md")
         XCTAssertTrue(summary.contains("self_pivot_usd total: **0.000600**"), summary)
-        XCTAssertTrue(summary.contains("| reminds-me | 1 | 400 | 20 | 0.000050 |"), summary)
-        XCTAssertTrue(summary.contains("| celebrate-group-plan | 0 | 0 | 0 | 0.000000 |"), summary)
-        XCTAssertTrue(summary.contains("| **total** | 12 | 4800 | 240 | **0.000600** |"), summary)
+        XCTAssertTrue(summary.contains("| reminds-me | 1 | 1 | 400 | 20 | 0.000050 |"), summary)
+        XCTAssertTrue(summary.contains("| celebrate-group-plan | 0 | 0 | 0 | 0 | 0.000000 |"), summary)
+        XCTAssertTrue(summary.contains("| **total** | 12 | 12 | 4800 | 240 | **0.000600** |"), summary)
         XCTAssertTrue(try read("pivot-eval.md").contains("self_pivot_usd total: 0.000600"))
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try read("pivot-eval.json").utf8)) as? [String: Any])
         XCTAssertEqual(try XCTUnwrap(json["self_pivot_usd"] as? Double), 12 * each, accuracy: 1e-12)
@@ -76,49 +77,80 @@ final class PivotEvalTests: XCTestCase {
         XCTAssertEqual(log.count, r.outcomes.count + 1, "one entry per case and a total")
         let perCase = log.filter { $0["kind"] as? String == "judge" }
         XCTAssertEqual(perCase.compactMap { $0["self_pivot_usd"] as? Double }.reduce(0, +), 12 * each, accuracy: 1e-12)
-        XCTAssertEqual(perCase.filter { ($0["self_pivot_calls"] as? Double) == 1 }.count, 12)
+        XCTAssertEqual(perCase.filter { ($0["self_pivot_calls"] as? Double) == 1 && ($0["self_pivot_judge_calls"] as? Double) == 1 }.count, 12)
         let total = try XCTUnwrap(log.first { $0["kind"] as? String == "judge_total" })
         XCTAssertEqual(try XCTUnwrap(total["self_pivot_usd"] as? Double), 12 * each, accuracy: 1e-12)
-        XCTAssertEqual(total["self_pivot_calls"] as? Double, 12)
+        XCTAssertEqual(total["self_pivot_calls"] as? Double, 12, "posts")
+        XCTAssertEqual(total["self_pivot_judge_calls"] as? Double, 12, "judge calls, apart")
         XCTAssertEqual(total["calls"] as? Double, 12)
     }
 
-    /// A slow reply (the stub waits before answering) and a reply that names another host
-    /// (`401 incorrect_hostname`, the paid run's first call) each still send one request per judged case.
-    func testSlowAndHostRedirectRepliesSendOneRequestPerCase() async throws {
+    /// A slow reply (the stub waits before answering): one post per judged case, counted.
+    func testSlowRepliesAreOnePostPerCase() async throws {
         let config = try PivotEval.config()
-        let key = try XCTUnwrap(APIKey("dry-run-secret-value"))
         let slow = ReplyingHTTP(inner: StubJudgeHTTP(selfPivotAnswer: ("none", 0.99)), delayNs: 60_000_000)
-        let slowReport = await PivotEval.run(PivotEval.cases, http: slow, key: key, config: config)
+        let report = await PivotEval.run(PivotEval.cases, http: slow, key: try XCTUnwrap(APIKey("dry-run-secret-value")), config: config,
+                                         hosts: LearnedHosts())
         XCTAssertEqual(slow.posts, 12)
-        XCTAssertEqual(slowReport.requests, 12)
-        XCTAssertTrue(slowReport.requestMismatches.isEmpty)
-
-        let wrongHost = ReplyingHTTP(inner: StubJudgeHTTP(), delayNs: 0, status: 401,
-                                     body: #"{"error":{"code":"incorrect_hostname","message":"Use eu.api.openai.com"}}"#)
-        let redirected = await PivotEval.run(PivotEval.cases, http: wrongHost, key: key, config: config)
-        XCTAssertEqual(wrongHost.posts, 12, "one request per judged case, none resent on the regional host")
-        XCTAssertEqual(redirected.requests, 12)
-        XCTAssertTrue(redirected.requestMismatches.isEmpty)
-        XCTAssertEqual(redirected.failures.count, 12)
-        XCTAssertFalse(redirected.passed)
+        XCTAssertEqual(report.posts, 12)
+        XCTAssertEqual(report.judgeCalls, 12)
+        XCTAssertTrue(report.postMismatches.isEmpty)
+        XCTAssertTrue(report.passed)
     }
 
-    /// The bar catches a request the layer never counted (a resend): a case with two requests for one counted
-    /// judge call fails the run, and so does a counted call that never reached the wire.
-    func testTheBarCatchesARequestTheLayerNeverCounted() {
+    /// The paid run's shape: the first post goes to a host that answers `401 incorrect_hostname`, the one resend
+    /// to the regional host works and is learned, and the other eleven cases post once. 13 posts, 12 judge calls,
+    /// every post counted by the layer, and the run passes.
+    func testTheRegionalResendIsCountedAndTheRunPasses() async throws {
+        let config = try PivotEval.config()
+        let routed = HostRoutedHTTP(inner: StubJudgeHTTP(selfPivotAnswer: ("none", 0.99)))
+        let report = await PivotEval.run(PivotEval.cases, http: routed, key: try XCTUnwrap(APIKey("dry-run-secret-value")), config: config,
+                                         hosts: LearnedHosts())
+        XCTAssertEqual(routed.hosts.filter { $0 == "api.openai.com" }.count, 1, "only the first post goes to the configured host")
+        XCTAssertEqual(report.posts, 13)
+        XCTAssertEqual(report.judgeCalls, 12)
+        XCTAssertEqual(report.outcomes.map(\.posts).filter { $0 == 2 }.count, 1)
+        XCTAssertTrue(report.postMismatches.isEmpty, "wire posts equal the posts the layer counted")
+        XCTAssertEqual(report.selfPivotUsd, 12 * 0.00005, accuracy: 1e-12, "the 401 carried no usage")
+        XCTAssertTrue(report.passed)
+    }
+
+    /// Every host answers `401 incorrect_hostname`: each judged case makes exactly two posts, never a third, both
+    /// counted, and the run fails on the errors.
+    func testASecondUnauthorizedIsNeverResent() async throws {
+        let config = try PivotEval.config()
+        let wrongHost = ReplyingHTTP(inner: StubJudgeHTTP(), delayNs: 0, status: 401,
+                                     body: #"{"error":{"code":"incorrect_hostname","message":"Use eu.api.openai.com"}}"#)
+        let report = await PivotEval.run(PivotEval.cases, http: wrongHost, key: try XCTUnwrap(APIKey("dry-run-secret-value")), config: config,
+                                         hosts: LearnedHosts())
+        XCTAssertEqual(wrongHost.posts, 24, "two posts per judged case, never three")
+        XCTAssertEqual(report.posts, 24)
+        XCTAssertEqual(report.judgeCalls, 12)
+        XCTAssertTrue(report.outcomes.allSatisfy { $0.posts == $0.countedPosts })
+        XCTAssertTrue(report.postMismatches.isEmpty)
+        XCTAssertEqual(report.failures.count, 12)
+        XCTAssertFalse(report.passed)
+    }
+
+    /// The bar compares posts with posts: a case whose wire posts differ from the posts the layer counted fails
+    /// the run, whichever way. Two posts for one judge call is fine when both are counted.
+    func testTheBarComparesPostsWithPosts() {
         let clean = PivotEval.Outcome(name: "x", set: .positive, candidate: true, judged: true, verdict: "none", confidence: 0.9, cue: false,
-                                      failure: nil, requests: 1, judgeCalls: 1)
+                                      failure: nil, posts: 1, countedPosts: 1, judgeCalls: 1)
         var resent = clean
-        resent.requests = 2
+        resent.posts = 2
         var unsent = clean
-        unsent.requests = 0
+        unsent.posts = 0
+        var resentAndCounted = clean
+        resentAndCounted.posts = 2
+        resentAndCounted.countedPosts = 2
         func report(_ o: PivotEval.Outcome) -> PivotEval.Report {
-            PivotEval.Report(outcomes: [o], requests: o.requests, storeViolations: 0, otherJudgeRequests: 0, snippetLeaks: [])
+            PivotEval.Report(outcomes: [o], posts: o.posts, storeViolations: 0, otherJudgeRequests: 0, snippetLeaks: [])
         }
         XCTAssertTrue(report(clean).passed)
+        XCTAssertTrue(report(resentAndCounted).passed, "one judge call, two counted posts")
         XCTAssertFalse(report(resent).passed)
-        XCTAssertEqual(report(resent).requestMismatches.map(\.name), ["x"])
+        XCTAssertEqual(report(resent).postMismatches.map(\.name), ["x"])
         XCTAssertFalse(report(unsent).passed)
     }
 
@@ -146,6 +178,27 @@ final class PivotEvalTests: XCTestCase {
 
 
 /// Wraps a judge transport: waits before answering, or answers a canned error instead. Counts what reached it.
+/// The configured host answers `401 incorrect_hostname` naming the regional one; the regional host answers like the
+/// wrapped stub. Records each post's host.
+final class HostRoutedHTTP: HTTPTransport, @unchecked Sendable {
+    private let inner: HTTPTransport
+    private let lock = NSLock()
+    private var _hosts: [String] = []
+
+    init(inner: HTTPTransport) { self.inner = inner }
+
+    var hosts: [String] { lock.withLock { _hosts } }
+
+    func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
+        let host = url.host ?? "?"
+        lock.withLock { _hosts.append(host) }
+        if host == "api.openai.com" {
+            return (401, Data(#"{"error":{"code":"incorrect_hostname","message":"Use eu.api.openai.com"}}"#.utf8))
+        }
+        return try await inner.post(url: url, headers: headers, body: body, timeout: timeout)
+    }
+}
+
 final class ReplyingHTTP: HTTPTransport, @unchecked Sendable {
     private let inner: HTTPTransport
     private let delayNs: UInt64

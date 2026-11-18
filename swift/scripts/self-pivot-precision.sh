@@ -7,8 +7,9 @@
 #   swift/scripts/self-pivot-precision.sh --dry-run [--stub-answer none|self_pivot] [--out DIR]
 #
 # Writes pivot-eval.md, pivot-eval.json, SUMMARY.md and cost-log.jsonl (numbers and labels only), and prints
-# SUMMARY.md at the end: the request count and self_pivot_usd per case and in total. Exit 0 when the bar holds:
-# no false self_pivot cue on a negative, store:false on every request, one request per candidate (none resent),
+# SUMMARY.md at the end: judge calls, posts and self_pivot_usd per case and in total. Exit 0 when the bar holds:
+# no false self_pivot cue on a negative, store:false on every request, wire posts equal the posts the layer
+# counted (a judge call posts once, or twice after a 401 incorrect_hostname, never three),
 # no case text in any output or log line.
 set -euo pipefail
 cd "$(dirname "$0")/../Packages/ListenMoreHarness"

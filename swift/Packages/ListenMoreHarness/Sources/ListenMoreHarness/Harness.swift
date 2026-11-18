@@ -270,10 +270,12 @@ public enum Harness {
                                       "engines": Double(record.engineStarts.count),
                                       "usd": meter.transcribeUsd],
                              labels: ["mode": record.mode.rawValue])]
-        // The per-judge split: requests on the wire by schema, dollars from each engine's own meter.
+        // The per-judge split: posts on the wire by schema (self_pivot_calls counts every post; the judge calls
+        // are apart), dollars from each engine's own meter.
         var judge: [String: Double] = ["calls": Double(record.judgeCalls), "usd": meter.judgeUsd,
-                                       "self_pivot_calls": Double(record.selfPivotJudgeCalls),
-                                       "other_calls": Double(record.judgeCalls - record.selfPivotJudgeCalls),
+                                       "self_pivot_calls": Double(record.selfPivotPosts),
+                                       "self_pivot_judge_calls": Double(record.selfPivotEngineJudgeCalls),
+                                       "other_calls": Double(record.judgeCalls - record.selfPivotPosts),
                                        "self_pivot_usd": meter.selfPivotJudgeUsd, "other_usd": meter.judgeUsd - meter.selfPivotJudgeUsd,
                                        "self_pivot_candidates": Double(record.pivotCandidates),
                                        "store_false_violations": Double(record.storeViolations)]
