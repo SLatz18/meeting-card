@@ -215,12 +215,14 @@ public final class HarnessAudioState: AudioStateProvider {
 /// The Kit's `FileTranscriptStore` (the coach's only disk writer) with every call recorded, so a
 /// keep-nothing run can show it was never asked to write and a saving run that it wrote only in the run dir.
 public final class CountingTranscriptStore: TranscriptStore {
-    private let inner = FileTranscriptStore()
+    private let inner: TranscriptStore
     public private(set) var prepared: [URL] = []
     public private(set) var written: [URL] = []
     public private(set) var removed: [URL] = []
 
-    public init() {}
+    public init(inner: TranscriptStore = FileTranscriptStore()) {
+        self.inner = inner
+    }
 
     public func prepare(folder: URL) throws {
         prepared.append(folder)

@@ -19,18 +19,35 @@ public struct HarnessOptions {
     public var offlineVoices: OfflineVoices
     /// The not_listening judge. nil: on offline (a free stub), off live (0 judge calls unless asked for).
     public var judge: Bool?
-    /// Test hook: config overrides for the engine only (the oracle keeps the built-in rules), to show
-    /// the checks catch an engine regression.
-    public var engineOverrides: [String: Any]
-    /// Test hook: controls the runner skips (a broken Mute or Pause).
-    public var ignoredControls: Set<ControlKind>
-    /// Test hook: the offline judge answers not_listening to requests whose transcript has this text.
-    public var offlineNotListeningOn: String?
+    // Test hooks. They are internal: the tests reach them through `@testable import`, and the CLI, which
+    // uses a plain import, can't name them, so production runs always leave them at their defaults.
+    /// Config overrides for the engine only (the oracle keeps the built-in rules), to show the checks
+    /// catch an engine regression.
+    var engineOverrides: [String: Any]
+    /// Controls the runner skips (a broken Mute or Pause).
+    var ignoredControls: Set<ControlKind>
+    /// The offline judge answers not_listening to requests whose transcript has this text.
+    var offlineNotListeningOn: String?
+    /// The transcript store under the harness's counting wrapper (default: the file store).
+    var transcriptStore: TranscriptStore?
+    /// Called with the scenario and its run directory when the scenario ends, before the directory is
+    /// inspected and wiped (simulates something writing there).
+    var afterRun: ((Scenario, URL) -> Void)?
+    /// Where a scenario's run directory is created (default: the system temp directory).
+    var runDirectoryParent: ((Scenario) -> URL)?
 
     public init(mode: Mode = .offline, scenarios: [Scenario] = Scenarios.all, outputDirectory: URL,
                 environment: [String: String] = ProcessInfo.processInfo.environment, liveBackend: LiveBackend? = nil,
-                ttsModel: String = "gpt-4o-mini-tts", offlineVoices: OfflineVoices = .synthetic, judge: Bool? = nil,
-                engineOverrides: [String: Any] = [:], ignoredControls: Set<ControlKind> = [], offlineNotListeningOn: String? = nil) {
+                ttsModel: String = "gpt-4o-mini-tts", offlineVoices: OfflineVoices = .synthetic, judge: Bool? = nil) {
+        self.init(mode: mode, scenarios: scenarios, outputDirectory: outputDirectory, environment: environment,
+                  liveBackend: liveBackend, ttsModel: ttsModel, offlineVoices: offlineVoices, judge: judge,
+                  engineOverrides: [:])
+    }
+
+    init(mode: Mode = .offline, scenarios: [Scenario] = Scenarios.all, outputDirectory: URL,
+         environment: [String: String] = ProcessInfo.processInfo.environment, liveBackend: LiveBackend? = nil,
+         ttsModel: String = "gpt-4o-mini-tts", offlineVoices: OfflineVoices = .synthetic, judge: Bool? = nil,
+         engineOverrides: [String: Any] = [:], ignoredControls: Set<ControlKind> = [], offlineNotListeningOn: String? = nil) {
         self.mode = mode
         self.scenarios = scenarios
         self.outputDirectory = outputDirectory
@@ -102,16 +119,19 @@ public enum Harness {
         var clipCache: [String: [Float]] = [:]
         for scenario in o.scenarios {
             log("\(scenario.name): running (\(o.mode.rawValue))")
-            var scenarioOverrides = runOverrides
-            if let budget = scenario.budgetUsd { scenarioOverrides = deepMerge(scenarioOverrides, ["gpt": ["budget_usd_per_call": budget]]) }
-            let config = scenarioOverrides.isEmpty ? base : try ListenMoreConfig.load(overrides: scenarioOverrides)
-            let engineConfig = o.engineOverrides.isEmpty ? config
-                : try ListenMoreConfig.load(overrides: deepMerge(scenarioOverrides, o.engineOverrides))
-            let dir = try RunDirectory.create()
-            let audit = DiskAudit(roots: DiskAudit.defaultRoots() + [o.outputDirectory], exclude: dir.url)
+            var scenarioDir: RunDirectory?
+            var scenarioAudit: DiskAudit?
             var record: RunRecord
             var meteredHTTP: MeteredHTTP?
             do {
+                var scenarioOverrides = runOverrides
+                if let budget = scenario.budgetUsd { scenarioOverrides = deepMerge(scenarioOverrides, ["gpt": ["budget_usd_per_call": budget]]) }
+                let config = scenarioOverrides.isEmpty ? base : try ListenMoreConfig.load(overrides: scenarioOverrides)
+                let engineConfig = o.engineOverrides.isEmpty ? config
+                    : try ListenMoreConfig.load(overrides: deepMerge(scenarioOverrides, o.engineOverrides))
+                let created = try RunDirectory.create(in: o.runDirectoryParent?(scenario) ?? FileManager.default.temporaryDirectory)
+                scenarioDir = created
+                scenarioAudit = DiskAudit(roots: DiskAudit.defaultRoots() + [o.outputDirectory], exclude: created.url)
                 var services: RunServices
                 switch o.mode {
                 case .offline:
@@ -125,16 +145,21 @@ public enum Harness {
                 services.ignoredControls = o.ignoredControls
                 services.judgeOn = o.judgeOn
                 services.segmentedSpeech = o.mode == .live || o.offlineVoices == .espeak
-                record = try await ScenarioRun(scenario: scenario, services: services, workDir: dir.url).run()
+                services.transcriptStore = o.transcriptStore
+                record = try await ScenarioRun(scenario: scenario, services: services, workDir: created.url).run()
+                o.afterRun?(scenario, created.url)
+                record.runDirEntries = created.entries()
             } catch {
-                dir.wipe()
+                scenarioDir?.wipe()
                 // What was spent and scored so far is still written before the error goes up.
                 try? writeOutputs(writer, results: results, cost: cost, options: o, base: base,
-                                  failure: "\(scenario.name) stopped: \(writer.scrub("\(error)", context: "error"))")
+                                  failure: "\(scenario.name) stopped: \(publicDescription(error))")
                 throw error
             }
+            guard let dir = scenarioDir, let audit = scenarioAudit else { preconditionFailure("the do block above sets both or throws") }
             record.workDirWiped = dir.wipe()
             record.diskViolations = audit.violations()
+            record.textLeaks = audit.filesContaining(scenario.lines.flatMap { [$0.text, $0.words.prefix(4).joined(separator: " ")] })
             let result = Checks.evaluate(record)
             results.append(result)
             cost += costEntries(result, record: record, http: meteredHTTP)
@@ -144,6 +169,18 @@ public enum Harness {
         try writeOutputs(writer, results: results, cost: cost, options: o, base: base, failure: nil)
         return HarnessSummary(mode: o.mode, results: results, outputDirectory: o.outputDirectory, files: writer.written,
                               leaks: writer.leaks, costEntries: cost)
+    }
+
+    /// What may go into the output files for a failed run: no file paths and no config detail. The full
+    /// error still goes to the CLI's stdout (scrubbed).
+    static func publicDescription(_ error: Error) -> String {
+        switch error {
+        case let e as HarnessError: return e.description
+        case let e as ConfigError: return "config error (\(e.publicName))"
+        default:
+            let ns = error as NSError
+            return "\(String(describing: type(of: error))) (\(ns.domain) \(ns.code))"
+        }
     }
 
     static func writeOutputs(_ writer: OutputWriter, results: [ScenarioResult], cost: [CostEntry], options o: HarnessOptions,
@@ -159,9 +196,12 @@ public enum Harness {
             "Streams: You = mic, Them = call (two Them voices in two-them-voices)",
             "Caption latency: end of each transcribed speech segment (its commit, less the VAD hangover) to its final transcript",
         ]
+        if o.mode == .offline {
+            header.append("Speaker ID offline: the scripted server answers a commit with text only from lines on its own stream, so attribution is true by construction here; the stream-routing check (loud audio on the right stream's transcriber) is what tests it. Live runs test attribution against real transcripts.")
+        }
         if let failure { header.append("INCOMPLETE: \(failure)") }
         try writer.write("results.md", Report.markdown(results, mode: o.mode, header: header))
-        try writer.write("results.json", Report.json(results, mode: o.mode))
+        try writer.write("results.json", Report.json(results, mode: o.mode, failure: failure))
         try writer.write("cost-log.jsonl", cost.map(\.json).joined(separator: "\n") + "\n")
     }
 

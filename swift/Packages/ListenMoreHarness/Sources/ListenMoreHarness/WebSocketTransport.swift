@@ -78,6 +78,28 @@ public final class SocketWebSocketConnector: WebSocketConnector, @unchecked Send
     }
 }
 
+/// Test seam for the socket client's teardown ordering. Production code passes none (every call site is
+/// `hooks?.…`); tests use it to record the order of writes, shutdown and release, and to hold the two
+/// places where that order is decided open until the other thread has had its chance to run.
+final class SocketHooks: @unchecked Sendable {
+    enum Event: Equatable, Sendable {
+        /// A frame is about to be written to the socket.
+        case wrote(WebSocketCodec.Opcode)
+        /// `shutdown(2)` is about to be called.
+        case shutdown
+        /// The reader is about to free the TLS session and close the descriptor.
+        case released
+        /// The reader queued a pong write.
+        case pongQueued
+    }
+
+    var event: @Sendable (Event) -> Void = { _ in }
+    /// In `close()`, after its state change and before the close write is queued.
+    var closeGap: @Sendable () -> Void = {}
+    /// On the write queue, before the queued close write does anything.
+    var beforeCloseWrite: @Sendable () -> Void = {}
+}
+
 /// One client WebSocket over a TCP socket, TLS (OpenSSL, peer and host name verified) for wss.
 /// Concurrency: one reader thread; writes go through a serial queue; every OpenSSL call on the
 /// connection happens under `ioLock`, with the socket non-blocking so no call holds the lock while
@@ -97,15 +119,17 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
     private var closed = false
     private var closeRequested = false
     private var failure: Error?
+    private let hooks: SocketHooks?
 
-    private init(fd: Int32, ctx: OpaquePointer?, ssl: OpaquePointer?, leftover: [UInt8]) {
+    private init(fd: Int32, ctx: OpaquePointer?, ssl: OpaquePointer?, leftover: [UInt8], hooks: SocketHooks?) {
         self.fd = fd
         self.ctx = ctx
         self.ssl = ssl
+        self.hooks = hooks
         parser.push(leftover)
     }
 
-    static func open(url: URL, headers: [String: String], timeout: Int = 10) throws -> SocketWebSocket {
+    static func open(url: URL, headers: [String: String], timeout: Int = 10, hooks: SocketHooks? = nil) throws -> SocketWebSocket {
         guard let scheme = url.scheme, scheme == "wss" || scheme == "ws", let host = url.host else {
             throw HarnessError.webSocket("unsupported URL")
         }
@@ -150,7 +174,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
         guard let r = response, r.status == 101 else { throw fail("handshake HTTP \(response?.status ?? 0)") }
         guard r.headers["sec-websocket-accept"] == WebSocketCodec.accept(for: key) else { throw fail("handshake accept mismatch") }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
-        let ws = SocketWebSocket(fd: fd, ctx: ctx, ssl: ssl, leftover: r.rest)
+        let ws = SocketWebSocket(fd: fd, ctx: ctx, ssl: ssl, leftover: r.rest, hooks: hooks)
         let reader = Thread { ws.readLoop() }
         reader.name = "lm-harness.ws.read"
         reader.start()
@@ -191,11 +215,19 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
         }
         guard first else { return }
         let frame = WebSocketCodec.encode(.close, [0x03, 0xE8], mask: WebSocketCodec.randomMask())
+        hooks?.closeGap()
         writes.async { [self] in
-            if !isClosed { _ = writeAll(frame) }
+            hooks?.beforeCloseWrite()
+            if !isClosed {
+                hooks?.event(.wrote(.close))
+                _ = writeAll(frame)
+            }
             // Only while the reader is still running (it frees the socket after it sees `closed` and
             // this queue drains); if the connection already failed, the reader closes the socket itself.
-            if markClosed(nil) { shutdown(fd, Int32(SHUT_RDWR)) }
+            if markClosed(nil) {
+                hooks?.event(.shutdown)
+                shutdown(fd, Int32(SHUT_RDWR))
+            }
         }
     }
 
@@ -217,6 +249,7 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
         }
         writes.sync {}
         ioLock.lock()
+        hooks?.event(.released)
         if let ssl { SSL_free(ssl) }
         if let ctx { SSL_CTX_free(ctx) }
         Glibc.close(fd)
@@ -239,7 +272,13 @@ final class SocketWebSocket: WebSocketConnection, @unchecked Sendable {
             case .binary(let b): deliver(String(decoding: b, as: UTF8.self))
             case .ping(let payload):
                 let pong = WebSocketCodec.encode(.pong, payload, mask: WebSocketCodec.randomMask())
-                writes.async { [self] in if !isClosed && !isClosing { _ = writeAll(pong) } }
+                writes.async { [self] in
+                    if !isClosed && !isClosing {
+                        hooks?.event(.wrote(.pong))
+                        _ = writeAll(pong)
+                    }
+                }
+                hooks?.event(.pongQueued)
             case .pong: break
             case .close(let code):
                 _ = markClosed(HarnessError.webSocket("closed by server (\(code.map(String.init) ?? "no code"))"))

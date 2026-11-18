@@ -67,6 +67,32 @@ final class LiveRun4Tests: XCTestCase {
             Line("y2", .you, "Sorry to cut in. I think the services should go first because they are smaller.", .beforeEnd("a2", lead: 4.0)),
         ])
 
+    /// cost-cap's judge-on take at 01809d9 hit the budget cap at 7.2 s, in the middle of You's first
+    /// words: only Them's line was transcribed, and the saved transcript held just that line. Forced
+    /// offline with a $0.0019 budget (cap at 7.5 s), the Them-only file passes; a transcribed side's line
+    /// without its time or label fails.
+    func testSavedTranscriptAfterAnEarlyCapHasLinesOnlyForTheSidesTranscribed() async throws {
+        var s = Scenarios.costCap
+        s.budgetUsd = 0.0019
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: out) }
+        let summary = try await Harness.run(HarnessOptions(mode: .offline, scenarios: [s], outputDirectory: out, environment: [:]))
+        let r = try XCTUnwrap(summary.results.first)
+        XCTAssertEqual(r.check("cost cap (T5)")?.passed, true, r.check("cost cap (T5)")?.detail ?? "")
+        XCTAssertEqual(r.check("transcription")?.detail.contains("lines captioned 1/1"), true, "only Them's line before the cap")
+        XCTAssertEqual(r.check("opt-in-transcript")?.passed, true, r.check("opt-in-transcript")?.detail ?? "")
+
+        let them = "**[00:00:05] Them:** Here is the short version of the budget review for this quarter.\n"
+        let you = "**[00:00:07] You:** Okay, go on.\n"
+        XCTAssertTrue(Checks.timesAndLabels(them, labels: ["Them"]))
+        XCTAssertTrue(Checks.timesAndLabels(them + you, labels: ["You", "Them"]))
+        XCTAssertFalse(Checks.timesAndLabels(them, labels: ["You", "Them"]), "You was transcribed but has no line")
+        XCTAssertFalse(Checks.timesAndLabels("**Them:** Here is the short version.\n", labels: ["Them"]), "no time")
+        XCTAssertFalse(Checks.timesAndLabels("**[00:00:05]** Here is the short version.\n", labels: ["Them"]), "no label")
+        XCTAssertFalse(Checks.timesAndLabels("[00:00:05] Them: Here is the short version.\n", labels: ["Them"]), "not the line format")
+        XCTAssertFalse(Checks.timesAndLabels("# Call transcript\n", labels: []), "at least one line")
+    }
+
     func testHeldCueIsNamedInTheDiagnostics() async throws {
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: out) }

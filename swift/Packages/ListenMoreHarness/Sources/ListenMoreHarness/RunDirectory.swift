@@ -10,9 +10,9 @@ import Darwin
 public struct RunDirectory {
     public let url: URL
 
-    public static func create() throws -> RunDirectory {
+    public static func create(in parent: URL = FileManager.default.temporaryDirectory) throws -> RunDirectory {
         let name = "lm-harness-\(getpid())-\(UUID().uuidString)"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: true)
+        let url = parent.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return RunDirectory(url: url)
     }
@@ -53,6 +53,41 @@ public struct RunDirectory {
 
     static func processAlive(_ pid: Int32) -> Bool {
         pid == getpid() || kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    /// Every entry in the directory, as paths relative to it, sorted, read with `lstat` semantics: a symlink
+    /// is never followed and is listed as `!symlink: <path>`; a folder that can't be read is listed as
+    /// `!unreadable: <path>`, and a run directory that is missing or can't be read as `!unreadable: .`
+    /// (a missing run directory is a failure, not an empty one). No allowlist rule matches a `!` entry.
+    public func entries() -> [String] {
+        entries(contentsOf: { try? FileManager.default.contentsOfDirectory(atPath: $0) })
+    }
+
+    /// `entries()` with the directory lister injected, so the unreadable-folder path is testable as root.
+    func entries(contentsOf list: (String) -> [String]?) -> [String] {
+        let fm = FileManager.default
+        var out: [String] = []
+        func walk(_ rel: String) {
+            let path = rel.isEmpty ? url.path : url.path + "/" + rel
+            guard let names = list(path) else {
+                out.append("!unreadable: " + (rel.isEmpty ? "." : rel))
+                return
+            }
+            for name in names {
+                let child = rel.isEmpty ? name : rel + "/" + name
+                switch (try? fm.attributesOfItem(atPath: path + "/" + name))?[.type] as? FileAttributeType {
+                case .typeDirectory?:
+                    out.append(child)
+                    walk(child)
+                case .typeSymbolicLink?:
+                    out.append("!symlink: " + child)
+                default:
+                    out.append(child)
+                }
+            }
+        }
+        walk("")
+        return out.sorted()
     }
 
     /// Removes the directory; true when it's gone.
@@ -97,17 +132,37 @@ public struct DiskAudit {
     }
 
     public func violations(maxDepth: Int = 6) -> [String] {
+        scan(maxDepth: maxDepth) { url in
+            Self.audioExtensions.contains(url.pathExtension.lowercased()) || Self.hasAudioSignature(url)
+        }
+    }
+
+    /// Files created or modified since `start` (outside the run directory) whose contents hold any of
+    /// `phrases`, compared case-insensitively. A keep-nothing run's transcript text would show up here
+    /// wherever a store put it, not only in the configured folder.
+    public func filesContaining(_ phrases: [String], maxDepth: Int = 6, maxBytes: Int = 4 << 20) -> [String] {
+        let needles = phrases.map { Data($0.lowercased().utf8) }.filter { !$0.isEmpty }
+        guard !needles.isEmpty else { return [] }
+        return scan(maxDepth: maxDepth) { url in
+            guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size <= maxBytes,
+                  let data = try? Data(contentsOf: url) else { return false }
+            let lowered = Data(data.map { $0 >= 65 && $0 <= 90 ? $0 + 32 : $0 })
+            return needles.contains { lowered.range(of: $0) != nil }
+        }
+    }
+
+    private func scan(maxDepth: Int, matches: (URL) -> Bool) -> [String] {
         var out: Set<String> = []
         let skip = exclude.resolvingSymlinksInPath().path
         let home = FileManager.default.homeDirectoryForCurrentUser.resolvingSymlinksInPath().path
         for root in roots {
             let rootPath = root.resolvingSymlinksInPath().path
-            walk(URL(fileURLWithPath: rootPath), depth: 0, maxDepth: rootPath == home ? 1 : maxDepth, skip: skip, into: &out)
+            walk(URL(fileURLWithPath: rootPath), depth: 0, maxDepth: rootPath == home ? 1 : maxDepth, skip: skip, matches: matches, into: &out)
         }
         return out.sorted()
     }
 
-    private func walk(_ dir: URL, depth: Int, maxDepth: Int, skip: String, into out: inout Set<String>) {
+    private func walk(_ dir: URL, depth: Int, maxDepth: Int, skip: String, matches: (URL) -> Bool, into out: inout Set<String>) {
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
         for name in names {
@@ -118,15 +173,19 @@ public struct DiskAudit {
             let type = attrs[.type] as? FileAttributeType
             if type == .typeDirectory {
                 if depth < maxDepth && !Self.skipDirectories.contains(name) {
-                    walk(url, depth: depth + 1, maxDepth: maxDepth, skip: skip, into: &out)
+                    walk(url, depth: depth + 1, maxDepth: maxDepth, skip: skip, matches: matches, into: &out)
                 }
             } else if type == .typeRegular, let modified = attrs[.modificationDate] as? Date, modified >= start {
-                if Self.audioExtensions.contains(url.pathExtension.lowercased()) || Self.hasAudioSignature(url) { out.insert(path) }
+                if matches(url) { out.insert(path) }
             }
         }
     }
 
-    /// RIFF/WAVE, AIFF, CAF, FLAC, Ogg, MP3 with an ID3 tag, MP4/M4A (`ftyp`).
+    /// Brands of ISO base media files that are images (HEIC, AVIF), which share the `ftyp` box with MP4/M4A.
+    static let imageBrands: Set<String> = ["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1", "mif2",
+                                           "avif", "avis", "avio", "jpeg", "jpgs"]
+
+    /// RIFF/WAVE, AIFF, CAF, FLAC, Ogg, MP3 with an ID3 tag, MP4/M4A (`ftyp`, but not a HEIC/AVIF image).
     public static func hasAudioSignature(_ url: URL) -> Bool {
         guard let h = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? h.close() }
@@ -143,6 +202,8 @@ public struct DiskAudit {
         }
         if ascii("RIFF", at: 0) && (ascii("WAVE", at: 8) || b.count < 12) { return true }
         if ascii("FORM", at: 0) || ascii("caff", at: 0) || ascii("fLaC", at: 0) || ascii("OggS", at: 0) || ascii("ID3", at: 0) { return true }
-        return ascii("ftyp", at: 4)
+        guard ascii("ftyp", at: 4) else { return false }
+        let brand = b.count >= 12 ? String(decoding: b[8..<12], as: UTF8.self).lowercased() : ""
+        return !imageBrands.contains(brand)
     }
 }

@@ -116,7 +116,7 @@ public enum Report {
         return "expected \(expected.count), actual \(actual.count) [\(names.joined(separator: ", "))]; missed \(r.cues.missed.count), false \(r.cues.falseCues.count) \(r.cues.passed ? "PASS" : "FAIL")"
     }
 
-    public static func json(_ results: [ScenarioResult], mode: Mode) -> String {
+    public static func json(_ results: [ScenarioResult], mode: Mode, failure: String? = nil) -> String {
         let scenarios: [[String: Any]] = results.map { r in
             var tx: [String: Any] = [:]
             for (speaker, t) in r.transcription {
@@ -146,7 +146,8 @@ public enum Report {
                 "diagnostics": r.diagnostics,
             ]
         }
-        let obj: [String: Any] = ["mode": mode.rawValue, "scenarios": scenarios]
+        var obj: [String: Any] = ["mode": mode.rawValue, "scenarios": scenarios, "incomplete": failure != nil]
+        if let failure { obj["failure"] = failure }
         let data = (try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])) ?? Data()
         return String(decoding: data, as: UTF8.self)
     }

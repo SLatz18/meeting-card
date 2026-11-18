@@ -90,10 +90,16 @@ public enum Checks {
 
         // Persistence.
         let everFiles = r.transcripts.flatMap(\.files)
+        // Keep-nothing: the run directory is empty. Saving: it holds only the transcripts folder and what is in
+        // it. Entries the listing marks "!" (a symlink, an unreadable folder) match neither rule.
+        let strays = r.runDirEntries.filter { e in
+            r.scenario.saving ? !(e == "transcripts" || e.hasPrefix("transcripts/")) : true
+        }
+        let strayNote = strays.isEmpty ? "" : "; run dir holds unexpected entries: \(strays.prefix(5).joined(separator: ", "))"
         if !s.saving {
             let untouched = r.storePrepared.isEmpty && r.storeWritten.isEmpty && r.recorderLastURL == nil
-            check("keep-nothing", untouched && r.transcripts.allSatisfy { !$0.folderExists },
-                  "saving off: transcript store asked to prepare \(r.storePrepared.count) folders and write \(r.storeWritten.count) files; folder never created: \(r.transcripts.allSatisfy { !$0.folderExists })")
+            check("keep-nothing", untouched && r.transcripts.allSatisfy { !$0.folderExists } && r.textLeaks.isEmpty && strays.isEmpty,
+                  "saving off: transcript store asked to prepare \(r.storePrepared.count) folders and write \(r.storeWritten.count) files; folder never created: \(r.transcripts.allSatisfy { !$0.folderExists }); files outside the run dir holding the script's text: \(r.textLeaks.count)\(strayNote)")
         } else if s.checks.contains(.deleteMidCall) {
             let deleted = r.deleteResults.first?.deleted == true
             let afterDelete = r.transcripts.drop { $0.phase != "after-delete" }
@@ -104,7 +110,7 @@ public enum Checks {
             let files = atEnd?.files ?? []
             let f = files.first
             let named = f.map { $0.name.hasPrefix("Call ") && $0.name.hasSuffix(".md") } ?? false
-            let labelled = f.map { $0.contents.contains("**[") && $0.contents.contains("You:**") } ?? false
+            let labelled = f.map { Self.timesAndLabels($0.contents, labels: Self.transcribedLabels(r)) } ?? false
             let after = r.transcripts.last { $0.phase == "after-teardown" }
             let wiped = r.transcriptDeletedAtTeardown && (after?.files.isEmpty ?? true)
             check("opt-in-transcript", files.count == 1 && named && f?.mode == 0o600 && labelled && wiped,
@@ -112,8 +118,8 @@ public enum Checks {
         }
         if s.saving, let folder = r.transcriptsFolder?.standardizedFileURL.path {
             let outside = r.storeWritten.filter { !$0.standardizedFileURL.path.hasPrefix(folder + "/") }
-            check("transcript stays in the run dir", !r.storeWritten.isEmpty && outside.isEmpty,
-                  "\(r.storeWritten.count) writes, \(outside.count) outside the run's folder")
+            check("transcript stays in the run dir", !r.storeWritten.isEmpty && outside.isEmpty && r.textLeaks.isEmpty && strays.isEmpty,
+                  "\(r.storeWritten.count) writes, \(outside.count) outside the run's folder, \(r.textLeaks.count) other files holding the script's text\(strayNote)")
         }
         check("no-traffic-after-close", r.sockets.sendsAfterClose == 0, "\(r.sockets.sendsAfterClose) sends on a closed transcription socket")
         check("no-audio-on-disk", r.diskViolations.isEmpty && r.workDirWiped,
@@ -126,8 +132,9 @@ public enum Checks {
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))
 
         // Scenario-specific. Offline the windows are exact (lockstep). Live, frames already queued when a
-        // control was applied still drain: engine frames count from when the engine handled the control,
-        // transcriber traffic half a second after that; captions count from the control itself.
+        // control was applied still drain: engine frames count from when the engine handled the control;
+        // transcriber traffic half a second after that; captions from the control itself for Mute, half a
+        // second after the engine handled it for Pause.
         func window(_ w: ClosedRange<Double>, from marks: [Double], slack: Double = 0) -> ClosedRange<Double> {
             let handled = live ? marks.first { $0 >= w.lowerBound - 0.05 && $0 <= w.upperBound } ?? w.lowerBound : w.lowerBound
             let lo = handled + (live ? slack : 0) + 1e-6
@@ -240,6 +247,24 @@ public enum Checks {
         return ScenarioResult(scenario: s.name, summary: s.summary, mode: r.mode, transcription: tx, speakers: sp, cues: match,
                               checks: checks, billedSeconds: r.sockets.billedSeconds, lastMeter: r.meters.last, judgeCalls: r.judgeCalls,
                               diagnostics: diagnostics)
+    }
+
+    /// The label of each side with a final transcript, as the caption feed showed it (Them can be renamed).
+    static func transcribedLabels(_ r: RunRecord) -> [String] {
+        [Speaker.me, .others].compactMap { speaker in
+            guard r.captions.contains(where: { $0.speaker == speaker && $0.isFinal }) else { return nil }
+            let shown = r.captionViews.reversed().lazy.compactMap { $0.rows.last { $0.speaker == speaker }?.label }.first
+            return shown ?? (speaker == .me ? "You" : "Them")
+        }
+    }
+
+    /// The saved transcript has a `**[hh:mm:ss] Label:**` line for each label, and at least one. A side
+    /// with nothing transcribed (You, when the budget cap comes before their first words) has no line.
+    static func timesAndLabels(_ contents: String, labels: [String]) -> Bool {
+        !labels.isEmpty && labels.allSatisfy { label in
+            contents.range(of: #"\*\*\[\d{2}:\d{2}:\d{2}\] "# + NSRegularExpression.escapedPattern(for: label) + #":\*\*"#,
+                           options: .regularExpression) != nil
+        }
     }
 
     static func holdReason(_ why: CuePolicy.HoldReason) -> String {
