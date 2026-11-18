@@ -184,9 +184,10 @@ public struct RunRecord: @unchecked Sendable {
     public var problems: [String] = []
     /// The same audio replayed through `LocalLayer` afterwards (diagnostics for local cues).
     public var shadow: ShadowTrace?
-    /// Them's audio per 20 ms frame from scenario time 0: voiced (RMS above -45 dBFS) or not. Clip
-    /// energy, independent of the engine's VAD.
+    /// Each stream's audio per 20 ms frame from scenario time 0: voiced (RMS above -45 dBFS) or not.
+    /// Clip energy, independent of the engine's VAD.
     public var callVoiced: [Bool] = []
+    public var micVoiced: [Bool] = []
     /// Run-clock time of scenario time 0.
     public var origin = 0.0
     /// Filled in by the harness after teardown.
@@ -380,6 +381,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.captionStates.append((now, live.captionState))
         record.shadow = ShadowTrace.record(config: config, tracks: tracks, applied: record.applied)
         record.callVoiced = (0..<(tracks.call.count / hop)).map { tracks.voiced(.call, at: Double($0) * frameS) }
+        record.micVoiced = (0..<(tracks.mic.count / hop)).map { tracks.voiced(.mic, at: Double($0) * frameS) }
         return record
     }
 

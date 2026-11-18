@@ -775,19 +775,23 @@ final class LocalLayerMicMuteTests: XCTestCase {
         XCTAssertEqual(cuts.first?.onset ?? 0, 4.4, accuracy: 0.1)
     }
 
-    /// A back-and-forth after unmute, the user's pauses under `cut_in_utterance_gap_ms`, for 22 s: the
-    /// other side's turns are new utterances, so the user's onsets are speaker switches and talk-over fires.
+    /// A back-and-forth right after unmute, the user's pauses under `cut_in_utterance_gap_ms`: the other
+    /// side's first turn is a new utterance, so the user's later onsets are speaker switches and the
+    /// exchange talks over well inside `firstWordsBackMaxS` (only the new-utterance rule ends the
+    /// exemption that early). The pattern then repeats for 22 s.
     func testBackAndForthAfterUnmuteStillTalksOver() {
-        var me: [(Double, Double)] = []
-        var others: [(Double, Double)] = []
-        for c in stride(from: 2.8, through: 22.8, by: 5.0) {
+        var me: [(Double, Double)] = [(3.2, 4.0), (4.4, 5.2), (5.6, 9.0)]
+        var others: [(Double, Double)] = [(1.0, 2.0), (3.8, 4.6), (5.0, 5.8)]
+        for c in stride(from: 10.0, through: 20.0, by: 5.0) {
             others += [(c, c + 0.9), (c + 1.3, c + 2.1)]
-            me += [(c + 0.5, c + 1.5), (c + 1.9, c + 5.1)]
+            me += [(c + 0.5, c + 1.5), (c + 1.9, c + 4.6)]
         }
-        let unmuted = run(28, me: me, others: others, mutes: [(0, true), (2.9, false)])
+        let unmuted = run(26, me: me, others: others, mutes: [(0, true), (2.9, false)])
         let talkOvers = unmuted.filter { $0.kind == .talkOver }
-        XCTAssertGreaterThanOrEqual(talkOvers.count, 3, "\(cues(unmuted))")
-        XCTAssertTrue(talkOvers.allSatisfy { $0.t > 7 }, "the first exchange is the user's first words back")
+        let capEnd = 2.9 + config.frameS + config.local.unmuteGraceS + LocalLayer.firstWordsBackMaxS
+        XCTAssertEqual(talkOvers.first?.onset ?? 0, 5.6, accuracy: 0.1, "\(cues(unmuted))")
+        XCTAssertLessThan(talkOvers.first?.onset ?? .infinity, capEnd, "switches logged before the cap would have ended the exemption")
+        XCTAssertGreaterThanOrEqual(talkOvers.count, 3)
     }
 
     /// The exemption is capped: talking on over the other side in 3 s chunks with 0.4 s pauses for 60 s,

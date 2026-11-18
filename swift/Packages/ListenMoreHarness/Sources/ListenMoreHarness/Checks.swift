@@ -47,7 +47,8 @@ public enum Checks {
         // Coaching.
         let oracle = CueOracle.expected(r.timeline, config: r.config,
                                         facts: .init(keyless: s.keyless, gptStopT: r.gptStop?.t, mode: r.mode, judgeOn: r.judgeOn,
-                                                     segmentedSpeech: r.segmentedSpeech, callVoiced: r.callVoiced, frameS: r.config.frameS))
+                                                     segmentedSpeech: r.segmentedSpeech, callVoiced: r.callVoiced,
+                                                     micVoiced: r.micVoiced, frameS: r.config.frameS))
         let match = CueOracle.match(expected: oracle.cues, tolerated: oracle.tolerated, actual: r.cues)
         check("coaching", match.passed,
               "expected \(oracle.cues.filter { !$0.optional }.count), matched \(match.outcomes.filter { $0.actual != nil }.count), missed \(match.missed.count), false \(match.falseCues.count)"

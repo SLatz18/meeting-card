@@ -75,6 +75,10 @@ public final class LocalLayer {
     static let speakingTailS = 0.06
     /// The other side must keep talking through a cut-in's opening overlap, bar VAD flicker this short.
     static let overlapGapS = 0.1
+    /// A cut-in is dropped when the other side's raw speech stops for longer than this before its
+    /// opening overlap (`cut_in_min_overlap_ms`) has built up: they count as speaking for
+    /// `speakingTailS` after their last voiced frame, then the gap may run to `overlapGapS`.
+    public static let cutInMaxOthersGapS = speakingTailS + overlapGapS
     /// The longest the user's first words back stay settled past the grace. A first reply after unmute
     /// ("Sorry, I was on mute, give me one second") runs about three seconds, so its comma onsets fall
     /// inside this; anything the user says after it is graded as usual, whatever their pauses.
