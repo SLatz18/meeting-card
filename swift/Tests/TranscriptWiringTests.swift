@@ -29,14 +29,25 @@ final class TranscriptWiringTests: XCTestCase {
         let t = try read("App/CoachTranscript.swift")
         XCTAssertTrue(t.contains("io: .serial(label:"))
         XCTAssertEqual(t.components(separatedBy: "maintain()").count - 1, 4, "the definition, init, call end and a new folder")
-        XCTAssertTrue(t.contains("live.recorder.flush()"))
+        XCTAssertTrue(t.contains("pattern: note.fileNamePattern"), "retention looks only at names the pattern makes")
+        XCTAssertTrue(t.contains("live.recorder.flush(timeout: Self.quitWait)"), "quit waits a bounded time")
+    }
+
+    /// A chosen folder is followed when renamed, and one that is gone or in the Trash takes no notes.
+    func testAMissingOrTrashedFolderTakesNoNotes() throws {
+        let t = try read("App/CoachTranscript.swift")
+        XCTAssertTrue(t.contains("saving: savingOn && folderUsable"))
+        XCTAssertTrue(t.contains("return !Self.isInTrash(f) && live.recorder.store.isDirectory(f)"))
+        XCTAssertTrue(t.contains("parts.contains(\".Trash\") || parts.contains(\".Trashes\")"))
+        XCTAssertTrue(t.contains("if folderIsChosen, let f = resolvedFolder, !live.recorder.store.isDirectory(f) { refreshFolder() }"))
+        XCTAssertTrue(try read("App/CoachNoteSettings.swift").contains("folderUsable: t.folderUsable"))
     }
 
     /// The folder is a bookmark (security-scoped only if the app is ever sandboxed); no entitlement is added.
     func testTheFolderBookmarkNeedsNoEntitlement() throws {
         let t = try read("App/CoachTranscript.swift")
         XCTAssertTrue(t.contains("Self.isSandboxed ? [.withSecurityScope] : []"))
-        XCTAssertTrue(t.contains("if scoped { _ = url.startAccessingSecurityScopedResource() }"))
+        XCTAssertTrue(t.contains("accessing = url.startAccessingSecurityScopedResource() ? url : nil"), "one open scope at a time")
         let project = try read("project.yml")
         XCTAssertTrue(project.contains("ENABLE_APP_SANDBOX: NO"))
         XCTAssertFalse(project.lowercased().contains("entitlements"))

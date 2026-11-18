@@ -139,6 +139,7 @@ final class CoachNoteSettingsRows: NSObject {
         if visible { lastVault = t.vaultName() }
         let n = t.note
         let rows = TranscriptSettingsRows(.init(folderPath: (t.folder.path as NSString).abbreviatingWithTildeInPath, vaultName: lastVault,
+                                                folderUsable: t.folderUsable,
                                                 keyUsable: coach.transcriptKeyUsable, fileNamePattern: n.fileNamePattern,
                                                 tags: n.tags, dailyNoteOn: n.dailyNoteOn, dailyNotePath: n.dailyNotePath,
                                                 dailyNoteEmbed: n.dailyNoteEmbed, retentionDays: n.retentionDays,

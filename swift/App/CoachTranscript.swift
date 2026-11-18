@@ -27,6 +27,8 @@ final class CoachTranscript {
     /// The per-call cost meter's latest reading (nil until the first billed segment).
     private(set) var meter: CostReading?
     private var resolvedFolder: URL?
+    /// The folder whose security scope is open (sandboxed builds only).
+    private var accessing: URL?
 
     init(defaults: UserDefaults, store: TranscriptStore = FileTranscriptStore()) {
         self.defaults = defaults
@@ -51,12 +53,36 @@ final class CoachTranscript {
     static var isSandboxed: Bool { ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil }
 
     /// The chosen folder, through its bookmark (so it follows a rename or move), else its stored
-    /// path, else the default. Resolved once and kept until the user picks another.
-    var folder: URL {
-        if let resolvedFolder { return resolvedFolder }
-        let url = resolveBookmark()
-            ?? defaults.string(forKey: Keys.transcriptFolder).map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? Self.defaultFolder
+    /// path, else the default. Kept between calls; looked up again at each call's start, when it has
+    /// gone from where it was, and when the user picks another.
+    var folder: URL { resolvedFolder ?? refreshFolder() }
+
+    /// The user picked a folder (else the default is used, created when first needed).
+    var folderIsChosen: Bool {
+        defaults.string(forKey: Keys.transcriptFolder) != nil || defaults.data(forKey: Keys.transcriptFolderBookmark) != nil
+    }
+
+    /// A chosen folder that is gone or in the Trash takes no notes: it is never recreated, and
+    /// nothing goes anywhere else instead.
+    var folderUsable: Bool {
+        guard folderIsChosen else { return true }
+        let f = folder
+        return !Self.isInTrash(f) && live.recorder.store.isDirectory(f)
+    }
+
+    static func isInTrash(_ url: URL) -> Bool {
+        let parts = url.standardizedFileURL.pathComponents
+        return parts.contains(".Trash") || parts.contains(".Trashes")
+    }
+
+    /// Resolves the folder again: a renamed or moved folder is followed (its new path is stored).
+    @discardableResult
+    func refreshFolder() -> URL {
+        let stored = defaults.string(forKey: Keys.transcriptFolder).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let url = resolveBookmark() ?? stored ?? Self.defaultFolder
+        if let stored, url.standardizedFileURL.path != stored.standardizedFileURL.path, !Self.isInTrash(url) {
+            defaults.set(url.path, forKey: Keys.transcriptFolder)
+        }
         resolvedFolder = url
         return url
     }
@@ -67,8 +93,11 @@ final class CoachTranscript {
         let scoped = Self.isSandboxed
         guard let url = try? URL(resolvingBookmarkData: data, options: scoped ? [.withSecurityScope] : [],
                                  relativeTo: nil, bookmarkDataIsStale: &stale) else { return nil }
-        if scoped { _ = url.startAccessingSecurityScopedResource() }
-        if stale { storeBookmark(url) }
+        if scoped {
+            accessing?.stopAccessingSecurityScopedResource()
+            accessing = url.startAccessingSecurityScopedResource() ? url : nil
+        }
+        if stale && !Self.isInTrash(url) { storeBookmark(url) }
         return url
     }
 
@@ -88,7 +117,7 @@ final class CoachTranscript {
     }
 
     func settings(keyUsable: Bool) -> LiveTranscript.Settings {
-        .init(captions: captionsOn, saving: savingOn, folder: folder, keyUsable: keyUsable, note: note.options)
+        .init(captions: captionsOn, saving: savingOn && folderUsable, folder: folder, keyUsable: keyUsable, note: note.options)
     }
 
     func setCaptions(_ on: Bool, keyUsable: Bool) {
@@ -117,8 +146,10 @@ final class CoachTranscript {
 
     func markNoticeSeen() { defaults.set(true, forKey: Keys.noticeSeen) }
 
-    /// Keeps the live settings in step with the stored ones and the key (each coach refresh).
+    /// Keeps the live settings in step with the stored ones and the key (each coach refresh). A chosen
+    /// folder no longer where it was is looked up again (renamed, moved or trashed).
     func sync(keyUsable: Bool) {
+        if folderIsChosen, let f = resolvedFolder, !live.recorder.store.isDirectory(f) { refreshFolder() }
         let s = settings(keyUsable: keyUsable)
         if s != live.settings { live.update(s) }
         render()
@@ -127,19 +158,29 @@ final class CoachTranscript {
     /// Recovery (notes of calls the app quit during) and the opt-in retention, in the folder, queued
     /// behind the recorder's writes so they never touch the call being saved.
     func maintain() {
-        live.recorder.maintain(folder: folder, retentionDays: note.retentionDays, labels: Self.speakerLabels)
+        guard folderUsable else { return }
+        live.recorder.maintain(folder: folder, retentionDays: note.retentionDays, pattern: note.fileNamePattern,
+                               labels: Self.speakerLabels)
     }
 
-    /// App quit: finishes the call's note now, then waits for the writes.
+    /// The longest quit waits for the note's writes; whatever is left is recovered at the next launch.
+    static let quitWait: TimeInterval = 2
+
+    /// App quit: finishes the call's note now, then waits a little for the writes.
     func finishForQuit() {
         live.callEnded()
-        live.recorder.flush()
+        live.recorder.flush(timeout: Self.quitWait)
     }
 
     // MARK: coach events
 
     func callStarted(info: CallInfo = CallInfo()) {
         meter = nil
+        if folderIsChosen {
+            refreshFolder()
+            let s = settings(keyUsable: live.settings.keyUsable)
+            if s != live.settings { live.update(s) }
+        }
         live.setCallInfo(info)
         live.callStarted()
         render()

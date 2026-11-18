@@ -117,6 +117,7 @@ enum UISnapshots {
         func obsidianShot(_ coach: CoachController, _ store: MemoryTranscriptStore, _ w: CoachSettingsWindow) {
             let vault = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Example Vault", isDirectory: true)
             store.addFolder(vault.appendingPathComponent(".obsidian"))
+            store.addFolder(vault.appendingPathComponent("Meetings"))
             coach.transcript.setFolder(vault.appendingPathComponent("Meetings", isDirectory: true), keyUsable: coach.transcriptKeyUsable)
             coach.transcript.note.setDailyNote(true)
             coach.transcript.note.setRetentionDays(30)
