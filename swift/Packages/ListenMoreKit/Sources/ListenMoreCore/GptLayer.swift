@@ -1,5 +1,14 @@
 import Foundation
 
+/// Whether the layer is still on, for a judge's task to read: set on the loop, read from any thread.
+final class OpenFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var open = true
+
+    var isOpen: Bool { lock.withLock { open } }
+    func set(_ v: Bool) { lock.withLock { open = v } }
+}
+
 /// The GPT layer's rules, synchronous and single-owner (port of `GptLayer` in `gpt_layer.py`):
 /// - sends only voiced audio: silent frames inside an utterance are held and sent only if speech
 ///   resumes, so the VAD hangover never goes out; pre-roll before each onset;
@@ -23,15 +32,6 @@ import Foundation
 ///
 /// `GptLayer` drives it with real sockets and timers; a test or parity harness can drive it on a
 /// simulated clock. Transcript text stays in RAM.
-/// Whether the layer is still on, for a judge's task to read: set on the loop, read from any thread.
-final class OpenFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var open = true
-
-    var isOpen: Bool { lock.withLock { open } }
-    func set(_ v: Bool) { lock.withLock { open = v } }
-}
-
 public final class GptCore {
     public enum TxAction: Equatable {
         case send(Speaker, [Float])
@@ -496,11 +496,17 @@ public final class GptCore {
     public func finishJudge(_ req: JudgeRequest, result: Result<(JudgeResult, JudgeUsage), Error>, now: TimeInterval) -> Offer? {
         switch result {
         case .failure(let error):
-            if let g = error as? GptError, g.isRedirectProblem {
+            if case .resendRefused? = error as? GptError {
+                // The owner refused the one resend (the layer stopped or judging was stopped): nothing to count
+                // or report.
+            } else if let g = error as? GptError, g.isRedirectProblem {
+                // The cue judge stops judging, never the layer. An untrusted host and a regional host that
+                // didn't work are different reasons, with different copy.
+                let reason: JudgeFailure = g == .untrustedHost ? .untrustedHost : .hostRejected
                 judgeFailures += 1
-                lastJudgeFailure = .untrustedHost
+                lastJudgeFailure = reason
                 if judgeActive {
-                    judgeStopReason = .untrustedHost
+                    judgeStopReason = reason
                     stopJudging()
                 }
             } else if GptError.isTransient(error) {

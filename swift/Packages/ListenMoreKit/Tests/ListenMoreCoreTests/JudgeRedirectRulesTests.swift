@@ -15,6 +15,34 @@ final class EventPorts: @unchecked Sendable {
     func emit(_ speaker: Speaker, _ event: TranscriptEvent) { lock.withLock { ports[speaker] }?(event) }
 }
 
+/// Counts the layer's reports that judging stopped (and keeps the reason).
+final class RedirectStopLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _reasons: [JudgeFailure] = []
+
+    func add(_ failure: JudgeFailure) { lock.withLock { _reasons.append(failure) } }
+    var reasons: [JudgeFailure] { lock.withLock { _reasons } }
+}
+
+/// Posts `replies(n)` for the n-th post, or throws what `throwing(n)` returns for it.
+final class ScriptedHTTP: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _hosts: [String] = []
+    private let script: @Sendable (Int) throws -> (Int, Data)
+
+    init(_ script: @escaping @Sendable (Int) throws -> (Int, Data)) { self.script = script }
+
+    var hosts: [String] { lock.withLock { _hosts } }
+
+    func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
+        let n = lock.withLock { () -> Int in
+            _hosts.append(url.host ?? "?")
+            return _hosts.count
+        }
+        return try script(n)
+    }
+}
+
 final class CaptionBox: @unchecked Sendable {
     private let lock = NSLock()
     private var _finals: [Speaker] = []
@@ -59,11 +87,12 @@ final class JudgeRedirectRulesTests: XCTestCase {
 
     func runLayer(_ s: PivotScript, config: ListenMoreConfig? = nil, cueJudge: CueJudge = FakeJudge(), selfPivotJudge: CueJudge? = nil,
                   allowed: @escaping @Sendable () -> Bool = { true }, count: Int = 1, until: Double, ports: EventPorts = EventPorts(),
-                  captions: CaptionBox = CaptionBox(), during: (TimeInterval, GptLayer) async -> Void = { _, _ in },
+                  captions: CaptionBox = CaptionBox(), stops: RedirectStopLog = RedirectStopLog(), during: (TimeInterval, GptLayer) async -> Void = { _, _ in },
                   afterClose: () -> Void = {}, settle: (GptLayer.Snapshot) -> Bool) async -> Ran {
         let clock = clock, offers = offers
         let layer = GptLayer(config: config ?? self.config, now: { clock.now() }, offer: { offers.add($0, $1, $2, $3) },
-                             onCaption: { captions.add($0) }, judge: cueJudge, selfPivotJudge: selfPivotJudge,
+                             onJudgeStopped: { stops.add($0) }, onCaption: { captions.add($0) },
+                             provider: GptJudgeProvider(cueJudge), selfPivotJudge: selfPivotJudge,
                              selfPivotAllowed: allowed, scheduler: InstantScheduler()) { speaker, onEvent in
             ports.set(speaker, onEvent)
             return FakeTranscriber(speaker: speaker, script: Array(repeating: speaker == .me ? PivotLines.pivot : PivotLines.share, count: count),
@@ -113,7 +142,7 @@ final class JudgeRedirectRulesTests: XCTestCase {
         XCTAssertTrue(ran.final.enabled, "the layer is not stopped")
         XCTAssertTrue(ran.final.errors.isEmpty)
         XCTAssertFalse(ran.final.judgeActive)
-        XCTAssertEqual(ran.final.judgeStopReason, .untrustedHost)
+        XCTAssertEqual(ran.final.judgeStopReason, .hostRejected, "a trusted regional host that didn't work, not an untrusted one")
         XCTAssertEqual(ran.final.otherJudgePosts, 2)
         XCTAssertEqual(captions.finals, 4, "captions keep flowing after the stop")
     }
@@ -129,7 +158,7 @@ final class JudgeRedirectRulesTests: XCTestCase {
         XCTAssertEqual(http.hosts, ["api.openai.com"])
         XCTAssertTrue(ran.final.enabled)
         XCTAssertFalse(ran.final.judgeActive)
-        XCTAssertEqual(ran.final.judgeStopReason, .untrustedHost)
+        XCTAssertEqual(ran.final.judgeStopReason, .hostRejected)
         XCTAssertEqual(captions.finals, 4)
     }
 
@@ -159,8 +188,12 @@ final class JudgeRedirectRulesTests: XCTestCase {
         XCTAssertFalse(GptError.http(500).isRedirectProblem)
         XCTAssertTrue(GptError.isTransient(GptError.http(500)))
         XCTAssertEqual(JudgeFailure.untrustedHost.kind, .untrustedHost)
-        XCTAssertFalse(JudgeFailure.untrustedHost.description.contains("401"))
-        XCTAssertFalse(JudgeFailure.untrustedHost.description.lowercased().contains("typesafe"))
+        XCTAssertEqual(JudgeFailure.hostRejected.kind, .hostRejected)
+        XCTAssertNotEqual(JudgeFailure.untrustedHost, JudgeFailure.hostRejected)
+        for failure in [JudgeFailure.untrustedHost, .hostRejected] {
+            XCTAssertFalse(failure.description.contains("401"))
+            XCTAssertFalse(failure.description.lowercased().contains("typesafe"))
+        }
     }
 
     // MARK: R1: the self-pivot lane
@@ -260,8 +293,9 @@ final class JudgeRedirectRulesTests: XCTestCase {
             let cueHttp = DelayedHTTP(latch: cueLatch) { n in n == 1 ? DelayedHTTP.wrongHost() : DelayedHTTP.ok("none") }
             var cueFired = false
             let cuePorts = EventPorts()
+            let cueStops = RedirectStopLog()
             let cueRan = await runLayer(pivots(1, every: 200), config: generic, cueJudge: cueJudge(cueHttp, config: generic), until: 30,
-                                        ports: cuePorts,
+                                        ports: cuePorts, stops: cueStops,
                                         during: { t, layer in
                                             if t >= 20 && !cueFired {
                                                 cueFired = true
@@ -274,6 +308,10 @@ final class JudgeRedirectRulesTests: XCTestCase {
                                         settle: { $0.judgeLatenciesMs.count >= 1 })
             XCTAssertEqual(cueHttp.hosts.count, 1, "cue judge, \(trigger): no resend once the layer has stopped")
             XCTAssertEqual(cueRan.final.otherJudgePosts, 1, "\(trigger)")
+            XCTAssertNil(cueRan.final.judgeStopReason, "a refused resend reports nothing, \(trigger)")
+            XCTAssertEqual(cueRan.final.judgeFailures, 0, "\(trigger)")
+            XCTAssertNil(cueRan.final.lastJudgeFailure, "\(trigger)")
+            XCTAssertTrue(cueStops.reasons.isEmpty, "onJudgeStopped is never called, \(trigger)")
         }
     }
 
@@ -298,6 +336,111 @@ final class JudgeRedirectRulesTests: XCTestCase {
         let closingPosts = closing.cuePosts()
         closing.closeGates()
         XCTAssertFalse(closingPosts.mayResend(), "the layer is closing")
+    }
+
+    // MARK: a resend that answers 200 with a body that isn't the expected JSON
+
+    /// 401 incorrect_hostname, then 200 `not json` on the resend: the parse failure is a regional host that didn't
+    /// work (stops cue judging only), not an error that reaches `fail()`. Exactly two posts; the layer stays on and
+    /// its captions keep arriving.
+    func testANonJSONResendStopsOnlyCueJudging() async throws {
+        let generic = try cueConfig()
+        let http = DelayedHTTP(latch: opened()) { n in n == 1 ? DelayedHTTP.wrongHost() : (200, Data("not json".utf8)) }
+        let captions = CaptionBox()
+        let stops = RedirectStopLog()
+        let ran = await runLayer(pivots(2, every: 30), config: generic, cueJudge: cueJudge(http, config: generic), count: 2, until: 60,
+                                 captions: captions, stops: stops, settle: { !$0.judgeActive })
+        XCTAssertEqual(http.hosts, ["api.openai.com", "eu.api.openai.com"], "exactly two posts")
+        XCTAssertTrue(ran.final.enabled, "the layer is still on")
+        XCTAssertTrue(ran.final.errors.isEmpty, "no layer error")
+        XCTAssertFalse(ran.final.judgeActive)
+        XCTAssertEqual(ran.final.judgeStopReason, .hostRejected)
+        XCTAssertEqual(stops.reasons, [.hostRejected])
+        XCTAssertEqual(captions.finals, 4, "captions keep arriving after the stop")
+    }
+
+    /// The same for the self-pivot lane: it stops for the call, the layer stays on and captions keep arriving.
+    func testANonJSONResendStopsOnlySelfPivot() async throws {
+        let http = DelayedHTTP(latch: opened()) { n in n == 1 ? DelayedHTTP.wrongHost() : (200, Data("not json".utf8)) }
+        let captions = CaptionBox()
+        let ran = await runLayer(pivots(2, every: 30), selfPivotJudge: selfPivotJudge(http), count: 2, until: 60,
+                                 captions: captions, settle: { $0.selfPivotStop != nil })
+        XCTAssertEqual(http.hosts, ["api.openai.com", "eu.api.openai.com"], "exactly two posts")
+        XCTAssertEqual(ran.final.selfPivotStop, .judgeError)
+        XCTAssertTrue(ran.final.enabled)
+        XCTAssertTrue(ran.final.errors.isEmpty)
+        XCTAssertEqual(ran.final.selfPivotCallPosts, 2)
+        XCTAssertEqual(captions.finals, 4, "captions keep arriving after the stop")
+    }
+
+    /// On the resend, a network error and a cancellation stay what they are; a body that isn't JSON is a
+    /// `hostRejected`.
+    func testTheResendKeepsNetworkErrorsAndWrapsTheRest() async throws {
+        func outcome(_ script: @escaping @Sendable (Int) throws -> (Int, Data)) async -> (Error?, Int) {
+            let http = ScriptedHTTP(script)
+            do {
+                _ = try await LiveJudge(config: config, key: key, http: http, hosts: LearnedHosts()).judge(prompt: "x")
+                return (nil, http.hosts.count)
+            } catch {
+                return (error, http.hosts.count)
+            }
+        }
+        let (timeout, timeoutPosts) = await outcome { n in
+            if n == 1 { return DelayedHTTP.wrongHost() }
+            throw URLError(.timedOut)
+        }
+        XCTAssertEqual((timeout as? URLError)?.code, .timedOut)
+        XCTAssertTrue(GptError.isTransient(try XCTUnwrap(timeout)))
+        XCTAssertEqual(timeoutPosts, 2)
+        let (cancelled, cancelledPosts) = await outcome { n in
+            if n == 1 { return DelayedHTTP.wrongHost() }
+            throw CancellationError()
+        }
+        XCTAssertTrue(cancelled is CancellationError)
+        XCTAssertEqual(cancelledPosts, 2)
+        let (garbled, garbledPosts) = await outcome { n in n == 1 ? DelayedHTTP.wrongHost() : (200, Data("not json".utf8)) }
+        guard case .hostRejected? = garbled as? GptError else { return XCTFail("expected hostRejected, got \(String(describing: garbled))") }
+        XCTAssertEqual(garbledPosts, 2, "never a third")
+        let (empty, _) = await outcome { n in n == 1 ? DelayedHTTP.wrongHost() : (200, Data()) }
+        guard case .hostRejected? = empty as? GptError else { return XCTFail("expected hostRejected, got \(String(describing: empty))") }
+    }
+
+    /// What finishJudge reports for each redirect-path error: its own reason, or nothing for a refused resend.
+    func testFinishJudgeMapsRedirectErrorsToTheirReasons() throws {
+        let req = GptCore.JudgeRequest(refT: 1, reason: "me_reply")
+        let cases: [(GptError, JudgeFailure?)] = [
+            (.untrustedHost, .untrustedHost), (.redirectToSameHost, .hostRejected),
+            (.hostRejected(first: "api.openai.com", regional: "eu.api.openai.com", inner: "HTTP 401"), .hostRejected),
+            (.resendRefused, nil),
+        ]
+        for (error, reason) in cases {
+            let core = GptCore(config: try cueConfig())
+            XCTAssertNil(core.finishJudge(req, result: .failure(error), now: 5))
+            let snap = core.snapshot
+            XCTAssertTrue(snap.enabled, "\(error)")
+            XCTAssertEqual(snap.judgeStopReason, reason, "\(error)")
+            XCTAssertEqual(snap.judgeActive, reason == nil, "\(error)")
+            XCTAssertEqual(snap.judgeFailures, reason == nil ? 0 : 1, "\(error)")
+            XCTAssertEqual(snap.lastJudgeFailure, reason?.description, "\(error)")
+        }
+    }
+
+    /// A refused self-pivot resend doesn't stop the lane, but the learned host that answered 401 is forgotten.
+    func testARefusedResendForgetsTheLearnedHost() async throws {
+        let hosts = LearnedHosts()
+        let scope = KeyScope(key)
+        hosts.learn("https://eu.api.openai.com/v1/responses", for: config.gpt.responsesUrl, scope: scope)
+        let http = DelayedHTTP(latch: opened()) { _ in DelayedHTTP.wrongHost("api.openai.com") }
+        let judge = LiveJudge(config: config, key: key, http: http, hosts: hosts, spec: .selfPivot)
+        do {
+            _ = try await judge.judge(prompt: "x", posts: JudgePosts(resendGate: { false }))
+            XCTFail("expected the refusal")
+        } catch {
+            XCTAssertEqual(error as? GptError, .resendRefused)
+        }
+        XCTAssertEqual(http.hosts, ["eu.api.openai.com"], "one post")
+        XCTAssertNil(hosts.url(for: config.gpt.responsesUrl, scope: scope))
+        XCTAssertEqual(judge.currentURL, config.gpt.responsesUrl)
     }
 
     // MARK: R3: learned hosts belong to the key

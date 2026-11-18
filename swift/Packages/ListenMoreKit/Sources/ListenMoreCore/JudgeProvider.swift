@@ -54,6 +54,9 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
     /// The OpenAI judge was told to use another host that can't be used (not an OpenAI API host, or the
     /// redirect failed): it stops judging, with no more posts. Not a TypeSafe failure.
     case untrustedHost
+    /// The OpenAI judge was redirected to a regional host that was trusted and used, and it didn't work (it
+    /// rejected the key or the request, or named the host just used): the judge stops, no more posts.
+    case hostRejected
 
     public var description: String {
         switch self {
@@ -62,6 +65,7 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
         case .transport: "transport error"
         case .badResponse: "bad response"
         case .untrustedHost: "untrusted host"
+        case .hostRejected: "regional host rejected"
         }
     }
 
@@ -80,6 +84,7 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
         case .transport: return .unreachable
         case .badResponse: return .badReply
         case .untrustedHost: return .untrustedHost
+        case .hostRejected: return .hostRejected
         }
     }
 
@@ -108,6 +113,8 @@ public enum JudgeFailureKind: String, CaseIterable, Equatable, Sendable {
     case badReply
     /// `JudgeFailure.untrustedHost`.
     case untrustedHost
+    /// `JudgeFailure.hostRejected`.
+    case hostRejected
 }
 
 /// One state-based provider call. Content-free: labels, confidences, counts and the configured price.

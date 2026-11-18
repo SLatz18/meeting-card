@@ -455,6 +455,17 @@ final class SelfPivotSingleRequestTests: XCTestCase {
         XCTAssertFalse(OpenAIHost.isTrustedHost("api.openai.com.evil.example"))
     }
 
+    /// A host label is at most 63 characters, as DNS allows.
+    func testAHostLabelIsAtMost63Characters() {
+        let ok = String(repeating: "a", count: 63), tooLong = String(repeating: "a", count: 64)
+        XCTAssertTrue(OpenAIHost.isTrustedHost("\(ok).api.openai.com"))
+        XCTAssertTrue(OpenAIHost.isTrusted("https://\(ok).api.openai.com/v1/responses"))
+        XCTAssertFalse(OpenAIHost.isTrustedHost("\(tooLong).api.openai.com"))
+        XCTAssertFalse(OpenAIHost.isTrusted("https://\(tooLong).api.openai.com/v1/responses"))
+        XCTAssertEqual(LiveJudge.namedHost(status: 401, body: GptClientTests.hostError("Use \(tooLong).api.openai.com"), current: "api.openai.com"),
+                       .untrusted)
+    }
+
     func testLearnedHostsKeepOnlyTrustedHosts() {
         let hosts = LearnedHosts()
         let configured = config.gpt.responsesUrl

@@ -257,7 +257,9 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
 
     /// At most two posts: the first, and one more after a `401 incorrect_hostname` that names a trusted host,
     /// other than the one just used, which the owner lets this call use. A non-transient failure from a learned
-    /// host forgets it (for this key) and resets to the configured host, with no resend.
+    /// host forgets it (for this key) and resets to the configured host, with no resend. That includes a resend
+    /// the owner refused (`resendRefused`, for the self-pivot lane the switch or a cap): the learned host just
+    /// answered 401 incorrect_hostname, so it is forgotten even though the lane itself goes on.
     public func judge(prompt: String, posts: JudgePosts) async throws -> (JudgeResult, JudgeUsage) {
         let body = try JSONSerialization.data(withJSONObject: Self.requestBody(gpt: gpt, prompt: prompt, spec: spec))
         let configured = gpt.responsesUrl
@@ -295,6 +297,12 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
         } catch let error as GptError {
             if case .hostRejected = error { throw error }
             if GptError.isTransient(error) { throw error }
+            throw GptError.hostRejected(first: currentHost ?? "?", regional: URLComponents(string: alt)?.host ?? "?", inner: GptError.safe(error))
+        } catch {
+            // A network error or a cancellation stays what it is; anything else (a 200 whose body isn't the
+            // expected JSON throws a Foundation error) is a regional host that didn't work, which stops judging
+            // only, never the layer.
+            if error is URLError || error is CancellationError { throw error }
             throw GptError.hostRejected(first: currentHost ?? "?", regional: URLComponents(string: alt)?.host ?? "?", inner: GptError.safe(error))
         }
         lock.withLock { url = alt }
@@ -382,7 +390,8 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
 }
 
 /// Which hosts a judge may send the key to after being redirected, or keep as learned: https, and exactly
-/// `api.openai.com` or one label in front of it (`<label>.api.openai.com`). A deeper subdomain
+/// `api.openai.com` or one label in front of it (`<label>.api.openai.com`, the label at most 63 characters, as
+/// DNS allows). A deeper subdomain
 /// (`a.b.api.openai.com`), a look-alike (`api.openai.com.example`), another domain, plain http, a port other
 /// than 443 or credentials in the URL are none of those.
 public enum OpenAIHost {
@@ -399,7 +408,7 @@ public enum OpenAIHost {
         if h == base { return true }
         guard h.hasSuffix("." + base) else { return false }
         let label = h.dropLast(base.count + 1)
-        return !label.isEmpty && !label.hasPrefix("-") && !label.hasSuffix("-")
+        return !label.isEmpty && label.count <= 63 && !label.hasPrefix("-") && !label.hasSuffix("-")
             && label.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") }
     }
 }

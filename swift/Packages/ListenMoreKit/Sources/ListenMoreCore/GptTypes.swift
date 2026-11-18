@@ -125,7 +125,8 @@ public enum GptError: Error, Equatable, CustomStringConvertible {
     /// A 401 incorrect_hostname named only the host just used: there is nowhere else to send it.
     case redirectToSameHost
     /// A 401 incorrect_hostname whose one resend the call's owner refused (the switch is off, a cap is reached
-    /// or the layer stopped). Not a fault of the judge: the self-pivot lane goes on.
+    /// or the layer stopped). Not a fault of the judge: nothing stops, and the cue judge ignores it. The judge
+    /// does forget a learned host it came from (that host just answered 401 incorrect_hostname).
     case resendRefused
 
     public var description: String {
@@ -149,8 +150,9 @@ public enum GptError: Error, Equatable, CustomStringConvertible {
         return String(describing: type(of: error))
     }
 
-    /// Redirect-path errors: the cue judge stops judging for them (never the layer), and the self-pivot lane
-    /// stops for all but `resendRefused`.
+    /// Redirect-path errors. The cue judge stops judging for all but `resendRefused` (never the layer; a refused
+    /// resend is a no-op for it), and the self-pivot lane stops for all but `resendRefused` too (that one is only
+    /// counted as a failure).
     public var isRedirectProblem: Bool {
         switch self {
         case .untrustedHost, .redirectToSameHost, .resendRefused, .hostRejected: return true
