@@ -61,6 +61,7 @@ final class CoachNoteSettings {
 final class CoachNoteSettingsRows: NSObject {
     private let coach: CoachController
     private let vaultNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    private let unfinishedNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
     private let fileNameField = NSTextField()
     private let tagsField = NSTextField()
     private let dailyNoteSwitch = NSSwitch()
@@ -119,6 +120,7 @@ final class CoachNoteSettingsRows: NSObject {
         dailyNoteStyleRow = CoachSettingsWindow.row(label(TranscriptCopy.dailyNoteStyleLabel), stylePopup)
         return [
             vaultNote,
+            unfinishedNote,
             CoachSettingsWindow.row(label(TranscriptCopy.fileNameLabel), fileNameField),
             helper(TranscriptCopy.fileNameHelp),
             CoachSettingsWindow.row(label(TranscriptCopy.tagsLabel), tagsField),
@@ -136,18 +138,24 @@ final class CoachNoteSettingsRows: NSObject {
     /// being edited keeps what the user is typing.
     func update(visible: Bool) {
         let t = coach.transcript
-        if visible { lastVault = t.vaultName() }
+        if visible {
+            t.refreshFolder()
+            lastVault = t.vaultName()
+        }
         let n = t.note
         let rows = TranscriptSettingsRows(.init(folderPath: (t.folder.path as NSString).abbreviatingWithTildeInPath, vaultName: lastVault,
                                                 folderUsable: t.folderUsable,
                                                 keyUsable: coach.transcriptKeyUsable, fileNamePattern: n.fileNamePattern,
                                                 tags: n.tags, dailyNoteOn: n.dailyNoteOn, dailyNotePath: n.dailyNotePath,
                                                 dailyNoteEmbed: n.dailyNoteEmbed, retentionDays: n.retentionDays,
-                                                canDelete: t.canDelete), chooseFolder: CoachCopy.chooseFolder)
+                                                canDelete: t.canDelete, unfinished: t.unfinished), chooseFolder: CoachCopy.chooseFolder)
         for r in rows.rows {
             switch r.control {
             case let .note(s) where r.id == "vault":
                 vaultNote.stringValue = s
+            case let .note(s) where r.id == "unfinished":
+                unfinishedNote.stringValue = s
+                unfinishedNote.isHidden = r.hidden
             case let .field(_, value):
                 let f = ["fileName": fileNameField, "tags": tagsField, "dailyNotePath": dailyNotePathField][r.id]
                 if let f {

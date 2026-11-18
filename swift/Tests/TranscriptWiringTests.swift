@@ -28,7 +28,9 @@ final class TranscriptWiringTests: XCTestCase {
     func testUpkeepAndQuit() throws {
         let t = try read("App/CoachTranscript.swift")
         XCTAssertTrue(t.contains("io: .serial(label:"))
-        XCTAssertEqual(t.components(separatedBy: "maintain()").count - 1, 4, "the definition, init, call end and a new folder")
+        XCTAssertEqual(t.components(separatedBy: "maintain()").count - 1, 4, "the definition, init, every call's end and a new folder")
+        XCTAssertTrue(t.contains("live.callEnded()\n        maintain()"), "recovery after every call, retention on or off")
+        XCTAssertTrue(t.contains("{ [weak self] left in self?.unfinished = left }"))
         XCTAssertTrue(t.contains("pattern: note.fileNamePattern"), "retention looks only at names the pattern makes")
         XCTAssertTrue(t.contains("live.recorder.flush(timeout: Self.quitWait)"), "quit waits a bounded time")
     }
@@ -37,9 +39,11 @@ final class TranscriptWiringTests: XCTestCase {
     func testAMissingOrTrashedFolderTakesNoNotes() throws {
         let t = try read("App/CoachTranscript.swift")
         XCTAssertTrue(t.contains("saving: savingOn && folderUsable"))
-        XCTAssertTrue(t.contains("return !Self.isInTrash(f) && live.recorder.store.isDirectory(f)"))
+        XCTAssertTrue(t.contains("resolvedUsable = !folderIsChosen || (!Self.isInTrash(url) && live.recorder.store.isDirectory(url))"))
         XCTAssertTrue(t.contains("parts.contains(\".Trash\") || parts.contains(\".Trashes\")"))
-        XCTAssertTrue(t.contains("if folderIsChosen, let f = resolvedFolder, !live.recorder.store.isDirectory(f) { refreshFolder() }"))
+        let sync = try XCTUnwrap(t.components(separatedBy: "func sync(keyUsable: Bool) {").dropFirst().first?.components(separatedBy: "\n    }\n").first)
+        XCTAssertFalse(sync.contains("isDirectory") || sync.contains("refreshFolder"), "no disk check on every refresh")
+        XCTAssertTrue(try read("App/CoachNoteSettings.swift").contains("t.refreshFolder()"), "Settings on screen looks again")
         XCTAssertTrue(try read("App/CoachNoteSettings.swift").contains("folderUsable: t.folderUsable"))
     }
 
