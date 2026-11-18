@@ -295,6 +295,28 @@ final class CueDisplayTests: XCTestCase {
         XCTAssertTrue(project.contains("SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG"), "Debug does (the tests)")
     }
 
+    /// Release doesn't compile the test-only files at all, so no object of theirs (which whole-module
+    /// optimization can fill with other files' code) reaches the shipping binary's debug map; the
+    /// `--test-id` build clears the list and compiles them.
+    func testReleaseLeavesTheTestOnlyFilesOut() throws {
+        let project = try read("project.yml")
+        let release = try XCTUnwrap(project.components(separatedBy: "    Release:").dropFirst().first?.components(separatedBy: "# The call coach").first)
+        XCTAssertTrue(release.contains("EXCLUDED_SOURCE_FILE_NAMES: \"$(MEETINGCARD_TEST_ONLY_SOURCES)\""))
+        let line = try XCTUnwrap(release.components(separatedBy: "\n").first { $0.contains("MEETINGCARD_TEST_ONLY_SOURCES: ") })
+        let listed = try XCTUnwrap(line.components(separatedBy: "\"").dropFirst().first).split(separator: " ").map(String.init)
+        let testOnly = ["App/CoachDebugReadout.swift", "App/CoachCueDisplayLab.swift", "Core/CueDisplay.swift", "Core/CueDisplayLab.swift",
+                        "Core/CueDisplayViews.swift", "Core/CueTimelines.swift"]
+        XCTAssertEqual(Set(listed), Set(testOnly.map { URL(fileURLWithPath: $0).lastPathComponent }), "every test-only file, nothing else")
+        // Excluded by file name: no shipping source may share one.
+        var names: [String: Int] = [:]
+        for dir in ["App", "Core"] {
+            for f in try FileManager.default.contentsOfDirectory(atPath: Self.swiftDir.appendingPathComponent(dir).path) { names[f, default: 0] += 1 }
+        }
+        for name in listed { XCTAssertEqual(names[name], 1, "\(name): exactly one file by that name") }
+        let script = try read("scripts/build.sh")
+        XCTAssertTrue(script.contains("'MEETINGCARD_TEST_ONLY_SOURCES='"), "the test build compiles them")
+    }
+
     /// Every App reference to the prototype sits inside `#if MEETINGCARD_TEST_ID`.
     func testEveryAppReferenceIsInsideTheTestIdFlag() throws {
         let app = Self.swiftDir.appendingPathComponent("App")

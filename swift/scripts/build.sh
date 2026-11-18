@@ -11,6 +11,8 @@
 #     registered as a login item. It alone compiles the coach's audio debug readout
 #     (MEETINGCARD_TEST_ID; App/CoachDebugReadout.swift) and, of the Release builds, the coaching-display
 #     prototype (Core/CueDisplay*.swift, App/CoachCueDisplayLab.swift; Debug builds have it for the tests).
+#     The shipping Release build doesn't compile those files at all (project.yml's
+#     MEETINGCARD_TEST_ONLY_SOURCES, which --test-id clears).
 #     Mac hand checks use it (docs/MAC_DEMO_CHECKS.md).
 # Tests include the ListenMoreKit package (swift test); SKIP_KIT_TESTS=1 skips them.
 # Never launches the app.
@@ -42,7 +44,7 @@ if (( TEST_ID )); then
   DEST="$HOME/Applications/MeetingCardSwift-Test.app"
   RELEASE_DD="build/dd-test"
   IDENTITY=(MEETINGCARD_APP_ID=com.slatz.meetingcard.swift.test "MEETINGCARD_APP_NAME=MeetingCard (Test)")
-  TEST_FLAGS=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) MEETINGCARD_TEST_ID')
+  TEST_FLAGS=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) MEETINGCARD_TEST_ID' 'MEETINGCARD_TEST_ONLY_SOURCES=')
 fi
 XCODEGEN="${XCODEGEN:-$(command -v xcodegen || echo "$HOME/.local/bin/xcodegen")}"
 [[ -x "$XCODEGEN" ]] || { echo "xcodegen not found: brew install xcodegen (or set XCODEGEN)" >&2; exit 1; }
