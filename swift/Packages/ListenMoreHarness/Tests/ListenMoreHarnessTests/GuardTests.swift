@@ -119,11 +119,13 @@ final class GuardTests: XCTestCase {
         XCTAssertTrue(live.contains("environment: openai-live"))
         XCTAssertTrue(live.contains("--live"))
         XCTAssertTrue(live.contains("--no-judge"), "0 judge calls unless the judge input is set")
-        // Both workflows run pinned code: containers by digest, every action by full commit SHA.
-        for f in ["harness-live.yml", "ci.yml"] {
+        // Every workflow runs pinned code: containers by digest, every action by full commit SHA.
+        let workflows = try FileManager.default.contentsOfDirectory(atPath: wf.path).filter { $0.hasSuffix(".yml") || $0.hasSuffix(".yaml") }
+        XCTAssertTrue(Set(workflows).isSuperset(of: ["ci.yml", "harness-live.yml", "live-openai.yml"]))
+        for f in workflows {
             let text = try String(contentsOf: wf.appendingPathComponent(f), encoding: .utf8)
             let uses = text.components(separatedBy: "\n").filter { $0.contains("uses:") }
-            XCTAssertGreaterThanOrEqual(uses.count, 2, f)
+            XCTAssertGreaterThanOrEqual(uses.count, 1, f)
             for u in uses { XCTAssertNotNil(u.range(of: #"uses: [\w./-]+@[0-9a-f]{40}( |$)"#, options: .regularExpression), "\(f): \(u)") }
             for c in text.components(separatedBy: "\n").filter({ $0.contains("container:") }) {
                 XCTAssertNotNil(c.range(of: #"container: [\w./:-]+@sha256:[0-9a-f]{64}"#, options: .regularExpression), "\(f): \(c)")
