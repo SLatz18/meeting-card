@@ -15,7 +15,7 @@ public enum DefaultConfig {
     "cut_in_backchannel_max_ms": 1200,
     "cut_in_utterance_gap_ms": 500,
     "cut_in_others_pause_ms": 300,
-    "cut_in_overlap_gap_ms": 300,
+    "cut_in_onset_gap_ms": 300,
     "cut_in_text_wait_ms": 1000,
     "cut_in_question_lookback_s": 3.0,
     "cut_in_after_talk_over_s": 20,
