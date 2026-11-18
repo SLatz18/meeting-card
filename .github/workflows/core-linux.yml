@@ -1,0 +1,27 @@
+name: Core on Linux
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# ListenMoreCore is Foundation only: its tests (transcripts, notes, crash recovery, retention, the
+# daily-note line and the privacy guards among them) run on Linux too.
+jobs:
+  core-linux:
+    runs-on: ubuntu-24.04
+    container: swift:6.2-noble
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: ListenMoreCore tests
+        working-directory: swift/Packages/ListenMoreKit
+        shell: bash
+        run: |
+          set -o pipefail
+          swift --version
+          swift test 2>&1 | tee core-linux.log
+          grep -E "Executed [0-9]+ tests" core-linux.log | tail -1 | tee -a "$GITHUB_STEP_SUMMARY"
