@@ -398,6 +398,13 @@ public enum CueDisplayCopy {
 
     /// VoiceOver: the glyph-state status line while a cue lingers.
     public static func glyphLabel(status: String, words: String, age: String) -> String { "\(status). Last cue: \(words), \(age)." }
+    /// VoiceOver: the pill while a cue's words hold (the shipped pill's label).
+    public static func nudgeLabel(status: String, words: String) -> String { "\(status). \(words)" }
+    /// The glyph-state pill's tooltip: the cue's words and how long ago.
+    public static func tooltip(words: String, age: String) -> String { "\(words) · \(age)" }
+    /// A snapshot strip's time label (the doc's images only, never in the app).
+    public static func stripTime(_ t: TimeInterval) -> String { String(format: "t = %.1f s", t) }
+
     /// VoiceOver: a caption row with a cue mark.
     public static func anchoredRowLabel(speaker: String, text: String, words: String) -> String { "Cue: \(words). \(speaker): \(text)" }
 

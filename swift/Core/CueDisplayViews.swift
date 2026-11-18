@@ -338,11 +338,11 @@ struct CuePillMock: View {
             .background(shape.fill(style.surface.swiftUI))
             .clipShape(shape)
             .accessibilityElement(children: .contain)
-            .accessibilityLabel(words.map { "\(CueDisplayCopy.statusListening). \($0.words)" }
+            .accessibilityLabel(words.map { CueDisplayCopy.nudgeLabel(status: CueDisplayCopy.statusListening, words: $0.words) }
                 ?? cue.map { CueDisplayCopy.glyphLabel(status: CueDisplayCopy.statusListening, words: $0.nudge.words, age: age ?? "") }
                 ?? CueDisplayCopy.statusListening)
             if hover, let cue, let age {
-                Text("\(cue.nudge.words) · \(age)")
+                Text(CueDisplayCopy.tooltip(words: cue.nudge.words, age: age))
                     .font(d.tooltipFont.swiftUI)
                     .foregroundStyle(CardStyle.Text.primary.shapeStyle(style))
                     .lineLimit(1)
@@ -375,7 +375,7 @@ public enum CueDisplaySnapshot {
         let content = HStack(alignment: .top, spacing: d.stripGap) {
             ForEach(Array(moments.enumerated()), id: \.offset) { _, t in
                 VStack(alignment: .leading, spacing: d.stripGap / 2) {
-                    Text(String(format: "t = %.1f s", t))
+                    Text(CueDisplayCopy.stripTime(t))
                         .font(d.stripLabelFont.swiftUI)
                         .foregroundStyle(d.stripLabelText.shapeStyle(style))
                     CueDisplaySurface(option: option, timeline: timeline, t: t, mode: mode)

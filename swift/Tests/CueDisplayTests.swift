@@ -220,6 +220,10 @@ final class CueDisplayTests: XCTestCase {
                        "Coach on, listening. Last cue: Let them finish, Just now.")
         XCTAssertEqual(CueDisplayCopy.anchoredRowLabel(speaker: "Them", text: "Okay.", words: words), "Cue: Let them finish. Them: Okay.")
         XCTAssertEqual(CueDisplayCopy.Lab.describe(.stale(.talkOver, at: 34.5)), "34.5 s dropped talk_over: too late to act on")
+        XCTAssertEqual(CueDisplayCopy.nudgeLabel(status: "Coach on, listening", words: words), "Coach on, listening. Let them finish")
+        XCTAssertEqual(CueDisplayCopy.tooltip(words: words, age: "12 s ago"), "Let them finish · 12 s ago")
+        XCTAssertEqual(CueDisplayCopy.stripTime(9.5), "t = 9.5 s")
+        XCTAssertFalse(try read("Core/CueDisplayViews.swift").contains("Text(\""), "the surfaces' strings live in CueDisplayCopy")
     }
 
     /// Cue glyphs: one per type, all different, and never a mic (Mute in Zoom's), a waveform (the
