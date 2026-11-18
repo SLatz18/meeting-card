@@ -56,7 +56,7 @@ final class PrivacyGuardTests: XCTestCase {
         // Disk writes: only the transcript writer (Foundation and POSIX alike).
         let writerOnly = ["write(to:", "createDirectory(", "removeItem(", "moveItem(", "copyItem(", "setAttributes(",
                           "replaceItem", "O_WRONLY", "O_RDWR", "O_APPEND", "O_CREAT", "renameat(", "unlink(", "ftruncate(",
-                          "fsync(", "F_FULLFSYNC", "FileHandle(forUpdating"]
+                          "fsync(", "F_FULLFSYNC", "FileHandle(forUpdating", "renamex_np", "linkat("]
         for (name, text) in try allSources() {
             for f in neverAnywhere { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
             guard name != Self.transcriptWriter else { continue }
@@ -85,7 +85,8 @@ final class PrivacyGuardTests: XCTestCase {
     }
 
     /// The opt-in note's own parts: a summary placeholder section and the daily-note line are what
-    /// the user asked for when they turned on saving. Everywhere else the history rule below holds.
+    /// the user asked for when they turned on saving. These files may say "summary" and "daily";
+    /// every other word of the history rule below still holds in them.
     static let noteFiles: Set<String> = ["CallNote.swift", "CallRecord.swift", "DailyNote.swift", "Transcript.swift"]
 
     /// The summary section is a fixed placeholder: the note never gets a generated summary.
@@ -219,8 +220,10 @@ final class PrivacyGuardTests: XCTestCase {
     /// The coach keeps nothing: no daily summary, history, recap or stats, in memory or on disk. The
     /// opt-in note files (`noteFiles`) may name the note's summary placeholder and daily-note line.
     func testNoSummaryOrHistory() throws {
-        let re = #"(?i)\b(summary|summaries|history|recap|recaps|daily|stats|statistics|journal|archive)\b"#
-        for (name, text) in try allSources() where !Self.noteFiles.contains(name) {
+        let all = #"(?i)\b(summary|summaries|history|recap|recaps|daily|stats|statistics|journal|archive)\b"#
+        let notes = #"(?i)\b(summaries|history|recap|recaps|stats|statistics|journal|archive)\b"#
+        for (name, text) in try allSources() {
+            let re = Self.noteFiles.contains(name) ? notes : all
             // Code and comments only: user-facing copy may promise "no stats, no recaps".
             let code = text.replacingOccurrences(of: #""(?:[^"\\\n]|\\.)*""#, with: "\"\"", options: .regularExpression)
             XCTAssertNil(code.range(of: re, options: .regularExpression), "\(name) mentions a stored-history concept")
