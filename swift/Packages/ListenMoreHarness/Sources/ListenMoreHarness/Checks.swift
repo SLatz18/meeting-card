@@ -151,7 +151,7 @@ public enum Checks {
             check("muted: indicator", indicatorOK, "indicator showed micOff: \(indicatorOK)")
             let grace = r.config.local.unmuteGraceS
             for u in r.timeline.times(.unmute) {
-                let early = r.cues.filter { $0.t >= u && $0.t <= u + grace + 4 && !oracle.tolerated.contains($0.type) }
+                let early = r.cues.filter { c in c.t >= u && c.t <= u + grace + 4 && !oracle.tolerated.contains { $0.covers(c) } }
                 check("unmute grace: no false cue", early.isEmpty,
                       "cues in the \(fmt(grace + 4)) s after unmute (local.unmute_grace_s = \(fmt(grace))): \(early.map { $0.type.rawValue })")
             }

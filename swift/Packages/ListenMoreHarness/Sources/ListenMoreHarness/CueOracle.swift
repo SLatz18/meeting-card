@@ -11,6 +11,16 @@ public struct ExpectedCue: Sendable {
     public var reason: String
 }
 
+/// A cue the oracle can't time but a rule may raise around one line (a judge verdict on a reply, a
+/// borderline trailing cut-in, a counter-question). Only that type, only inside that window.
+public struct Tolerance: Sendable {
+    public var type: CueType
+    public var window: ClosedRange<Double>
+    public var reason: String
+
+    public func covers(_ c: CueRecord) -> Bool { c.type == type && window.contains(c.t) }
+}
+
 public struct CueMatch: Sendable {
     public struct Outcome: Sendable {
         public var expected: ExpectedCue
@@ -54,7 +64,7 @@ public enum CueOracle {
     public static let liveTranscriptAllowanceS = 1.5
     static let offlineTranscriptAllowanceS = 1.0
 
-    public static func expected(_ timeline: Timeline, config c: ListenMoreConfig, facts: Facts) -> (cues: [ExpectedCue], tolerated: Set<CueType>) {
+    public static func expected(_ timeline: Timeline, config c: ListenMoreConfig, facts: Facts) -> (cues: [ExpectedCue], tolerated: [Tolerance]) {
         let l = c.local
         let hang = Double(c.vad.hangoverMs) / 1000
         let end = timeline.duration
@@ -74,8 +84,16 @@ public enum CueOracle {
         }
 
         var cands: [ExpectedCue] = []
-        var tolerated: Set<CueType> = live && facts.judgeOn && !c.cues.disabledTypes.contains(.notListening) ? [.notListening] : []
+        var tolerated: [Tolerance] = []
         let allowance = live ? liveTranscriptAllowanceS : offlineTranscriptAllowanceS
+        // The judge answers on You's first line after a Them turn: its verdict lands after that line's
+        // transcript plus at most `judge_timeout_s`.
+        if live && facts.judgeOn && !facts.keyless && !c.cues.disabledTypes.contains(.notListening) {
+            for u in you where heard(u) && them.contains(where: { $0.end <= u.start && $0.end > u.start - 30 }) {
+                tolerated.append(Tolerance(type: .notListening, window: u.start...(u.end + hang + allowance + c.gpt.judgeTimeoutS),
+                                           reason: "judge verdict on \(u.line.id)"))
+            }
+        }
 
         // Cut-in.
         let cutOverlap = l.cutInMinOverlapMs / 1000, cutContinue = l.cutInOthersContinueMs / 1000
@@ -97,7 +115,9 @@ public enum CueOracle {
                 cands.append(ExpectedCue(type: .interrupt, level: nil, window: window, optional: false,
                                          reason: "\(u.line.id) cuts in on \(th.line.id): overlap \(fmt(overlap)) s, they continue \(fmt(othersAfter)) s"))
             } else if overlap >= l.cutInTrailingMinOverlapMs / 1000 && abs(th.end - u.start) <= l.cutInTrailingWindowS {
-                tolerated.insert(.interrupt)
+                let latest = u.start + max(cutBackchannel, l.cutInTrailingYieldS) + l.cutInTextWaitMs / 1000 + allowance
+                tolerated.append(Tolerance(type: .interrupt, window: u.start...max(u.start, min(latest, u.end + hang + allowance)),
+                                           reason: "trailing cut-in by \(u.line.id) depends on \(th.line.id)'s last words"))
             }
         }
 
@@ -161,7 +181,8 @@ public enum CueOracle {
             let question = ScriptText.sentences(ScriptText.normalize(q.line.text)).last ?? ""
             let reply = ScriptText.normalize(r.line.text)
             if ScriptText.sentences(reply).first?.hasSuffix("?") == true {
-                tolerated.insert(.missedQuestion)
+                tolerated.append(Tolerance(type: .missedQuestion, window: r.start...(r.end + l.monologueMeGapResetS + allowance),
+                                           reason: "\(r.line.id) answers \(q.line.id) with a question"))
                 continue
             }
             if c.text.questionOpenInvites.contains(where: { ScriptText.contains(question, phrase: $0) }) { continue }
@@ -208,7 +229,7 @@ public enum CueOracle {
     }
 
     /// Each expected cue takes the first unused actual cue of its type (and level) inside its window.
-    public static func match(expected: [ExpectedCue], tolerated: Set<CueType>, actual: [CueRecord]) -> CueMatch {
+    public static func match(expected: [ExpectedCue], tolerated: [Tolerance], actual: [CueRecord]) -> CueMatch {
         var used = Set<Int>()
         var outcomes: [CueMatch.Outcome] = []
         for e in expected {
@@ -221,7 +242,7 @@ public enum CueOracle {
         var falseCues: [CueRecord] = []
         var tol: [CueRecord] = []
         for (i, a) in actual.enumerated() where !used.contains(i) {
-            if tolerated.contains(a.type) { tol.append(a) } else { falseCues.append(a) }
+            if tolerated.contains(where: { $0.covers(a) }) { tol.append(a) } else { falseCues.append(a) }
         }
         return CueMatch(outcomes: outcomes, falseCues: falseCues, tolerated: tol)
     }
