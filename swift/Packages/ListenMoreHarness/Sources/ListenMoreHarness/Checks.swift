@@ -103,7 +103,7 @@ public enum Checks {
             let atEnd = r.transcripts.last { $0.phase == "teardown" } ?? r.transcripts.last { $0.phase == "call-ended" }
             let files = atEnd?.files ?? []
             let f = files.first
-            let named = f.map { $0.name.hasPrefix("Call ") && $0.name.hasSuffix(".md") } ?? false
+            let named = f.map { NoteFileName.matches($0.name, pattern: NoteFileName.defaultPattern) && $0.name.hasSuffix(" \(NoteWording().untitled).md") } ?? false
             let labelled = f.map { Self.timesAndLabels($0.contents, labels: Self.transcribedLabels(r)) } ?? false
             let after = r.transcripts.last { $0.phase == "after-teardown" }
             let wiped = r.transcriptDeletedAtTeardown && (after?.files.isEmpty ?? true)
@@ -198,7 +198,7 @@ public enum Checks {
             check("two Them voices", sp.multiThem == .mergedAsThem, "engine behaviour: \(sp.multiThem.rawValue)")
             let renameAt = r.timeline.times(.renameThem).first ?? .infinity
             let tagged = r.captionViews.filter { $0.t > renameAt }.flatMap(\.rows).filter { $0.speaker == .others }
-            let file = (r.transcripts.last { $0.phase == "call-ended" })?.files.first?.contents ?? ""
+            let file = (r.transcripts.last { $0.phase == "call-ended" })?.files.first { $0.name.hasSuffix(".md") }?.contents ?? ""
             let ok = !tagged.isEmpty && tagged.allSatisfy { $0.label == "Guest" } && file.contains("Guest:**") && !file.contains("Them:**")
                 && r.themLabelAfterCall == "Them"
             check("speaker name (X4)", ok, "tagged rows \(tagged.count), file relabelled \(file.contains("Guest:**") && !file.contains("Them:**")), next call label \(r.themLabelAfterCall ?? "-")")
@@ -253,11 +253,23 @@ public enum Checks {
 
     /// The saved transcript has a `**[hh:mm:ss] Label:**` line for each label, and at least one. A side
     /// with nothing transcribed (You, when the budget cap comes before their first words) has no line.
+    /// The note writes labels Markdown-escaped, and a numbered voice within Them as `Them 2`.
     static func timesAndLabels(_ contents: String, labels: [String]) -> Bool {
         !labels.isEmpty && labels.allSatisfy { label in
-            contents.range(of: #"\*\*\[\d{2}:\d{2}:\d{2}\] "# + NSRegularExpression.escapedPattern(for: label) + #":\*\*"#,
+            contents.range(of: #"\*\*\[\d{2}:\d{2}:\d{2}\] "# + NSRegularExpression.escapedPattern(for: markdownEscaped(label)) + #"( \d+)?:\*\*"#,
                            options: .regularExpression) != nil
         }
+    }
+
+    /// The note's escaping of transcript text and labels (`CallNote.escape`).
+    static func markdownEscaped(_ s: String) -> String {
+        let special: Set<Character> = ["\\", "`", "*", "_", "[", "]", "#", "^", "%", "<", ">", "=", "~", "|", "$"]
+        var out = ""
+        for ch in s {
+            if special.contains(ch) { out.append("\\") }
+            out.append(ch)
+        }
+        return out
     }
 
     static func holdReason(_ why: CuePolicy.HoldReason) -> String {

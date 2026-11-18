@@ -115,6 +115,9 @@ final class LiveRun4Tests: XCTestCase {
         XCTAssertFalse(Checks.timesAndLabels("**[00:00:05]** Here is the short version.\n", labels: ["Them"]), "no label")
         XCTAssertFalse(Checks.timesAndLabels("[00:00:05] Them: Here is the short version.\n", labels: ["Them"]), "not the line format")
         XCTAssertFalse(Checks.timesAndLabels("# Call transcript\n", labels: []), "at least one line")
+        XCTAssertTrue(Checks.timesAndLabels("**[00:00:05] Them 2:** Here is the short version. ^l1\n", labels: ["Them"]), "a numbered voice within Them")
+        XCTAssertTrue(Checks.timesAndLabels("**[00:00:05] Dev\\_Ops:** Here is the short version. ^l1\n", labels: ["Dev_Ops"]), "a Markdown-escaped label")
+        XCTAssertFalse(Checks.timesAndLabels("**[00:00:05] Dev_Ops:** Here is the short version.\n", labels: ["Dev_Ops"]), "the note never writes a label unescaped")
     }
 
     func run(_ s: Scenario) async throws -> ScenarioResult {

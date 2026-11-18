@@ -234,10 +234,26 @@ public final class CountingTranscriptStore: TranscriptStore {
         try inner.write(text, to: url)
     }
 
+    public func create(_ text: String, at url: URL) throws {
+        written.append(url)
+        try inner.create(text, at: url)
+    }
+
     public func remove(_ url: URL) throws {
         removed.append(url)
         try inner.remove(url)
     }
+
+    public func append(_ text: String, to url: URL) throws {
+        written.append(url)
+        try inner.append(text, to: url)
+    }
+
+    public func read(_ url: URL) -> String? { inner.read(url) }
+    public func head(_ url: URL, bytes: Int) -> String? { inner.head(url, bytes: bytes) }
+    public func contents(of folder: URL) -> [URL] { inner.contents(of: folder) }
+    public func modified(_ url: URL) -> Date? { inner.modified(url) }
+    public func isDirectory(_ url: URL) -> Bool { inner.isDirectory(url) }
 }
 
 public struct HarnessKeys: APIKeyProvider {
