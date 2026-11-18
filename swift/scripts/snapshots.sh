@@ -77,6 +77,8 @@ case "${1:-}" in
     for s in card-idle card-listening card-paused card-muted card-nudge-amber card-nudge-rose card-increased-contrast \
              card-saving card-saving-nudge card-mic-off card-zoom-mute pill-mic-off card-call-mode-tip card-no-mic-notice card-zoom-call-mode-tip card-zoom-no-mic-notice \
              pill-idle pill-listening pill-muted pill-paused pill-nudge-amber pill-nudge-rose \
+             card-cue-linger-amber card-cue-linger-rose card-cue-expired card-cue-linger-mic-off \
+             pill-cue-linger-amber pill-cue-linger-rose pill-cue-expired \
              pill-zoom-mute morph-end collapse-end; do
       for a in light dark; do
         [[ -s "$OUT/coach-$s-$a.png" ]] || { echo "missing coach-$s-$a.png" >&2; missing=1; }
