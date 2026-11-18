@@ -71,6 +71,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.local.cutInMinOverlapMs, 600)
         XCTAssertEqual(c.local.monologueSoftS, 60)
         XCTAssertEqual(c.cues.globalCooldownS, 20)
+        XCTAssertEqual(c.cues.onScreenS, 4.5)
         XCTAssertEqual(c.gpt.notListeningMinConfidence, 0.85)
         XCTAssertEqual(c.gpt.judgeModel, "gpt-6-luna")
         XCTAssertEqual(c.gpt.transcribeModel, "gpt-live-transcribe")

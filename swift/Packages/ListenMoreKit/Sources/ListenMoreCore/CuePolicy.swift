@@ -2,7 +2,10 @@ import Foundation
 
 /// Swift mirror of `listen_more/cues.py`: colour per cue type, ~3 s fade, one cue at a time, never any
 /// sound. A cue is held back when any cue showed in the last `global_cooldown_s` or the same type in
-/// the last `cooldown_s`; candidates raised at the same moment are tried in `priority` order.
+/// the last `cooldown_s`; candidates raised at the same moment are tried in `priority` order. One
+/// exception: right after a judged cue, a local interrupt skips the global cooldown (its own still
+/// applies), but nothing shows while the last cue is on screen (`on_screen_s`): it is dropped, not
+/// queued, since a late "let them finish" lands after the cut-in it was about.
 public enum CueType: String, CaseIterable, Equatable, Sendable {
     case interrupt
     case talkOver = "talk_over"
@@ -95,6 +98,8 @@ public final class CuePolicy {
         case global
         /// The same type showed within `cooldown_s`.
         case type
+        /// The last cue is still on screen (within `on_screen_s`).
+        case onScreen = "on_screen"
     }
 
     /// A held cue: type, time and reason only.
@@ -106,6 +111,7 @@ public final class CuePolicy {
 
     public let cooldown: TimeInterval
     public let globalCooldown: TimeInterval
+    public let onScreen: TimeInterval
     public let fade: Double
     public let minConfidence: Double
     private let colors: [String: CueColor]
@@ -113,7 +119,7 @@ public final class CuePolicy {
     public let disabled: Set<CueType>
     private let rank: [CueType: Int]
     private var last: [CueType: TimeInterval] = [:]
-    private var lastAny: TimeInterval?
+    private var lastAny: (t: TimeInterval, source: CueSource)?
     public private(set) var suppressed = 0
     public private(set) var held: [Hold] = []
     public var paused = false
@@ -121,6 +127,7 @@ public final class CuePolicy {
     public init(config: ListenMoreConfig.Cues) {
         cooldown = config.cooldownS
         globalCooldown = config.globalCooldownS
+        onScreen = config.onScreenS
         fade = config.fadeS
         minConfidence = config.gptMinConfidence
         colors = config.colors
@@ -144,16 +151,24 @@ public final class CuePolicy {
             hold(type, t, .closing)
             return nil
         }
-        if let lastAny, Elapsed.span(t - lastAny) < globalCooldown {
-            hold(type, t, .global)
-            return nil
+        if let lastAny {
+            let since = Elapsed.span(t - lastAny.t)
+            let cutInAfterJudge = type == .interrupt && source == .local && lastAny.source == .gpt
+            if since < globalCooldown && !cutInAfterJudge {
+                hold(type, t, .global)
+                return nil
+            }
+            if since < onScreen {
+                hold(type, t, .onScreen)
+                return nil
+            }
         }
         if let prev = last[type], Elapsed.span(t - prev) < cooldown {
             hold(type, t, .type)
             return nil
         }
         last[type] = t
-        lastAny = t
+        lastAny = (t, source)
         return Cue(type: type, color: color, t: t, onset: onset,
                    latencyMs: Int(((t - onset) * 1000).rounded(.toNearestOrEven)), source: source, fadeS: fade,
                    confidence: confidence, level: level)

@@ -55,8 +55,8 @@ final class LiveRun3Tests: XCTestCase {
 /// Fixes from the fourth live run (0390f5e on the box).
 @MainActor
 final class LiveRun4Tests: XCTestCase {
-    /// A judged not_listening on You's reply, then You cut in 8 s later: the engine raises the interrupt
-    /// and its cue policy holds it for the global cooldown. The report names the hold.
+    /// A judged not_listening on You's reply, then You cut in a few seconds later, inside the global
+    /// cooldown but after the verdict's `on_screen_s`: the interrupt answers only to its own cooldown and shows.
     static let judgedThenCutIn = Scenario(
         name: "judged-then-cut-in",
         summary: "a judged not_listening, then a cut-in inside the global cooldown",
@@ -67,16 +67,43 @@ final class LiveRun4Tests: XCTestCase {
             Line("y2", .you, "Sorry to cut in. I think the services should go first because they are smaller.", .beforeEnd("a2", lead: 4.0)),
         ])
 
-    func testHeldCueIsNamedInTheDiagnostics() async throws {
+    /// The same verdict, then a cut-in while it is still on screen: the policy drops the interrupt.
+    static let judgedThenQuickCutIn = Scenario(
+        name: "judged-then-quick-cut-in",
+        summary: "a judged not_listening, then a cut-in while it is on screen",
+        lines: [
+            Line("a1", .themA, "Let me walk you through the plan for the release next week.", .at(0.5)),
+            Line("y1", .you, "Okay, I see what you mean about the plan.", .after("a1", gap: 1.0)),
+            Line("a2", .themA, "The first step is the database move and then the services follow one at a time over the weekend.", .after("y1", gap: 0.3)),
+            Line("y2", .you, "Sorry to cut in. I think the services should go first because they are smaller.", .into("a2", offset: 0.6)),
+        ])
+
+    func run(_ s: Scenario) async throws -> ScenarioResult {
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: out) }
-        let summary = try await Harness.run(HarnessOptions(mode: .offline, scenarios: [Self.judgedThenCutIn], outputDirectory: out,
+        let summary = try await Harness.run(HarnessOptions(mode: .offline, scenarios: [s], outputDirectory: out,
                                                            environment: [:], offlineNotListeningOn: "what you mean"))
-        let r = try XCTUnwrap(summary.results.first)
+        return try XCTUnwrap(summary.results.first)
+    }
+
+    /// Until this ruling the policy held this cut-in for the global cooldown (and this test asserted
+    /// the miss); after a judged cue a local interrupt now waits only for its own cooldown.
+    func testCutInAfterAJudgedCueShows() async throws {
+        let r = try await run(Self.judgedThenCutIn)
+        XCTAssertEqual(r.cues.falseCues.map(\.type), [.notListening], "offline, the judge's cue isn't tolerated")
+        XCTAssertEqual(r.cues.missed.map(\.type), [])
+        let verdict = try XCTUnwrap(r.cues.falseCues.first), cutIn = try XCTUnwrap(r.cues.outcomes.first?.actual)
+        XCTAssertEqual(cutIn.type, .interrupt)
+        XCTAssertGreaterThanOrEqual(cutIn.t - verdict.t, 4.5, "after the verdict left the screen")
+        XCTAssertLessThan(cutIn.t - verdict.t, 20, "inside the global cooldown")
+    }
+
+    func testHeldCueIsNamedInTheDiagnostics() async throws {
+        let r = try await run(Self.judgedThenQuickCutIn)
         XCTAssertEqual(r.cues.falseCues.map(\.type), [.notListening], "offline, the judge's cue isn't tolerated")
         XCTAssertEqual(r.cues.missed.map(\.type), [.interrupt])
         let held = r.diagnostics.first { $0.hasPrefix("missed interrupt: the engine raised it") }
         XCTAssertNotNil(held, "\(r.diagnostics)")
-        XCTAssertTrue(held?.contains("held it (global cooldown); last cue shown: not_listening at") ?? false, held ?? "")
+        XCTAssertTrue(held?.contains("held it (the last cue still on screen); last cue shown: not_listening at") ?? false, held ?? "")
     }
 }

@@ -90,6 +90,7 @@ public enum DefaultConfig {
   "cues": {
     "cooldown_s": 20,
     "global_cooldown_s": 20,
+    "on_screen_s": 4.5,
     "priority": ["talk_over", "interrupt", "missed_question", "aggressive", "monologue", "not_listening", "talk_share"],
     "fade_s": 3,
     "gpt_min_confidence": 0.7,
