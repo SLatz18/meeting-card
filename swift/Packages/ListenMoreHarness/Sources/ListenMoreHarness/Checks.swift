@@ -265,6 +265,7 @@ public enum Checks {
         case .global: return "global cooldown"
         case .type: return "same-type cooldown"
         case .closing: return "quiet after a closing phrase"
+        case .onScreen: return "the last cue still on screen"
         }
     }
 

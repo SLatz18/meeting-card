@@ -90,10 +90,11 @@ final class GuardTests: XCTestCase {
     }
 
     /// The cue policy shows one cue at a time and holds every cue for `global_cooldown_s` after the
-    /// last. The judge may say not_listening on any You line after a Them turn (live, judge on), so no
-    /// expected cue may start within that cooldown of a verdict on an earlier You line: it could be held
-    /// by design, and the scenario would test the judge instead of its rule. From 2.6 to a fast 3.4
-    /// words/s.
+    /// last, except a local interrupt after a judged cue, which only waits while the verdict is on
+    /// screen (`on_screen_s`). The judge may say not_listening on any You line after a Them turn (live,
+    /// judge on), so no expected cue may start within that hold of a verdict on an earlier You line: it
+    /// could be held by design, and the scenario would test the judge instead of its rule. From 2.6 to
+    /// a fast 3.4 words/s.
     func testExpectedCuesAreClearOfEarlierJudgeVerdictsCooldown() throws {
         let config = try ListenMoreConfig.builtIn()
         var bad: [String] = []
@@ -113,7 +114,7 @@ final class GuardTests: XCTestCase {
                     }
                     for v in tolerated where v.type == .notListening {
                         guard let earlier = v.line.flatMap({ t.line($0) }), earlier.start < line.start else { continue }
-                        let clear = v.window.upperBound + config.cues.globalCooldownS
+                        let clear = v.window.upperBound + (e.type == .interrupt ? config.cues.onScreenS : config.cues.globalCooldownS)
                         if e.window.lowerBound < clear {
                             bad.append(String(format: "%@ at %.1f words/s: %@ on %@ from %.1f s, a verdict on %@ until %.1f s holds cues to %.1f s",
                                               s.name, wordsPerS, e.type.rawValue, line.line.id, e.window.lowerBound, earlier.line.id,
@@ -124,6 +125,14 @@ final class GuardTests: XCTestCase {
             }
         }
         XCTAssertEqual(bad, [])
+    }
+
+    /// The policy's `on_screen_s` is how long the coach card holds a nudge (`CardStyle.Coach.nudgeHold`).
+    func testOnScreenHoldMatchesTheCardsNudgeHold() throws {
+        let theme = try String(contentsOf: Self.repoURL.appendingPathComponent("swift/Core/Theme.swift"), encoding: .utf8)
+        let decl = try XCTUnwrap(theme.split(separator: "\n").first { $0.contains("static let nudgeHold: TimeInterval =") })
+        let value = try XCTUnwrap(Double(decl.split(separator: "=").last?.trimmingCharacters(in: .whitespaces) ?? ""))
+        XCTAssertEqual(try ListenMoreConfig.builtIn().cues.onScreenS, value)
     }
 
     func testKeyIsRefusedInArguments() {
