@@ -197,6 +197,8 @@ public struct RunRecord: @unchecked Sendable {
     public var origin = 0.0
     /// Filled in by the harness after teardown.
     public var diskViolations: [String] = []
+    /// Files outside the run directory that hold the scenario's script text (a transcript anywhere else).
+    public var textLeaks: [String] = []
     public var workDirWiped = false
 
     init(scenario: Scenario, mode: Mode, timeline: Timeline, config: ListenMoreConfig) {

@@ -92,8 +92,8 @@ public enum Checks {
         let everFiles = r.transcripts.flatMap(\.files)
         if !s.saving {
             let untouched = r.storePrepared.isEmpty && r.storeWritten.isEmpty && r.recorderLastURL == nil
-            check("keep-nothing", untouched && r.transcripts.allSatisfy { !$0.folderExists },
-                  "saving off: transcript store asked to prepare \(r.storePrepared.count) folders and write \(r.storeWritten.count) files; folder never created: \(r.transcripts.allSatisfy { !$0.folderExists })")
+            check("keep-nothing", untouched && r.transcripts.allSatisfy { !$0.folderExists } && r.textLeaks.isEmpty,
+                  "saving off: transcript store asked to prepare \(r.storePrepared.count) folders and write \(r.storeWritten.count) files; folder never created: \(r.transcripts.allSatisfy { !$0.folderExists }); files outside the run dir holding the script's text: \(r.textLeaks.count)")
         } else if s.checks.contains(.deleteMidCall) {
             let deleted = r.deleteResults.first?.deleted == true
             let afterDelete = r.transcripts.drop { $0.phase != "after-delete" }
@@ -112,8 +112,8 @@ public enum Checks {
         }
         if s.saving, let folder = r.transcriptsFolder?.standardizedFileURL.path {
             let outside = r.storeWritten.filter { !$0.standardizedFileURL.path.hasPrefix(folder + "/") }
-            check("transcript stays in the run dir", !r.storeWritten.isEmpty && outside.isEmpty,
-                  "\(r.storeWritten.count) writes, \(outside.count) outside the run's folder")
+            check("transcript stays in the run dir", !r.storeWritten.isEmpty && outside.isEmpty && r.textLeaks.isEmpty,
+                  "\(r.storeWritten.count) writes, \(outside.count) outside the run's folder, \(r.textLeaks.count) other files holding the script's text")
         }
         check("no-traffic-after-close", r.sockets.sendsAfterClose == 0, "\(r.sockets.sendsAfterClose) sends on a closed transcription socket")
         check("no-audio-on-disk", r.diskViolations.isEmpty && r.workDirWiped,

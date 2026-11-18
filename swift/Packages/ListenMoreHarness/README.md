@@ -18,7 +18,9 @@ Each run scores three things per scenario and writes one results table:
   segment is matched against every line; on equal word share a line that could be heard wins (lines can
   share words), and a segment that best matches a line spoken while muted or paused counts as wrong (that
   audio should never reach a transcriber). Every wrong one is named in the report. With an accuracy
-  figure, and what happens with two different Them voices.
+  figure, and what happens with two different Them voices. Offline, the scripted server returns text only
+  from lines on its own stream, so attribution is true by construction there and only the `stream-routing`
+  check tests it; live runs are where attribution is really tested.
 - **Coaching**: every cue (type, level, timing, source) against the cue rules: expected cues fire, no
   false cues (including right after unmute), and none while paused or muted.
 
@@ -89,7 +91,9 @@ expected vs actual cues and every check), `results.json` and `cost-log.jsonl`, i
 new folder under the system temp directory). Never committed. Each scenario gets a private temp
 directory (mode 0700, named with the harness's pid) for the opt-in transcript; it is wiped at the end,
 a run sweeps folders a crashed run left behind (dead pid and untouched for five minutes), and a disk audit fails the run if an audio-like file
-appeared anywhere else (temp dir, the repository, the home folder's top level).
+appeared anywhere else (temp dir, the repository, the home folder's top level). The same audit also looks
+in every new file there for the scenario's script text, so a transcript written outside the run directory
+(a keep-nothing run's, or a saving run's copy) fails the persistence check wherever it landed.
 
 For each missed or false interrupt, the report adds a diagnostic: the run's own audio replayed through
 `LocalLayer` with the same Mutes and Pauses, saying whether the local rule raised the cut-in on that

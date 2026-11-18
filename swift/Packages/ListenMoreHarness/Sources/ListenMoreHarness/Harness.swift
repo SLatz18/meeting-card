@@ -135,6 +135,7 @@ public enum Harness {
             }
             record.workDirWiped = dir.wipe()
             record.diskViolations = audit.violations()
+            record.textLeaks = audit.filesContaining(scenario.lines.flatMap { [$0.text, $0.words.prefix(4).joined(separator: " ")] })
             let result = Checks.evaluate(record)
             results.append(result)
             cost += costEntries(result, record: record, http: meteredHTTP)
@@ -159,6 +160,9 @@ public enum Harness {
             "Streams: You = mic, Them = call (two Them voices in two-them-voices)",
             "Caption latency: end of each transcribed speech segment (its commit, less the VAD hangover) to its final transcript",
         ]
+        if o.mode == .offline {
+            header.append("Speaker ID offline: the scripted server answers a commit with text only from lines on its own stream, so attribution is true by construction here; the stream-routing check (loud audio on the right stream's transcriber) is what tests it. Live runs test attribution against real transcripts.")
+        }
         if let failure { header.append("INCOMPLETE: \(failure)") }
         try writer.write("results.md", Report.markdown(results, mode: o.mode, header: header))
         try writer.write("results.json", Report.json(results, mode: o.mode))
