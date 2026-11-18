@@ -91,7 +91,7 @@ public enum DefaultConfig {
     "pivot_invite_hold_s": 60,
     "pivot_reply_max_start_s": 5.0,
     "pivot_reply_min_words": 15,
-    "pivot_openers": ["that reminds me", "reminds me of", "same thing happened to me", "that happened to me", "when i was", "when my", "i remember when", "i remember", "back when i", "i once", "i had the same", "i had a similar", "i did the same", "me too", "same here", "same with me", "same for me", "my own", "speaking of"],
+    "pivot_openers": ["that reminds me", "reminds me of", "same thing happened to me", "that happened to me", "when i was", "when my", "i remember when", "i remember", "back when i", "i once", "i had the same", "i had a similar", "i did the same", "me too", "same here", "same with me", "same for me", "my dad", "my mom", "my father", "my mother", "my parents", "my sister", "my brother", "my wife", "my husband", "my son", "my daughter", "my kids", "my family", "my grandmother", "my grandfather", "my grandma", "my grandpa", "my own", "speaking of"],
     "pivot_first_person": ["i", "i'm", "i've", "i'd", "i'll", "me", "my", "mine", "myself"],
     "pivot_other_person": ["you", "you're", "you've", "you'd", "you'll", "your", "yours", "yourself", "he", "he's", "he'd", "he'll", "him", "his", "himself", "she", "she's", "she'd", "she'll", "her", "hers", "herself", "they", "they're", "they've", "they'd", "they'll", "them", "their", "theirs", "themselves"],
     "pivot_about_them": ["that sounds", "sounds like", "love that", "good for you", "happy for you", "proud of you", "how exciting", "so exciting", "how fun"],

@@ -136,6 +136,7 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         /// is about them.
         public var pivotReplyMaxStartS: Double
         public var pivotReplyMinWords: Int
+        /// Includes the user's own family at a sentence start ("my dad", "my kids"): a story of theirs.
         public var pivotOpeners: [String]
         public var pivotFirstPerson: [String]
         public var pivotOtherPerson: [String]

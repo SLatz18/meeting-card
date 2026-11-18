@@ -287,6 +287,31 @@ final class PivotGateTests: XCTestCase {
         }
     }
 
+    /// A sentence opening with the user's own family ("my dad had…") turns to the user's story.
+    func testAFamilyStoryAfterSympathyIsACandidate() {
+        for reply in [
+            "Oh no, so sorry, hope it gets better soon. My dad had the same surgery last year and I was at the hospital every day.",
+            "My dad was in the hospital for a week last spring and I drove there every single day after work.",
+        ] {
+            XCTAssertEqual(run(pivot(reply: reply, share: PivotLines.worried), until: 30).counters.candidates, 1, reply)
+        }
+    }
+
+    /// Family words that open a sentence about them, not a story of the user's own.
+    func testFamilyWordsInTalkAboutThemAreNone() {
+        let house = "We finally bought our first house last week and I am so excited to move in."
+        for (share, reply) in [
+            (PivotLines.worried, "So sorry to hear that. My family sends our love, we are all thinking of you this week."),
+            (PivotLines.worried, "I'm so sorry. My mom sends her love and I will call you later tonight to check in on you."),
+            (PivotLines.worried, "My kids are fine, thanks, I hope your dad is home soon and you get some rest this weekend."),
+            (PivotLines.worried, "So sorry to hear that, I hope he gets better. My dad and I will be thinking of you both all week."),
+            (PivotLines.engaged, "Congrats! My sister just got engaged too, she is so excited and they are planning a big wedding."),
+            (house, "Congrats! My kids keep asking when we can come over and see the new place, they are so excited for you."),
+        ] {
+            XCTAssertEqual(run(pivot(reply: reply, share: share), until: 30).counters.candidates, 0, reply)
+        }
+    }
+
     /// Well-wishes after sympathy are about them, however first-person they read.
     func testWellWishesAfterSympathyAreAboutThem() {
         for reply in [
