@@ -273,6 +273,9 @@ enum UISnapshots {
         ("card-call-mode-tip", shotState(.listening, noZoomMute, nil, .card, callModeTip: true), nil),
         // Bluetooth headphones on a Mac with no built-in mic: the same row, with the no-mic notice.
         ("card-no-mic-notice", shotState(.listening, noZoomMute, nil, .card, noMicNotice: true), nil),
+        // The fullest button row (the coach's Mute, Mute in Zoom, Pause, Stop Coach) above each tip row.
+        ("card-zoom-call-mode-tip", shotState(.listening, liveMute, nil, .card, callModeTip: true), CoachCardCopy.Tooltip.muteMic),
+        ("card-zoom-no-mic-notice", shotState(.micOff, liveMute, nil, .card, noMicNotice: true), CoachCardCopy.Tooltip.unmuteMic),
         ("pill-idle", shotState(.idle, noZoomMute, nil, .pill), nil),
         ("pill-listening", shotState(.listening, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.muteMic),
         ("pill-muted", shotState(.muted, mutedMute, nil, .pill), nil),

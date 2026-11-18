@@ -20,7 +20,7 @@ public enum CoachCardCopy {
         public static let stop = "Stop coach for this call"
         public static let expand = "Expand coach"
         public static let minimize = "Minimize coach"
-        /// The pill's Mute: the coach's own, also its VoiceOver label.
+        /// The card's and pill's Mute: the coach's own, also its VoiceOver label.
         public static let muteMic = "Mute My Mic for Coach"
         public static let unmuteMic = "Unmute My Mic for Coach"
     }
@@ -275,8 +275,8 @@ public extension CoachCardState {
                             accessibilityLabel: mute.accessibilityLabel ?? "", enabled: mute.visibility == .enabled)
     }
 
-    /// The pill's Mute: the coach's own (it stops the coach hearing the user's mic, never Zoom's
-    /// mute), with the coach menu's symbols; nothing to mute before a session starts.
+    /// The card's and pill's Mute: the coach's own (it stops the coach hearing the user's mic, never
+    /// Zoom's mute), with the coach menu's symbols; nothing to mute before a session starts.
     var coachMuteControl: CoachControl {
         let s = Theme.Coach.menuSymbols
         let off = coachMicMuted || status == .micOff

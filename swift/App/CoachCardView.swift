@@ -212,9 +212,10 @@ class CoachSurfaceView: NSView {
 }
 
 /// The full coach card: status line (the nudge band while a nudge holds) with Minimize, the
-/// captions area, and Stop Coach, Mute and Pause/Resume on the button row. While the call-mode tip
-/// or the no-mic notice shows, one more row sits below them: its text and a borderless Dismiss (the
-/// card is taller by `Theme.CoachCard.tipExtra`, and is laid out for it when it is made).
+/// captions area, and the button row: the coach's Mute, Mute in Zoom (only while it can act),
+/// Pause/Resume, then Stop Coach. While the call-mode tip or the no-mic notice shows, one more row
+/// sits below them: its text and a borderless Dismiss (the card is taller by
+/// `Theme.CoachCard.tipExtra`, and is laid out for it when it is made).
 final class CoachFullCardView: CoachSurfaceView {
     private let band = CoachSurfaceView.layerView()
     private let bar = CoachSurfaceView.layerView()
@@ -232,8 +233,11 @@ final class CoachFullCardView: CoachSurfaceView {
     private(set) var dismissTip: NSButton!
     private(set) var minimize: CardButton!
     private(set) var stop: CardButton!
+    private(set) var micMute: CardButton!
     private(set) var mute: CardButton!
     private(set) var pause: CardButton!
+    /// How far the usual content sits above a card without the tip row.
+    private let lift: Double
 
     static var size: NSSize { NSSize(width: Theme.CoachCard.width, height: Theme.CoachCard.height) }
 
@@ -259,9 +263,10 @@ final class CoachFullCardView: CoachSurfaceView {
     }
 
     init(state: CoachCardState, actions: CoachCardActions, captions: NSView) {
-        super.init(state: state, actions: actions, size: Self.frameSize(for: state))
         let k = Theme.CoachCard.self
         let lift = state.tipRow ? k.tipExtra : 0
+        self.lift = lift
+        super.init(state: state, actions: actions, size: Self.frameSize(for: state))
         func rect(_ f: Theme.CoachCard.Frame) -> NSRect { NSRect(x: f.x, y: f.y + lift, width: f.width, height: f.height) }
 
         let row = k.statusRow
@@ -302,15 +307,13 @@ final class CoachFullCardView: CoachSurfaceView {
         addSubview(captionsBox)
         passthrough = captionsBox
 
+        micMute = button(radius: k.iconButtonRadius, action: #selector(muteMicPressed(_:)))
+        mute = button(radius: k.iconButtonRadius, action: #selector(mutePressed(_:)))
+        pause = button(radius: k.iconButtonRadius, action: #selector(pausePressed(_:)))
         stop = button(radius: CardStyle.Radius.control, action: #selector(stopPressed(_:)))
         stop.frame = rect(k.stopButton(labelWidth: Self.stopLabelWidth()))
-        addSubview(stop)
-        mute = button(radius: k.iconButtonRadius, action: #selector(mutePressed(_:)))
-        mute.frame = rect(k.muteButton)
-        addSubview(mute)
-        pause = button(radius: k.iconButtonRadius, action: #selector(pausePressed(_:)))
-        pause.frame = rect(k.pauseButton)
-        addSubview(pause)
+        for b in [micMute!, mute!, pause!, stop!] { addSubview(b) }
+        layoutButtons(state)
 
         let titleArea = k.tipTitle
         tipTitle.frame = NSRect(x: titleArea.x, y: titleArea.y, width: titleArea.width, height: titleArea.height)
@@ -361,6 +364,8 @@ final class CoachFullCardView: CoachSurfaceView {
 
         let icon = k.iconGlyph
         set(minimize, s.sizeControl, glyph: icon)
+        layoutButtons(s)
+        set(micMute, s.coachMuteControl, glyph: icon)
         set(mute, s.muteControl, glyph: icon)
         mute.isHidden = !s.showsMute
         set(pause, s.pauseControl, glyph: icon)
@@ -382,6 +387,17 @@ final class CoachFullCardView: CoachSurfaceView {
         dismissTip.attributedTitle = Card.attr(s.noMicNotice ? CoachCardCopy.NoMicNotice.dismiss : CoachCardCopy.CallModeTip.dismiss,
                                                Theme.font(k.tipButtonFont), Theme.text(k.tipButtonTextColor, style))
         dismissTip.isHidden = !s.tipRow
+    }
+
+    /// The icon buttons from the leading inset: the coach's Mute, Mute in Zoom while it can act, then
+    /// Pause/Resume, which moves over when Mute in Zoom comes or goes.
+    private func layoutButtons(_ s: CoachCardState) {
+        guard micMute != nil else { return }
+        let k = Theme.CoachCard.self
+        func rect(_ f: Theme.CoachCard.Frame) -> NSRect { NSRect(x: f.x, y: f.y + lift, width: f.width, height: f.height) }
+        micMute.frame = rect(k.micMuteButton)
+        mute.frame = rect(k.muteButton)
+        pause.frame = rect(k.pauseButton(showsMute: s.showsMute))
     }
 
     /// The saving badge at the band's right end, sized to its label (measured as a plain label, so
