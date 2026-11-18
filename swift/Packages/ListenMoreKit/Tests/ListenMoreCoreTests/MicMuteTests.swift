@@ -775,6 +775,33 @@ final class LocalLayerMicMuteTests: XCTestCase {
         XCTAssertEqual(cuts.first?.onset ?? 0, 4.4, accuracy: 0.1)
     }
 
+    /// The mute-unmute scenario's live TTS takes (box run at e2e6b84, from the shadow trace). You's first
+    /// words back ("Sorry, I was on mute, give me one second…") start 0.3 s after Unmute and re-onset at
+    /// their commas, over Them's sentence ("…settle it on the next call, I just want the whole
+    /// picture…"), which pauses at its comma: 0.6 s judge off (silent from 28.56 s, back by 29.2 s), at
+    /// least 0.46 s judge on (0.56 s here). Both takes raised an interrupt from You's last comma onset
+    /// 1.2 s later (31.58 and 31.32 s). A comma pause is not a new utterance: nothing cuts in. A full
+    /// second of quiet is, and the same words cut in.
+    func testLiveFirstWordsBackOverThemsCommaPauseStaySettled() {
+        let takes: [(name: String, unmute: Double, me: [(Double, Double)], them: Double, quiet: Double)] = [
+            ("judge off", 27.98, [(28.28, 28.80), (29.12, 29.94), (30.38, 32.5)], 25.98, 28.56),
+            ("judge on", 28.06, [(28.36, 29.70), (30.12, 32.3)], 26.06, 28.50),
+        ]
+        for take in takes {
+            func others(pause: Double) -> [(Double, Double)] { [(take.them, take.quiet), (take.quiet + pause, 31.9)] }
+            let lastOnset = take.me[take.me.count - 1].0
+            let control = run(34, me: take.me, others: others(pause: 0.6))
+            XCTAssertTrue(control.contains { $0.kind == .interrupt }, "\(take.name) control: not muted, a cut-in")
+            let comma = run(34, me: take.me, others: others(pause: take.name == "judge off" ? 0.6 : 0.56),
+                            mutes: [(0, true), (take.unmute, false)])
+            XCTAssertEqual(cues(comma), [], "\(take.name): Them's comma pause is not a new utterance")
+            let newUtterance = run(34, me: take.me, others: others(pause: LocalLayer.othersNewUtteranceGapS),
+                                   mutes: [(0, true), (take.unmute, false)])
+            let cut = newUtterance.first { $0.kind == .interrupt }
+            XCTAssertEqual(cut?.onset ?? 0, lastOnset, accuracy: 0.05, "\(take.name): a second of quiet ends the exemption")
+        }
+    }
+
     /// A back-and-forth right after unmute, the user's pauses under `cut_in_utterance_gap_ms`: the other
     /// side's first turn is a new utterance, so the user's later onsets are speaker switches and the
     /// exchange talks over well inside `firstWordsBackMaxS` (only the new-utterance rule ends the

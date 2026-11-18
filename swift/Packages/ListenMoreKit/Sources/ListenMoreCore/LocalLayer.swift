@@ -88,6 +88,11 @@ public final class LocalLayer {
     /// ("Sorry, I was on mute, give me one second") runs about three seconds, so its comma onsets fall
     /// inside this; anything the user says after it is graded as usual, whatever their pauses.
     static let firstWordsBackMaxS = 3.0
+    /// How long the other side must be quiet before their next words end the first words back's
+    /// exemption as a new utterance. A pause inside one of their sentences (a comma, a breath) runs to
+    /// about 0.7 s: a live TTS take of "settle it on the next call, I just want the whole picture" paused
+    /// 0.6 s at the comma, past `cut_in_utterance_gap_ms`.
+    static let othersNewUtteranceGapS = 1.0
 
     struct CutIn {
         var onset: TimeInterval
@@ -138,7 +143,8 @@ public final class LocalLayer {
     private var unmuteGraceUntil: TimeInterval?
     /// The user's first words back began inside the grace: later onsets of that same utterance (after a
     /// pause shorter than `cut_in_utterance_gap_ms`, like a comma) settle too, until the other side
-    /// starts a new utterance or `firstWordsBackMaxS` past the grace.
+    /// starts a new utterance (after `othersNewUtteranceGapS` quiet) or `firstWordsBackMaxS` past the
+    /// grace.
     private var settlingRun = false
     /// When the other side's last utterance ended (their VAD offset).
     private var othersLastEnd = -Double.infinity
@@ -196,8 +202,8 @@ public final class LocalLayer {
     /// call heard, so talk share keeps counting the other side and the gap can only lower the user's
     /// share. Back on, an utterance that starts in the first `local.unmute_grace_s` seconds opens no
     /// cut-in and logs no switch, through pauses shorter than `cut_in_utterance_gap_ms`, until the
-    /// other side starts a new utterance (after at least that long quiet) or `firstWordsBackMaxS` past
-    /// the grace, whichever comes first.
+    /// other side starts a new utterance (after at least `othersNewUtteranceGapS` quiet) or
+    /// `firstWordsBackMaxS` past the grace, whichever comes first.
     public func setMicMuted(_ muted: Bool) {
         guard muted != micMuted else { return }
         micMuted = muted
@@ -245,7 +251,7 @@ public final class LocalLayer {
         }
         if settlingRun {
             let userPaused = !s.active && Elapsed.span(t - me.lastSpeechT) > cutPause
-            let othersNewUtterance = o.onset.map { Elapsed.span($0 - othersLastEnd) >= cutPause } ?? false
+            let othersNewUtterance = o.onset.map { Elapsed.span($0 - othersLastEnd) >= Self.othersNewUtteranceGapS } ?? false
             let capped = unmuteGraceUntil.map { Elapsed.span(t - $0) >= Self.firstWordsBackMaxS } ?? true
             if userPaused || othersNewUtterance || capped { settlingRun = false }
         }
