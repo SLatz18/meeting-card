@@ -365,6 +365,8 @@ final class NoteSink: @unchecked Sendable {
     private(set) var notes: [URL]
     private var lastHash: String?
     private var stopped = false
+    /// Notes whose first write is confirmed in the spool.
+    private var confirmed: Set<String> = []
     private var reserved: Set<String>
 
     init(store: TranscriptStore, folder: URL, note: URL, callId: String, reserved: Set<String>) {
@@ -383,6 +385,7 @@ final class NoteSink: @unchecked Sendable {
             try store.append(begin.encoded(), to: spool)
             try store.write(text, to: note)
             lastHash = noteHash(text)
+            confirm()
         } catch {
             return fail()
         }
@@ -451,7 +454,16 @@ final class NoteSink: @unchecked Sendable {
         } catch {
             return fail()
         }
+        confirm()
         return outcome
+    }
+
+    /// Records, once per note, that it reached disk.
+    private func confirm() {
+        let name = note.lastPathComponent
+        guard !confirmed.contains(name) else { return }
+        confirmed.insert(name)
+        _ = try? store.append(CallSpool.written(name).encoded(), to: spool)
     }
 
     private func fail() -> Outcome {
@@ -506,8 +518,8 @@ public enum TranscriptMaintenance {
                 if !ours {
                     note = NoteFileName.unique(base: String(note.deletingPathExtension().lastPathComponent), in: folder, store: store)
                 }
-            } else if replay.hashes.count > 1 {
-                // A record after `begin` means the first note was written; it is gone, so the user removed it.
+            } else if replay.written.contains(replay.noteName) {
+                // It reached disk and is gone: the user removed it.
                 try? store.remove(spool)
                 continue
             }

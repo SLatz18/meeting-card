@@ -41,7 +41,7 @@ final class TranscriptDurabilityTests: XCTestCase {
         for i in 1...3 {
             r.add(TranscriptLine(speaker: i % 2 == 0 ? .me : .others, offset: Double(i), text: "line \(i)"))
             XCTAssertTrue(try read(note).contains("line \(i) ^l\(i)"), "line \(i) is in the note")
-            XCTAssertEqual(try read(spool()).split(separator: "\n").count, 1 + i, "and in the spool")
+            XCTAssertEqual(try read(spool()).split(separator: "\n").count, 2 + i, "and in the spool (after begin and the first-write record)")
         }
         XCTAssertEqual(try names(folder), [".meetingcard-call1.spool", "2026-01-31 0905 Sync.md"], "no temporary files left behind")
         let perms = try FileManager.default.attributesOfItem(atPath: note.path)[.posixPermissions] as? NSNumber
@@ -72,7 +72,7 @@ final class TranscriptDurabilityTests: XCTestCase {
         let note = try read(try XCTUnwrap(r.lastURL))
         XCTAssertTrue(note.contains("n50 ^l50"))
         let spoolLines = try read(spool()).split(separator: "\n")
-        XCTAssertEqual(spoolLines.count, 51)
+        XCTAssertEqual(spoolLines.count, 52, "begin, the first-write record and 50 lines")
         XCTAssertTrue(spoolLines.last?.contains("\"x\":\"n50\"") == true, "in order")
         r.end()
         r.flush()
@@ -129,6 +129,25 @@ final class TranscriptDurabilityTests: XCTestCase {
         XCTAssertEqual(try read(note), edited, "the user's note is untouched")
         XCTAssertEqual(written.map(\.lastPathComponent), ["2026-01-31 0905 Sync (2).md"])
         XCTAssertTrue(try read(written[0]).contains("only in the spool"))
+    }
+
+    func testANoteRemovedAfterTheCrashStaysRemoved() throws {
+        let note = try crashMidCall()
+        try FileManager.default.removeItem(at: note)
+        XCTAssertEqual(TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc), [])
+        XCTAssertEqual(try names(folder), [], "not recreated, and the spool is gone")
+    }
+
+    /// The note was edited, so the rest went to a note beside it, and the app quit before that note
+    /// was first written: recovery writes it (nothing the spool had is lost).
+    func testRecoveryWritesANoteThatNeverReachedDisk() throws {
+        let note = try crashMidCall(editNote: true)
+        let beside = folder.appendingPathComponent("2026-01-31 0905 Sync (2).md")
+        try FileTranscriptStore().append(CallSpool.note(beside.lastPathComponent, t: 12).encoded(), to: spool())
+        let written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc)
+        XCTAssertEqual(written.map(\.lastPathComponent), [beside.lastPathComponent])
+        XCTAssertTrue(try read(beside).contains("only in the spool"))
+        XCTAssertTrue(try read(note).contains("My notes."), "the edited note is untouched")
     }
 
     func testRecoveryOfACallThatEndedJustRewritesItComplete() throws {

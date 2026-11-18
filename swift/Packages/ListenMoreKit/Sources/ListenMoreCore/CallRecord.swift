@@ -127,7 +127,8 @@ public enum CallSpool {
     }
 
     struct Record: Codable, Equatable {
-        enum Kind: String, Codable { case begin, info, line, gap, cue, label, note, end }
+        /// `written`: the note named in it reached disk once (so if it is missing later, the user removed it).
+        enum Kind: String, Codable { case begin, info, line, gap, cue, label, note, written, end }
         var k: Kind
         /// Seconds since the call started.
         var t: Double?
@@ -140,7 +141,7 @@ public enum CallSpool {
         var tags: [String]?
         var daily: String?
         var dailyLine: String?
-        // begin and note: the note's file name in the folder
+        // begin, note and written: the note's file name in the folder
         var note: String?
         // info
         var title: String?
@@ -230,6 +231,12 @@ public enum CallSpool {
         return r
     }
 
+    static func written(_ name: String) -> Record {
+        var r = Record(.written)
+        r.note = name
+        return r
+    }
+
     static func end(t: Double) -> Record {
         Record(.end, t: t)
     }
@@ -242,6 +249,8 @@ public enum CallSpool {
         public var noteName: String
         /// Every note text hash the recorder wrote, oldest first.
         public var hashes: [String]
+        /// Notes known to have reached disk.
+        public var written: Set<String> = []
         public var ended: Bool
         public var dailyPath: String?
         public var dailyLine: String?
@@ -282,6 +291,8 @@ public enum CallSpool {
                 if let s = rec.s.flatMap(Speaker.init(rawValue:)) { r.labels.rename(s, to: rec.x) }
             case .note:
                 if let n = rec.note { r.noteName = n }
+            case .written:
+                if let n = rec.note { r.written.insert(n) }
             case .end:
                 r.ended = true
                 r.record.end = t
