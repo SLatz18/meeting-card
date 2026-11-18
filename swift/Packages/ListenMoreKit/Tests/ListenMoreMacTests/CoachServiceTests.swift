@@ -40,11 +40,46 @@ final class CoachServiceTests: XCTestCase {
         mic = FakeMic()
     }
 
-    func service(enabled: Bool) -> CoachService {
+    func service(enabled: Bool, callWindows: CallWindowTracker? = nil, callState: CallStateProvider? = nil) -> CoachService {
         let glow = GlowOverlayController(style: testGlowStyle, screenFrames: { [NSRect(x: 0, y: 0, width: 400, height: 300)] })
         return CoachService(config: try! .builtIn(), glowStyle: testGlowStyle, enabled: enabled, anyApp: false,
-                            ownBundleId: "com.example.hostapp", keys: NoKey(), provider: provider,
-                            mic: mic, call: FakeCall(), engine: LocalCoachEngine(), glow: glow)
+                            ownBundleId: "com.example.hostapp", keys: NoKey(), provider: provider, callState: callState,
+                            mic: mic, call: FakeCall(), engine: LocalCoachEngine(), glow: glow, callWindows: callWindows)
+    }
+
+    /// A fake window list for the call window tracker, recording which apps were asked for.
+    final class FakeWindows {
+        var windows: [AppWindow] = []
+        var asked: [Set<String>] = []
+        func read(_ keys: Set<String>) -> [AppWindow] {
+            asked.append(keys)
+            return windows.filter { w in w.bundleId.map { id in keys.contains { BundleIds.belongs(id, to: $0) } } == true }
+        }
+    }
+
+    final class FakeMeetRunner: AppleScriptRunner {
+        var raw = 0
+        func permission(bundleId: String) -> AutomationPermission { .granted }
+        func run(_ source: String, bundleId: String) -> ScriptOutcome { .count(raw) }
+    }
+
+    static let homeWindow = AppWindow(id: 1, bundleId: "us.zoom.xos", layer: 0, onScreen: true,
+                                      bounds: CGRect(x: 0, y: 0, width: 1400, height: 880))
+    static let meetingWindow = AppWindow(id: 2, bundleId: "us.zoom.xos", layer: 0, onScreen: true,
+                                         bounds: CGRect(x: 1600, y: 100, width: 1000, height: 700))
+    static let cardScreen = NSRect(x: 0, y: 0, width: 1440, height: 900)
+    static let callScreen = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+
+    /// A Zoom session on a service whose window list is `fake`, two displays, the card on the first.
+    func activeZoomService(_ fake: FakeWindows) -> CoachService {
+        let s = service(enabled: true, callWindows: CallWindowTracker(lookbackS: 60, windowSource: fake.read))
+        s.screenFrames = { [Self.cardScreen, Self.callScreen] }
+        s.fallbackScreen = { Self.cardScreen }
+        s.hostWindowNumber = { 0 }
+        provider.snap = zoom
+        RunLoop.main.run(until: Date().addingTimeInterval(4.2))
+        XCTAssertEqual(s.state, .active(paused: false))
+        return s
     }
 
     let zoom = AudioStateSnapshot(defaultInputRunning: true, processes: [
@@ -199,5 +234,81 @@ final class CoachServiceTests: XCTestCase {
     func testCoreAudioProviderReadsWithoutCrashing() {
         let snap = CoreAudioStateProvider().snapshot()
         XCTAssertFalse(snap.processes.contains { $0.pid == getpid() && $0.isRunningInput }, "tests never open the mic")
+    }
+
+    // MARK: the call's window, from the tracker to the glow's display
+
+    func testGlowScreenFollowsTheMeetingWindowNotTheHomeWindow() {
+        let fake = FakeWindows()
+        fake.windows = [Self.homeWindow]                      // open before the coach watched: unknown age
+        let s = activeZoomService(fake)
+        fake.windows = [Self.homeWindow, Self.meetingWindow]  // the meeting window opens during the call
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        XCTAssertEqual(s.callWindows.target(appKey: "us.zoom.xos"), Self.meetingWindow.bounds)
+        s.session.deliverForTesting(CueSuggestion(type: .interrupt, t: 10, onset: 9.7, source: .local))
+        XCTAssertEqual(s.glowScreen, Self.callScreen, "the meeting window's display, from the tracker through locateScreen")
+        s.glow.hideAll()
+        s.stopForThisCall()
+    }
+
+    func testGlowScreenIsTheCardsDisplayWhenOnlyTheHomeWindowIsOpen() {
+        let fake = FakeWindows()
+        fake.windows = [Self.homeWindow]
+        let s = activeZoomService(fake)
+        XCTAssertNil(s.callWindows.target(appKey: "us.zoom.xos"))
+        s.session.deliverForTesting(CueSuggestion(type: .interrupt, t: 10, onset: 9.7, source: .local))
+        XCTAssertEqual(s.glowScreen, Self.cardScreen, "never the home window's display")
+        s.glow.hideAll()
+        s.stopForThisCall()
+    }
+
+    /// `CoachService.init` feeds the tracker on every poll: the watched apps (the allowlist plus the
+    /// session's), the browser keys, and the call controls' window hints.
+    func testEachPollFeedsTheTrackerTheWatchedAppsBrowserKeysAndHints() throws {
+        let fake = FakeWindows()
+        let runner = FakeMeetRunner()
+        let controls = CallControlsProvider(readers: [MeetTabReader.chrome(runner: runner)], endedHoldS: 30)
+        controls.isEnabled = true
+        let s = service(enabled: true, callWindows: CallWindowTracker(lookbackS: 60, windowSource: fake.read), callState: controls)
+
+        s.session.tick()
+        let first = try XCTUnwrap(fake.asked.last)
+        XCTAssertTrue(first.contains("us.zoom.xos"), "Zoom is watched on every poll")
+        XCTAssertFalse(first.contains("com.google.chrome") || first.contains("company.thebrowser.dia"),
+                       "browsers with no Meet hint cost no window-list read")
+        XCTAssertEqual(first, Set(["us.zoom.xos"]), "with no session only Zoom is read: Slack, Teams, FaceTime and Webex are not")
+
+        let chromeWindow = AppWindow(id: 7, bundleId: "com.google.Chrome", layer: 0, onScreen: true,
+                                     bounds: CGRect(x: 100, y: 100, width: 800, height: 600))
+        fake.windows = [chromeWindow]
+        runner.raw = 1 + 1000 * 1 + 1_000_000 * 1               // one meeting tab, in the front of one visible window
+        s.session.tick()
+        XCTAssertTrue(try XCTUnwrap(fake.asked.last).contains("com.google.chrome"), "the hint puts Chrome in the read")
+        XCTAssertFalse(try XCTUnwrap(fake.asked.last).contains("company.thebrowser.dia"))
+        XCTAssertEqual(s.callWindows.target(appKey: "com.google.chrome"), chromeWindow.bounds, "bound from the hint")
+
+        runner.raw = 0
+        s.session.tick()
+        XCTAssertFalse(try XCTUnwrap(fake.asked.last).contains("com.google.chrome"), "no hint: Chrome is dropped again")
+        XCTAssertNil(s.callWindows.target(appKey: "com.google.chrome"))
+        s.setEnabled(false)
+    }
+
+    func testANonZoomNativeAppIsReadOnlyWhileItsSessionIsActive() {
+        let slack = "com.tinyspeck.slackmacgap"
+        let fake = FakeWindows()
+        let s = service(enabled: true, callWindows: CallWindowTracker(lookbackS: 60, windowSource: fake.read))
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        XCTAssertFalse(fake.asked.isEmpty)
+        XCTAssertFalse(fake.asked.contains { $0.contains(slack) }, "Slack with no session: no window read")
+        provider.snap = AudioStateSnapshot(defaultInputRunning: true, processes: [
+            AudioProcessState(pid: 78, bundleId: slack, isRunningInput: true, isRunningOutput: true)])
+        RunLoop.main.run(until: Date().addingTimeInterval(4.2))
+        XCTAssertEqual(s.state, .active(paused: false))
+        XCTAssertEqual(s.session.session?.appKey, slack)
+        fake.asked.removeAll()
+        s.session.tick()
+        XCTAssertEqual(fake.asked.last, Set(["us.zoom.xos", slack]), "Slack with an active session is read")
+        s.setEnabled(false)
     }
 }

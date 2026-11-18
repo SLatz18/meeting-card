@@ -65,15 +65,31 @@ menu-bar shortcuts only, plus the ⇧⌘A audio toggle's label reduced to a Bool
 Chrome and Dia (AppleScript: the browser filters tabs to the Meet host and the script returns a
 count; Meet mute is not detected, so only Zoom reports `muted`). `CallControlsModel` (`isMuted`, `canMute`,
 `muteUnavailableReason`, `toggleMute()`, `onChange`) is a host's Mute control: one Accessibility press on Zoom's own ⇧⌘A item
-per call, read back right after; a no-op with a reason (`toggleOff`, `permissionDenied`, `noZoomCall`, `meet`) otherwise. MeetingCard's copy for each reason, and the tooltips and VoiceOver labels, are in `swift/Core/CoachMuteCopy.swift` (no Zoom call hides the control). Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
+per call, read back right after; a no-op with a reason (`toggleOff`, `permissionDenied`, `noZoomCall`, `meet`) otherwise (`noZoomCall` also while the reading is held: Zoom's menu shows no in-meeting shortcuts, neither ⇧⌘A nor ⇧⌘V, while the call's window is still open, e.g. the home window in front). MeetingCard's copy for each reason, and the tooltips and VoiceOver labels, are in `swift/Core/CoachMuteCopy.swift` (no Zoom call hides the control). Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
 revoked or unsupported backend reports nothing for its app. `CallControlsPermissions.request...`
 shows the system prompts and is for a host's opt-in toggle only.
+
+`CallWindowSelector` (Core; `CallWindowTracker` in ListenMoreMac) is the call's window for the glow's display and for
+Zoom's "meeting window still there": the window that appeared with the call (never the app's largest, first or
+frontmost), a floating mini window while it's minimized, or for Meet the browser window the Meet script names. It reads
+CGWindowList numbers, owners, layers, on-screen flags and bounds only (no titles); nothing identified means the host's
+fallback display. `trigger.call_window_lookback_s` (60 s) bounds how long before the session the window may have opened, for the
+first bind only. A re-resolve after the bound window closes takes the newest window still open that appeared during the
+watch, skipping windows opened while another one was bound. A bound window never holds a session: Core Audio's stop
+still applies.
+
+The window list (CGWindowList) is read each poll only for Zoom (always, so the lookback works), for another native call
+app while a session is active for it (no first-bind lookback: windows already open at the session start never bind), and
+for a browser once the Meet script's hint names a window (`CallWindowSelector.keysToRead`); the running-apps list is still
+read every poll. `CallWindowTracker`'s window source is injectable. When Zoom's menu shows no
+in-meeting shortcuts (neither ⇧⌘A nor ⇧⌘V) while the call's window is still open, `ZoomControlsReader` holds the call on
+(`isHeld`) and `CallControlsModel` reports `noZoomCall`, since there is no Mute item to press.
 
 ## Rule constants
 
 Every tunable number and word list is in one place: [`DefaultConfig.swift`](Sources/ListenMoreCore/DefaultConfig.swift).
 They are generic defaults (for example cooldown 20 s, fade 3 s, GPT confidence 0.7, start after
-3 s, stop after 30 s, or 3 s after an ended call). Change them there, with a test, and nowhere else. No recordings, eval
+3 s, stop after 30 s, or 3 s after an ended call, call-window lookback 60 s for the first bind). Change them there, with a test, and nowhere else. No recordings, eval
 fixtures or example transcripts: tests generate their audio (`Synthetic.swift`) and use
 content-free text. Nothing is stored unless the user turns on saved transcripts: no history, no
 summaries.

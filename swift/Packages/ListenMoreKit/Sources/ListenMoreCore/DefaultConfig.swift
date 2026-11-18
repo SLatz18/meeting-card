@@ -162,6 +162,7 @@ public enum DefaultConfig {
     "start_after_s": 3,
     "stop_after_s": 30,
     "ended_stop_after_s": 3,
+    "call_window_lookback_s": 60,
     "exclude_bundle_ids": ["com.listenmore.mac"]
   },
   "meet_title_regex": "\\bMeet\\b",

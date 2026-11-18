@@ -181,9 +181,16 @@ public enum CallControlsPermissions {
 
 public extension CallControlsProvider {
     /// Zoom, Meet in Chrome and Meet in Dia, refreshed on a utility queue. Off until `isEnabled`.
-    static func live(config: ListenMoreConfig) -> CallControlsProvider {
+    /// - Parameter callWindows: the tracker the coach service uses, so Zoom's in-meeting state holds
+    ///   while its meeting window exists even if its menu bar follows the home window.
+    static func live(config: ListenMoreConfig, callWindows: CallWindowTracker? = nil) -> CallControlsProvider {
         let runner = OSAScriptRunner()
-        return CallControlsProvider(readers: [ZoomControlsReader(ax: AXZoomAccessibility()), MeetTabReader.chrome(runner: runner),
+        let zoom = ZoomControlsReader(ax: AXZoomAccessibility())
+        if let callWindows {
+            let key = zoom.appKey
+            zoom.callWindowPresent = { [weak callWindows] in callWindows?.callWindowPresent(appKey: key) }
+        }
+        return CallControlsProvider(readers: [zoom, MeetTabReader.chrome(runner: runner),
                                               MeetTabReader.dia(runner: runner)],
                                     endedHoldS: config.trigger.stopAfterS,
                                     queue: DispatchQueue(label: "com.listenmore.callcontrols", qos: .utility))
