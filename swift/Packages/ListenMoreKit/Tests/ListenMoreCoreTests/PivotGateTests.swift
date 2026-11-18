@@ -287,6 +287,16 @@ final class PivotGateTests: XCTestCase {
         }
     }
 
+    /// Well-wishes after sympathy are about them, however first-person they read.
+    func testWellWishesAfterSympathyAreAboutThem() {
+        for reply in [
+            "So sorry. My husband and I will keep you all in our thoughts this week, let us know.",
+            "So sorry to hear that. My dad will be in my thoughts, I will keep my fingers crossed all week for him.",
+        ] {
+            XCTAssertEqual(run(pivot(reply: reply, share: PivotLines.worried), until: 30).counters.candidates, 0, reply)
+        }
+    }
+
     /// Sympathy and talk about them, with no turn to the user's own experience.
     func testPureCommiserationIsNone() {
         assertNoCandidate(pivot(reply: PivotLines.pureCommiseration, share: PivotLines.worried))

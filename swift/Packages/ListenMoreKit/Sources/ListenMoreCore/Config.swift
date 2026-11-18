@@ -132,7 +132,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         /// words. A reply opening with a `pivot_sympathy` phrase is judged on the text after it, where
         /// `pivot_first_person_plural` ("we", "our", "us") counts as first person too when that text
         /// also has a singular first-person word or a share marker. A reply with a `pivot_help_offers`
-        /// phrase (help, or accommodation such as "no stress") is about them.
+        /// phrase (help, accommodation such as "no stress", or well-wishes such as "in my thoughts")
+        /// is about them.
         public var pivotReplyMaxStartS: Double
         public var pivotReplyMinWords: Int
         public var pivotOpeners: [String]

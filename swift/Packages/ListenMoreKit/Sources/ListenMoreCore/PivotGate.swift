@@ -25,8 +25,9 @@ import Foundation
 ///    sympathy, where "we", "our" and "us" count as the user too (`pivot_first_person_plural`) when
 ///    that text also has "i", "my" or the like, or a share marker ("we just"): "i'm
 ///    so sorry. my mom was in the hospital last year and i was there every night…" is a pivot, and
-///    sympathy with only talk about them is commiseration. A reply offering help (`pivot_help_offers`:
-///    "let me know", "if you need", "i can help") is about them.
+///    sympathy with only talk about them is commiseration. A reply offering help or well-wishes
+///    (`pivot_help_offers`: "let me know", "if you need", "no stress", "in my thoughts", "fingers
+///    crossed") is about them.
 /// 3. No question back anywhere in the reply: no "?", no sentence or clause that opens like a
 ///    question ("how's", "did your", "are they"), no sentence ending in a tag ("…, right"), no
 ///    invitation.
