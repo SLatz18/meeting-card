@@ -38,6 +38,11 @@ public enum CoachCardCopy {
         public static let empty = "Captions will show here once someone talks."
     }
 
+    public enum Pill {
+        /// What VoiceOver reads for the pill while a cue's words hold (approved, unchanged).
+        public static func nudgeAccessibilityLabel(status: String, words: String) -> String { "\(status). \(words)" }
+    }
+
     /// A cue after its words: its glyph lingers in the status glyph (`CardStyle.Coach.cueLinger`).
     public enum Linger {
         /// True until a writer approves the string below (draft copy).

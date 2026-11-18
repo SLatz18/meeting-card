@@ -265,10 +265,10 @@ final class CoachCardWiringTests: XCTestCase {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
         let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
-        XCTAssertEqual(found.count, 34, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), the call-mode tip and the no-mic notice, the fullest button row over each tip row, and the cue's linger and expiry (with mic off and Increase Contrast)")
+        XCTAssertEqual(found.count, 35, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act), the call-mode tip and the no-mic notice, the fullest button row over each tip row, and the cue's linger and expiry (with mic off and Increase Contrast)")
         for name in ["card-cue-linger-amber", "card-cue-linger-rose", "card-cue-expired", "card-cue-linger-mic-off", "card-cue-linger-increased-contrast",
                      "pill-cue-linger-amber", "pill-cue-linger-rose", "pill-cue-expired", "pill-nudge-increased-contrast",
-                     "card-cue-paused", "pill-cue-muted"] {
+                     "pill-cue-linger-increased-contrast", "card-cue-paused", "pill-cue-muted"] {
             XCTAssertTrue(found.contains(name), "\(name) has a shot")
         }
         XCTAssertTrue(found.contains("card-call-mode-tip"), "the call-mode tip card has a shot")

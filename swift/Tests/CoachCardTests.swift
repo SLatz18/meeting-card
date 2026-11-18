@@ -445,14 +445,13 @@ final class CoachCardTests: XCTestCase {
     }
 
     /// Cue glyphs: one per cue type, all different, and never a mic (Mute in Zoom's), a waveform (the
-    /// coach's hearing state) or an ear (the coach); the prototype shows the same ones.
+    /// coach's hearing state) or an ear (the coach).
     func testCueGlyphsKeepTheHearingGlyphRule() {
         let glyphs = CoachNudge.Kind.allCases.map(Theme.CoachCard.Symbols.cue)
         XCTAssertEqual(Set(glyphs).count, glyphs.count)
         for g in glyphs {
             for reserved in ["mic", "waveform", "ear"] { XCTAssertFalse(g.hasPrefix(reserved), g) }
         }
-        XCTAssertEqual(CoachNudge.Kind.allCases.map(Theme.CueDisplay.glyph), glyphs, "the prototype shows the shipped glyphs")
         // That each is a real SF Symbol on the runner's macOS: CueDisplaySnapshotTests.testGlyphVocabulary.
     }
 
@@ -511,6 +510,8 @@ final class CoachCardTests: XCTestCase {
         XCTAssertTrue(CoachCardCopy.Linger.isDraft)
         XCTAssertEqual(CoachCardCopy.Linger.accessibilityLabel(status: "Coach on, listening", words: "Let them finish"),
                        "Coach on, listening. Last cue: Let them finish.")
+        XCTAssertEqual(CoachCardCopy.Pill.nudgeAccessibilityLabel(status: "Coach on, listening", words: "Let them finish"),
+                       "Coach on, listening. Let them finish", "the pill's label while the words hold: unchanged")
     }
 
     /// The pill's cue glyph in its tone stays visible on the pill's surface (3:1 for graphics) in

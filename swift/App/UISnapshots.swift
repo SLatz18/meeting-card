@@ -304,6 +304,7 @@ enum UISnapshots {
         ("pill-cue-expired", shotState(.listening, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.expand),
         // Increase Contrast: the cue's bar at full strength, the glyph in the high-contrast tone.
         ("pill-nudge-increased-contrast", shotState(.listening, noZoomMute, roseNudge, .pill, ic: true), roseNudge.words),
+        ("pill-cue-linger-increased-contrast", shotState(.listening, noZoomMute, nil, .pill, lingering: amberNudge, ic: true), amberNudge.words),
         // Muted in Zoom with a cue from before: no cue glyph, edge or tooltip (Expand coach).
         ("pill-cue-muted", shotState(.muted, mutedMute, nil, .pill, lingering: roseNudge), CoachCardCopy.Tooltip.expand),
     ]

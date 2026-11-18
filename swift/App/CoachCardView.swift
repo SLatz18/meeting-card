@@ -516,7 +516,7 @@ final class CoachPillView: CoachSurfaceView {
         toolTip = s.pillTooltip
         glyph.image = Self.glyphImage(s.status.text, symbol: s.statusSymbol)
         glyph.contentTintColor = s.status == .listening ? (s.nudge?.color ?? glyphTint(lineColor)) : glyphTint(lineColor)
-        setAccessibilityLabel(s.nudge.map { "\(s.status.text). \($0.words)" } ?? statusLabel(s))
+        setAccessibilityLabel(s.nudge.map { CoachCardCopy.Pill.nudgeAccessibilityLabel(status: s.status.text, words: $0.words) } ?? statusLabel(s))
         set(micMute, s.coachMuteControl, glyph: p.buttonGlyph)
         set(mute, s.muteControl, glyph: p.buttonGlyph)
         set(pause, s.pauseControl, glyph: p.buttonGlyph)
