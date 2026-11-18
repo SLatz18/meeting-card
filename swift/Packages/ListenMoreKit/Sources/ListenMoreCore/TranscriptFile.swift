@@ -7,11 +7,12 @@ import Glibc
 
 /// The coach's only disk writer: the opt-in saved transcript, text only, in the folder the user chose
 /// (the call's note, the call's hidden spool file beside it while the call runs, and with that
-/// option on, one line appended to the day's note). Replacing a file writes a hidden temporary sibling in the
-/// same folder, syncs it and renames it over the target, so a reader sees the old text or the new,
-/// never a mix, and nothing is staged in another folder. Appends are synced before they return.
-/// Files are readable by the user only and a symlink at the target is never followed. Audio has no
-/// path here. PrivacyGuardTests checks that no other coach source writes to disk.
+/// option on, one line appended to the day's note). Replacing a file writes a hidden temporary
+/// sibling in the same folder, syncs it and renames it over the target, so a reader sees the old text
+/// or the new, never a mix, and nothing is staged in another folder. Creating a note does the same
+/// but never replaces a file that appeared meanwhile. Appends are synced before they return. Files
+/// are readable by the user only and a symlink at the target is never followed. Audio has no path
+/// here. PrivacyGuardTests checks that no other coach source writes to disk.
 public final class FileTranscriptStore: TranscriptStore {
     /// The host picks the folder (MeetingCard: per app identity, or the user's choice).
     public init() {}
@@ -32,20 +33,25 @@ public final class FileTranscriptStore: TranscriptStore {
 
     /// Replaces the file's contents with `text`, atomically.
     public func write(_ text: String, to url: URL) throws {
-        let temp = Self.tempSibling(of: url)
-        let fd = try posixOpen(temp.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC)
-        do {
-            try posixWriteAll(fd, Data(text.utf8))
-            try posixSync(fd)
-        } catch {
-            _ = posixClose(fd)
-            _ = posixUnlink(temp.path)
-            throw error
-        }
-        guard posixClose(fd) == 0, posixRename(temp.path, url.path) == 0 else {
+        let temp = try syncedTemp(text, beside: url)
+        guard posixRename(temp.path, url.path) == 0 else {
             let e = posixError()
             _ = posixUnlink(temp.path)
             throw e
+        }
+        posixSyncDirectory(url.deletingLastPathComponent().path)
+    }
+
+    /// Writes a new file atomically; throws `TranscriptStoreError.exists` (and writes nothing) if
+    /// anything is already at `url`.
+    public func create(_ text: String, at url: URL) throws {
+        let temp = try syncedTemp(text, beside: url)
+        let r = posixRenameExclusive(temp.path, url.path)
+        let e = errno
+        if r != 0 { _ = posixUnlink(temp.path) }
+        guard r == 0 else {
+            if e == EEXIST { throw TranscriptStoreError.exists }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(e))
         }
         posixSyncDirectory(url.deletingLastPathComponent().path)
     }
@@ -70,6 +76,13 @@ public final class FileTranscriptStore: TranscriptStore {
         return String(data: data, encoding: .utf8)
     }
 
+    public func head(_ url: URL, bytes: Int) -> String? {
+        guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? h.close() }
+        guard let data = try? h.read(upToCount: bytes) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     public func contents(of folder: URL) -> [URL] {
         (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
     }
@@ -82,13 +95,34 @@ public final class FileTranscriptStore: TranscriptStore {
         try FileManager.default.removeItem(at: url)
     }
 
-    /// A hidden name next to `url` (Obsidian and Finder skip dot files); a crash can leave one behind,
-    /// which recovery removes.
+    /// `text`, synced, in a new hidden file next to `url` (Obsidian and Finder skip dot files); a crash
+    /// can leave one behind, which recovery removes.
+    private func syncedTemp(_ text: String, beside url: URL) throws -> URL {
+        let temp = Self.tempSibling(of: url)
+        let fd = try posixOpen(temp.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC)
+        do {
+            try posixWriteAll(fd, Data(text.utf8))
+            try posixSync(fd)
+        } catch {
+            _ = posixClose(fd)
+            _ = posixUnlink(temp.path)
+            throw error
+        }
+        guard posixClose(fd) == 0 else {
+            let e = posixError()
+            _ = posixUnlink(temp.path)
+            throw e
+        }
+        return temp
+    }
+
     static func tempSibling(of url: URL) -> URL {
         url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)\(tempSuffix)")
     }
 
     static let tempSuffix = ".mc-tmp"
+    /// Bytes a temporary sibling adds to its target's name: two dots, the UUID and the suffix.
+    static let tempNameOverhead = 2 + 36 + tempSuffix.utf8.count
 }
 
 // File-scope wrappers: inside the store, `write`, `append` and `remove` name its own methods.
@@ -113,6 +147,26 @@ private func posixUnlink(_ path: String) -> Int32 {
 
 private func posixRename(_ from: String, _ to: String) -> Int32 {
     renameat(AT_FDCWD, from, AT_FDCWD, to)
+}
+
+/// Renames only if nothing is at `to` (errno EEXIST otherwise): RENAME_EXCL on Apple platforms, a
+/// hard link then unlink elsewhere or where the volume lacks RENAME_EXCL. A volume with neither
+/// (FAT, exFAT) gets a check then a plain rename, which leaves a short race.
+private func posixRenameExclusive(_ from: String, _ to: String) -> Int32 {
+    #if canImport(Darwin)
+    if renamex_np(from, to, UInt32(RENAME_EXCL)) == 0 { return 0 }
+    if errno != ENOTSUP && errno != EINVAL { return -1 }
+    #endif
+    if linkat(AT_FDCWD, from, AT_FDCWD, to, 0) == 0 {
+        _ = unlink(from)
+        return 0
+    }
+    guard errno == EPERM || errno == ENOTSUP || errno == EOPNOTSUPP || errno == EMLINK else { return -1 }
+    if access(to, F_OK) == 0 {
+        errno = EEXIST
+        return -1
+    }
+    return posixRename(from, to)
 }
 
 private func posixWriteAll(_ fd: Int32, _ data: Data) throws {

@@ -139,8 +139,12 @@ public enum CallSpool {
         var id: String?
         var start: Double?
         var tags: [String]?
+        /// The daily note's path relative to the vault (or the folder), checked again at recovery.
         var daily: String?
-        var dailyLine: String?
+        var dailyStyle: String?
+        /// The device and process writing the spool, so recovery leaves a live call alone.
+        var dev: String?
+        var pid: Int32?
         // begin, note and written: the note's file name in the folder
         var note: String?
         // info
@@ -171,15 +175,14 @@ public enum CallSpool {
         }
     }
 
-    static func begin(_ r: CallRecord, note: String, daily: (path: String, line: String)?) -> Record {
+    static func begin(_ r: CallRecord, device: String, pid: Int32) -> Record {
         var b = Record(.begin, t: 0)
         b.v = version
         b.id = r.callId
         b.start = r.start.timeIntervalSince1970
         b.tags = r.tags
-        b.note = note
-        b.daily = daily?.path
-        b.dailyLine = daily?.line
+        b.dev = device
+        b.pid = pid
         b.title = r.info.title
         b.app = r.info.app
         b.participants = r.info.participants
@@ -252,22 +255,37 @@ public enum CallSpool {
         /// Notes known to have reached disk.
         public var written: Set<String> = []
         public var ended: Bool
+        /// Relative to the vault (or the folder); unchecked until `DailyNote.url` resolves it.
         public var dailyPath: String?
-        public var dailyLine: String?
+        public var dailyStyle: DailyNoteOptions.Style?
+        public var device: String?
+        public var pid: Int32?
     }
 
-    /// nil when there is no readable `begin` record (nothing to recover).
+    /// A call ID safe in a file name and a marker: 1–64 letters, digits, `-` or `_`.
+    public static func isValidCallId(_ s: String) -> Bool {
+        !s.isEmpty && s.utf8.count <= 64 && s.unicodeScalars.allSatisfy {
+            ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "-" || $0 == "_"
+        }
+    }
+
+    /// nil when there is no readable `begin` record (nothing to recover). A spool can come from
+    /// anywhere (a synced or copied folder), so the call ID and every note name must be plain
+    /// (`isValidCallId`, `NoteFileName.isPlainNoteName`); a begin record that isn't is no call, and a
+    /// note record that isn't is skipped.
     public static func replay(_ text: String, labels defaults: SpeakerLabels = SpeakerLabels()) -> Replay? {
         let d = JSONDecoder()
         var out: Replay?
         for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let rec = try? d.decode(Record.self, from: Data(raw.utf8)) else { continue }
             if rec.k == .begin {
-                guard out == nil, let id = rec.id, let start = rec.start, let note = rec.note else { continue }
+                guard out == nil, let id = rec.id, isValidCallId(id), let start = rec.start, start.isFinite,
+                      let note = rec.note, NoteFileName.isPlainNoteName(note) else { continue }
                 let info = CallInfo(title: rec.title, app: rec.app, participants: rec.participants ?? [], transcriber: rec.transcriber)
                 out = Replay(record: CallRecord(callId: id, start: Date(timeIntervalSince1970: start), info: info, tags: rec.tags ?? []),
                              labels: defaults, noteName: note, hashes: [], ended: false,
-                             dailyPath: rec.daily, dailyLine: rec.dailyLine)
+                             dailyPath: rec.daily, dailyStyle: rec.dailyStyle.flatMap(DailyNoteOptions.Style.init(rawValue:)),
+                             device: rec.dev, pid: rec.pid)
                 if let h = rec.h { out?.hashes.append(h) }
                 continue
             }
@@ -290,7 +308,7 @@ public enum CallSpool {
             case .label:
                 if let s = rec.s.flatMap(Speaker.init(rawValue:)) { r.labels.rename(s, to: rec.x) }
             case .note:
-                if let n = rec.note { r.noteName = n }
+                if let n = rec.note, NoteFileName.isPlainNoteName(n) { r.noteName = n }
             case .written:
                 if let n = rec.note { r.written.insert(n) }
             case .end:

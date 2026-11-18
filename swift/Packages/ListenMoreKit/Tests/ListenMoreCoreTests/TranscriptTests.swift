@@ -3,7 +3,7 @@ import XCTest
 
 /// Keeps every file in memory and records each store call; touches no disk.
 final class SpyStore: TranscriptStore {
-    enum Call: Equatable { case prepare(URL), write(URL), append(URL), remove(URL) }
+    enum Call: Equatable { case prepare(URL), write(URL), create(URL), append(URL), remove(URL) }
     var calls: [Call] = []
     var files: [URL: String] = [:]
     var dirs: Set<URL> = []
@@ -20,6 +20,12 @@ final class SpyStore: TranscriptStore {
         calls.append(.write(url))
         files[url] = text
     }
+    func create(_ text: String, at url: URL) throws {
+        if failWrites { throw NSError(domain: "SpyStore", code: 1) }
+        guard files[url] == nil else { throw TranscriptStoreError.exists }
+        calls.append(.create(url))
+        files[url] = text
+    }
     func append(_ text: String, to url: URL) throws {
         if failWrites { throw NSError(domain: "SpyStore", code: 1) }
         calls.append(.append(url))
@@ -30,6 +36,7 @@ final class SpyStore: TranscriptStore {
         files[url] = nil
     }
     func read(_ url: URL) -> String? { files[url] }
+    func head(_ url: URL, bytes: Int) -> String? { files[url].map { String(decoding: Data($0.utf8).prefix(bytes), as: UTF8.self) } }
     func contents(of folder: URL) -> [URL] {
         let base = folder.standardizedFileURL.path
         return files.keys.filter { $0.deletingLastPathComponent().standardizedFileURL.path == base }
@@ -37,7 +44,15 @@ final class SpyStore: TranscriptStore {
     func modified(_ url: URL) -> Date? { mtimes[url] }
     func isDirectory(_ url: URL) -> Bool { dirs.contains(url.standardizedFileURL) }
 
-    var writtenURLs: Set<URL> { Set(calls.compactMap { if case .write(let u) = $0 { u } else { nil } }) }
+    /// Notes written whole: created or replaced.
+    var writtenURLs: Set<URL> {
+        Set(calls.compactMap {
+            switch $0 {
+            case .write(let u), .create(let u): u
+            case .prepare, .append, .remove: nil
+            }
+        })
+    }
     /// Notes only (not spools).
     var notes: [URL: String] { files.filter { $0.key.pathExtension == "md" } }
     /// The one note's text, when there is exactly one.

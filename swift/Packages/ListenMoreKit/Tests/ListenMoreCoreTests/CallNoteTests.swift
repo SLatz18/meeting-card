@@ -32,13 +32,49 @@ final class NoteFileNameTests: XCTestCase {
     func testLongTitlesAreCut() {
         let n = NoteFileName.sanitize(String(repeating: "a", count: 300))
         XCTAssertEqual(n.count, NoteFileName.maxLength)
-        XCTAssertEqual(NoteFileName.sanitize(String(repeating: "é", count: 200)).count, NoteFileName.maxLength)
+        XCTAssertEqual(NoteFileName.sanitize(String(repeating: "é", count: 200)).utf8.count, NoteFileName.maxBytes, "two bytes each: the byte cap")
     }
 
     func testReservedDeviceNamesAreChanged() {
         XCTAssertEqual(NoteFileName.sanitize("con"), "con_")
-        XCTAssertEqual(NoteFileName.sanitize("LPT1.txt"), "LPT1.txt_")
+        XCTAssertEqual(NoteFileName.sanitize("LPT1.txt"), "LPT1_.txt", "the part before the first dot is what Windows reserves")
+        XCTAssertEqual(NoteFileName.sanitize("con.txt"), "con_.txt")
         XCTAssertEqual(NoteFileName.sanitize("Console"), "Console")
+        XCTAssertEqual(name("CON", pattern: "{title}"), "CON_", "title and file name are both sanitized: one underscore")
+        for s in ["con.txt", "nul", "a..b", " .x. ", String(repeating: "会", count: 130)] {
+            XCTAssertEqual(NoteFileName.sanitize(NoteFileName.sanitize(s)), NoteFileName.sanitize(s), s)
+        }
+    }
+
+    func testRunsOfDotsBecomeOne() {
+        XCTAssertEqual(NoteFileName.sanitize("v1..2...3"), "v1.2.3", "a name never holds `..`")
+    }
+
+    /// 120 Japanese characters are 360 UTF-8 bytes: the name is cut by bytes so it, its " (n)", ".md"
+    /// and its temporary sibling all fit the 255-byte limit.
+    func testLongNonASCIITitlesFitTheByteLimit() {
+        let n = name(String(repeating: "会議", count: 60))
+        XCTAssertLessThanOrEqual(n.utf8.count, NoteFileName.maxBytes)
+        XCTAssertTrue(n.hasPrefix("2026-01-31 0905 会議"))
+        XCTAssertLessThanOrEqual("\(n) (9999).md".utf8.count + FileTranscriptStore.tempNameOverhead, 255)
+    }
+
+    func testPlainNoteNames() {
+        for ok in ["2026-01-31 0905 Call.md", "a (2).md", "会議.md"] { XCTAssertTrue(NoteFileName.isPlainNoteName(ok), ok) }
+        for bad in ["../../escaped.md", "sub/x.md", "/abs.md", ".hidden.md", "x..md", "x.txt", ".md", "a\\b.md", "a\nb.md",
+                    String(repeating: "a", count: 300) + ".md"] {
+            XCTAssertFalse(NoteFileName.isPlainNoteName(bad), bad)
+        }
+    }
+
+    func testRetentionMatchesNamesThePatternMakes() {
+        let p = NoteFileName.defaultPattern
+        XCTAssertTrue(NoteFileName.matches("2026-01-31 0905 Sync.md", pattern: p))
+        XCTAssertTrue(NoteFileName.matches("2026-01-31 0905 Sync (3).md", pattern: p))
+        XCTAssertFalse(NoteFileName.matches("Sync.md", pattern: p))
+        XCTAssertFalse(NoteFileName.matches("0905 2026-01-31 Sync.md", pattern: p), "tokens in the pattern's order")
+        XCTAssertFalse(NoteFileName.matches("2026-01-31 0905 Sync.txt", pattern: p))
+        XCTAssertTrue(NoteFileName.matches("Anything.md", pattern: "{title}"))
     }
 
     func testUnicodeIsKeptAndComposed() {

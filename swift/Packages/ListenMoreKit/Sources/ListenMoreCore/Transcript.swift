@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// One finished line of a saved transcript: who, when (seconds since the call started, at the start
 /// of the turn) and what. `themIndex` numbers voices within Them (Them 1, Them 2) when the
@@ -48,32 +53,32 @@ public enum TranscriptFormat {
 }
 
 /// Where saved transcripts go. `FileTranscriptStore` is the only implementation that touches disk.
-/// The defaults let a store that only replaces whole files conform (a host's in-memory preview
-/// store, or a wrapper that counts writes); without `read` such a store keeps only the spool's
-/// latest record and the recorder can't see edits, so a store that keeps real files implements all.
+/// Every method is required: a store that, say, couldn't read back would silently lose the spool and
+/// edit detection.
 public protocol TranscriptStore: AnyObject {
     /// Creates `folder` (and parents) if missing.
     func prepare(folder: URL) throws
     func exists(_ url: URL) -> Bool
     /// Replaces the file's contents with `text` (atomically, for a real store).
     func write(_ text: String, to url: URL) throws
+    /// Writes a new file; throws `TranscriptStoreError.exists`, writing nothing, if anything is at `url`.
+    func create(_ text: String, at url: URL) throws
     func remove(_ url: URL) throws
     /// Adds `text` at the end, creating the file if missing (synced, for a real store).
     func append(_ text: String, to url: URL) throws
-    /// nil when missing or unreadable.
+    /// nil when missing or unreadable (not UTF-8, for example).
     func read(_ url: URL) -> String?
+    /// The file's first `bytes` bytes as text (for its properties); nil when missing.
+    func head(_ url: URL, bytes: Int) -> String?
     /// The folder's entries, hidden ones included; empty when it can't be listed.
     func contents(of folder: URL) -> [URL]
     func modified(_ url: URL) -> Date?
     func isDirectory(_ url: URL) -> Bool
 }
 
-public extension TranscriptStore {
-    func append(_ text: String, to url: URL) throws { try write((read(url) ?? "") + text, to: url) }
-    func read(_ url: URL) -> String? { nil }
-    func contents(of folder: URL) -> [URL] { [] }
-    func modified(_ url: URL) -> Date? { nil }
-    func isDirectory(_ url: URL) -> Bool { false }
+public enum TranscriptStoreError: Error, Equatable {
+    /// `create` found something at the name.
+    case exists
 }
 
 /// The note's options: the file name pattern, tags and the optional daily-note line.
@@ -98,22 +103,30 @@ public struct TranscriptIO: @unchecked Sendable {
     let run: (@escaping () -> Void) -> Void
     let back: (@escaping () -> Void) -> Void
     let wait: () -> Void
+    /// Waits at most that long; false if work was still queued.
+    let waitUpTo: (TimeInterval) -> Bool
 
     public static func serial(label: String = "com.listenmore.transcript") -> TranscriptIO {
         let q = DispatchQueue(label: label, qos: .utility)
-        return TranscriptIO(run: { q.async(execute: $0) }, back: { DispatchQueue.main.async(execute: $0) }, wait: { q.sync {} })
+        return TranscriptIO(run: { q.async(execute: $0) }, back: { DispatchQueue.main.async(execute: $0) }, wait: { q.sync {} },
+                            waitUpTo: { seconds in
+                                let done = DispatchSemaphore(value: 0)
+                                q.async { done.signal() }
+                                return done.wait(timeout: .now() + seconds) == .success
+                            })
     }
 
-    public static let inline = TranscriptIO(run: { $0() }, back: { $0() }, wait: {})
+    public static let inline = TranscriptIO(run: { $0() }, back: { $0() }, wait: {}, waitUpTo: { _ in true })
 }
 
 /// One call's saved transcript. Saving off (`begin(folder: nil)`): nothing is kept and nothing is
 /// written. Saving on: each finished line, gap, cue and speaker tag is appended to the call's spool
 /// and synced, then the whole note is rendered and replaced atomically (so a tag relabels earlier
-/// lines too). The note is never written over text the recorder didn't write: if it changed on disk
-/// during the call (edited in Obsidian), the rest goes to a new note beside it; if it was removed,
-/// saving stops for the call. `end()` finishes the note, removes the spool and drops the call from
-/// memory. After a crash, `TranscriptMaintenance.recover` finishes the note from the spool.
+/// lines too). Every disk access runs on the I/O queue, `begin` included. A note's first write never
+/// replaces a file. The note is never written over text the recorder didn't write: if it changed on
+/// disk during the call (edited in Obsidian) or can't be read, the rest goes to a new note beside
+/// it; if it was removed, saving stops for the call. `end()` finishes the note, removes the spool and
+/// drops the call from memory. After a crash, `TranscriptMaintenance.recover` finishes the note.
 public final class TranscriptRecorder {
     public enum State: Equatable, Sendable {
         case off
@@ -128,11 +141,14 @@ public final class TranscriptRecorder {
 
     public let store: TranscriptStore
     public let wording: NoteWording
+    /// Names this device in each spool, so recovery on another Mac sharing the folder leaves a live call alone.
+    public let device: String
     private let timeZone: TimeZone
     private let io: TranscriptIO
     private let newCallId: () -> String
     public private(set) var state: State = .off
-    /// The current call's note, or the last call's (what Delete removes).
+    /// The current call's note, or the last call's (what Delete removes). Until the I/O queue has
+    /// created it, the name it will try first.
     public private(set) var lastURL: URL?
     private var record: CallRecord?
     private var labels = SpeakerLabels()
@@ -143,17 +159,26 @@ public final class TranscriptRecorder {
     private var reserved: Set<String> = []
 
     public init(store: TranscriptStore, timeZone: TimeZone = .current, wording: NoteWording = NoteWording(),
-                io: TranscriptIO = .inline, newCallId: @escaping () -> String = TranscriptRecorder.randomCallId) {
+                io: TranscriptIO = .inline, device: String = TranscriptRecorder.thisDevice,
+                newCallId: @escaping () -> String = TranscriptRecorder.randomCallId) {
         self.store = store
         self.timeZone = timeZone
         self.wording = wording
         self.io = io
+        self.device = device
         self.newCallId = newCallId
     }
 
     public static func randomCallId() -> String {
         "c" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(16)
     }
+
+    /// A hash of the host name: tells devices apart without writing the name.
+    public static let thisDevice: String = {
+        var buf = [CChar](repeating: 0, count: 256)
+        let host = gethostname(&buf, buf.count - 1) == 0 ? String(cString: buf) : ""
+        return String(noteHash("meetingcard-device:" + host).prefix(12))
+    }()
 
     public var isSaving: Bool {
         if case .saving = state { return true }
@@ -173,29 +198,20 @@ public final class TranscriptRecorder {
         let r = CallRecord(callId: newCallId(), start: start, info: info, tags: options.tags)
         self.labels = labels
         let base = NoteFileName.base(pattern: options.fileNamePattern, start: start, info: info, wording: wording, timeZone: timeZone)
-        let url = NoteFileName.unique(base: base, in: folder, store: store, reserved: reserved)
-        reserved.insert(url.lastPathComponent)
-        var daily: (url: URL, line: String)?
-        if let d = options.dailyNote {
-            let vault = ObsidianVault.root(containing: folder, store: store)
-            if let dailyURL = DailyNote.url(pattern: d.pathPattern, date: start, root: vault ?? folder, timeZone: timeZone) {
-                let line = DailyNote.line(note: url, vaultRoot: vault, start: start, title: info.title ?? wording.untitled,
-                                          style: d.style, callId: r.callId, timeZone: timeZone)
-                daily = (dailyURL, line)
-            }
-        }
+        let first = NoteFileName.unclaimed(base: base, in: folder, reserved: reserved)
+        reserved.insert(first.lastPathComponent)
         record = r
-        let sink = NoteSink(store: store, folder: folder, note: url, callId: r.callId, reserved: reserved)
+        let sink = NoteSink(store: store, folder: folder, base: base, note: first, callId: r.callId, reserved: reserved)
         self.sink = sink
-        state = .saving(url)
-        lastURL = url
+        state = .saving(first)
+        lastURL = first
         lastSink = sink
         let text = render(.inProgress)
-        var spoolBegin = CallSpool.begin(r, note: url.lastPathComponent, daily: daily.map { ($0.url.path, $0.line) })
+        var spoolBegin = CallSpool.begin(r, device: device, pid: getpid())
         spoolBegin.h = noteHash(text)
-        let first = spoolBegin
-        let dailyAppend = daily.map { ($0.url, $0.line, DailyNote.marker(callId: r.callId)) }
-        perform(sink) { $0.start(first, text: text, daily: dailyAppend) }
+        let plan = NoteSink.Start(begin: spoolBegin, text: text, daily: options.dailyNote, start: start,
+                                  title: info.title ?? wording.untitled, timeZone: timeZone)
+        perform(sink) { $0.start(plan) }
     }
 
     public func add(_ line: TranscriptLine) {
@@ -273,22 +289,30 @@ public final class TranscriptRecorder {
         return true
     }
 
-    /// Waits until every queued write has run (app quit, tests).
+    /// Waits until every queued write has run (tests).
     public func flush() {
         io.wait()
     }
 
+    /// Waits at most `seconds` for the queued writes (app quit); false if some were still queued.
+    @discardableResult
+    public func flush(timeout seconds: TimeInterval) -> Bool {
+        io.waitUpTo(seconds)
+    }
+
     /// Recovery and retention for `folder`, queued behind this recorder's writes so they never race
     /// a call being saved: the current call's spool and note are left alone. `retentionDays` nil: off.
-    public func maintain(folder: URL, retentionDays: Int?, labels: SpeakerLabels = SpeakerLabels(), now: Date = Date()) {
+    public func maintain(folder: URL, retentionDays: Int?, pattern: String = NoteFileName.defaultPattern,
+                         labels: SpeakerLabels = SpeakerLabels(), now: Date = Date()) {
         let skip: Set<String> = record.map { [$0.callId] } ?? []
         let keep: Set<URL> = lastURL.map { [$0] } ?? []
-        let store = store, wording = wording, timeZone = timeZone
+        let store = store, wording = wording, timeZone = timeZone, device = device
         io.run {
             TranscriptMaintenance.recover(folder: folder, store: store, labels: labels, wording: wording, timeZone: timeZone,
-                                          now: now, skip: skip)
+                                          now: now, skip: skip, device: device)
             if let days = retentionDays {
-                TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: days, now: now, timeZone: timeZone, keep: keep)
+                TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: days, pattern: pattern, now: now,
+                                            timeZone: timeZone, keep: keep)
             }
         }
     }
@@ -349,48 +373,76 @@ public final class TranscriptRecorder {
 final class NoteSink: @unchecked Sendable {
     enum Outcome: Equatable {
         case ok
-        /// The note changed on disk; writing continues in this new note beside it.
+        /// The note is at another name than the recorder last heard (taken, edited or unreadable).
         case moved(URL)
         /// The note was removed during the call; saving stopped and the spool is gone.
         case vanished
         case failed
     }
 
+    /// What `start` needs; the names and paths are worked out on the I/O queue.
+    struct Start {
+        var begin: CallSpool.Record
+        var text: String
+        var daily: DailyNoteOptions?
+        var start: Date
+        var title: String
+        var timeZone: TimeZone
+    }
+
     let store: TranscriptStore
     let folder: URL
     let spool: URL
     let callId: String
+    /// The call's file name before any " (n)".
+    let base: String
     private(set) var note: URL
     /// Every note this call wrote (Delete removes them all).
-    private(set) var notes: [URL]
+    private(set) var notes: [URL] = []
     private var lastHash: String?
     private var stopped = false
     /// Notes whose first write is confirmed in the spool.
     private var confirmed: Set<String> = []
     private var reserved: Set<String>
 
-    init(store: TranscriptStore, folder: URL, note: URL, callId: String, reserved: Set<String>) {
+    init(store: TranscriptStore, folder: URL, base: String, note: URL, callId: String, reserved: Set<String>) {
         self.store = store
         self.folder = folder
+        self.base = base
         self.note = note
         self.callId = callId
         self.reserved = reserved
-        notes = [note]
         spool = CallSpool.url(callId: callId, in: folder)
     }
 
-    func start(_ begin: CallSpool.Record, text: String, daily: (url: URL, line: String, marker: String)?) -> Outcome {
+    func start(_ plan: Start) -> Outcome {
+        let first = note
         do {
             try store.prepare(folder: folder)
+            reserved.remove(first.lastPathComponent)
+            note = NoteFileName.unique(base: base, in: folder, store: store, reserved: reserved)
+            var begin = plan.begin
+            begin.note = note.lastPathComponent
+            let vault = ObsidianVault.root(containing: folder, store: store)
+            let root = vault ?? folder
+            var dailyURL: URL?
+            if let d = plan.daily, let url = DailyNote.url(pattern: d.pathPattern, date: plan.start, root: root, timeZone: plan.timeZone),
+               let rel = ObsidianVault.relativePath(of: url, under: root) {
+                dailyURL = url
+                begin.daily = rel
+                begin.dailyStyle = d.style.rawValue
+            }
             try store.append(begin.encoded(), to: spool)
-            try store.write(text, to: note)
-            lastHash = noteHash(text)
-            confirm()
+            try createNote(plan.text)
+            if let dailyURL, let d = plan.daily {
+                let line = DailyNote.line(note: note, vaultRoot: vault, start: plan.start, title: plan.title, style: d.style,
+                                          callId: callId, timeZone: plan.timeZone)
+                _ = try? DailyNote.append(line, marker: DailyNote.marker(callId: callId), to: dailyURL, store: store)
+            }
         } catch {
             return fail()
         }
-        if let daily { _ = try? DailyNote.append(daily.line, marker: daily.marker, to: daily.url, store: store) }
-        return .ok
+        return note == first ? .ok : .moved(note)
     }
 
     func record(_ rec: CallSpool.Record, text: String) -> Outcome {
@@ -432,30 +484,51 @@ final class NoteSink: @unchecked Sendable {
     }
 
     private func writeNote(_ text: String) -> Outcome {
-        var outcome = Outcome.ok
-        if let lastHash {
-            if !store.exists(note) {
-                stopped = true
-                removeSpool()
-                return .vanished
-            }
-            if let onDisk = store.read(note), noteHash(onDisk) != lastHash {
-                let base = String(note.deletingPathExtension().lastPathComponent)
-                note = NoteFileName.unique(base: base, in: folder, store: store, reserved: reserved)
-                reserved.insert(note.lastPathComponent)
-                notes.append(note)
-                _ = try? store.append(CallSpool.note(note.lastPathComponent, t: 0).encoded(), to: spool)
-                outcome = .moved(note)
-            }
+        guard let lastHash else { return fail() }
+        if !store.exists(note) {
+            stopped = true
+            removeSpool()
+            return .vanished
         }
+        if store.read(note).map(noteHash) == lastHash {
+            do {
+                try store.write(text, to: note)
+            } catch {
+                return fail()
+            }
+            self.lastHash = noteHash(text)
+            return .ok
+        }
+        // Changed on disk, or unreadable: never written over. The rest goes beside it.
+        reserved.insert(note.lastPathComponent)
+        note = NoteFileName.unique(base: base, in: folder, store: store, reserved: reserved)
+        _ = try? store.append(CallSpool.note(note.lastPathComponent, t: 0).encoded(), to: spool)
         do {
-            try store.write(text, to: note)
-            lastHash = noteHash(text)
+            try createNote(text)
         } catch {
             return fail()
         }
-        confirm()
-        return outcome
+        return .moved(note)
+    }
+
+    /// The note's first write: never over a file, so a name taken since it was chosen moves on to
+    /// the next free one (recorded in the spool first).
+    private func createNote(_ text: String) throws {
+        for _ in 0..<20 {
+            do {
+                try store.create(text, at: note)
+                notes.append(note)
+                reserved.insert(note.lastPathComponent)
+                lastHash = noteHash(text)
+                confirm()
+                return
+            } catch TranscriptStoreError.exists {
+                reserved.insert(note.lastPathComponent)
+                note = NoteFileName.unique(base: base, in: folder, store: store, reserved: reserved)
+                try store.append(CallSpool.note(note.lastPathComponent, t: 0).encoded(), to: spool)
+            }
+        }
+        throw TranscriptStoreError.exists
     }
 
     /// Records, once per note, that it reached disk.
@@ -474,18 +547,35 @@ final class NoteSink: @unchecked Sendable {
 
 // MARK: maintenance
 
-/// Launch-time upkeep for the chosen folder: finishing notes from spools a quit left behind, and the
-/// opt-in retention. Both touch only notes this app wrote (they carry `meetingcard-call`), only in
-/// the chosen folder, and never a note edited since it was written.
+/// Upkeep for the chosen folder: finishing notes from spools a quit left behind, and the opt-in
+/// retention. Both touch only notes this app wrote (they carry `meetingcard-call`), only in the
+/// chosen folder (and, for recovery, the vault's daily note), and never a note edited after its call.
 public enum TranscriptMaintenance {
+    /// A spool written on another device is left for that device unless untouched this long.
+    public static let otherDeviceIdle: TimeInterval = 6 * 3600
+    /// How long after the note's last write by MeetingCard a change still counts as that write.
+    public static let writeSlack: TimeInterval = 10
+    /// Retention reads at most this much of a note: its properties.
+    static let propertiesBytes = 4096
+
+    /// Whether a process (another app identity sharing the folder) is still running.
+    public static func processIsAlive(_ pid: Int32) -> Bool {
+        kill(pid, 0) == 0 || errno == EPERM
+    }
+
     /// Finishes each call whose spool is still in `folder`: an unfinished call gets an app-quit gap at
-    /// its last event and `recovered` status. The note is rewritten only if it still holds what the
-    /// recorder wrote; otherwise the recovered note goes beside it. A note removed during the call
-    /// stays removed. Returns the notes written. Also clears temporary files a crash left behind.
+    /// its last event and `recovered` status, and every note recovery writes gets a `recovered` time.
+    /// Left alone: the calls in `skip`, a spool another running process on this device is writing,
+    /// and one from another device unless idle for `otherDeviceIdle`. Names come from the spool only
+    /// if plain (`CallSpool.replay`), and the daily note is found again through `DailyNote.url`. The
+    /// note is rewritten only if it still holds what the recorder wrote; otherwise the recovered note
+    /// goes beside it, and it never replaces a file. A note removed after it reached disk stays
+    /// removed. Returns the notes written. Also clears temporary files a crash left behind.
     @discardableResult
     public static func recover(folder: URL, store: TranscriptStore, labels: SpeakerLabels = SpeakerLabels(),
                                wording: NoteWording = NoteWording(), timeZone: TimeZone = .current,
-                               now: Date = Date(), skip: Set<String> = []) -> [URL] {
+                               now: Date = Date(), skip: Set<String> = [], device: String = TranscriptRecorder.thisDevice,
+                               isAlive: (Int32) -> Bool = TranscriptMaintenance.processIsAlive) -> [URL] {
         for url in store.contents(of: folder) where url.lastPathComponent.hasPrefix(".")
             && url.lastPathComponent.hasSuffix(FileTranscriptStore.tempSuffix) {
             if let m = store.modified(url), now.timeIntervalSince(m) < 3600 { continue }
@@ -499,6 +589,11 @@ public enum TranscriptMaintenance {
                 continue
             }
             guard !skip.contains(replay.record.callId) else { continue }
+            if let other = replay.device, other != device {
+                guard let m = store.modified(spool), now.timeIntervalSince(m) > otherDeviceIdle else { continue }
+            } else if let pid = replay.pid, pid != getpid(), isAlive(pid) {
+                continue
+            }
             var r = replay.record
             let status: NoteStatus
             if replay.ended {
@@ -511,26 +606,41 @@ public enum TranscriptMaintenance {
                 r.end = t
                 status = .recovered
             }
-            let noteText = CallNote.render(r, labels: replay.labels, status: status, wording: wording, timeZone: timeZone)
+            let noteText = CallNote.render(r, labels: replay.labels, status: status, wording: wording, timeZone: timeZone,
+                                           recoveredAt: now)
             var note = folder.appendingPathComponent(replay.noteName)
-            if store.exists(note) {
-                let ours = store.read(note).map { replay.hashes.contains(noteHash($0)) } ?? false
-                if !ours {
-                    note = NoteFileName.unique(base: String(note.deletingPathExtension().lastPathComponent), in: folder, store: store)
-                }
-            } else if replay.written.contains(replay.noteName) {
-                // It reached disk and is gone: the user removed it.
-                try? store.remove(spool)
-                continue
-            }
+            let base = String(note.deletingPathExtension().lastPathComponent)
             do {
-                try store.write(noteText, to: note)
+                if store.exists(note), store.read(note).map({ replay.hashes.contains(noteHash($0)) }) == true {
+                    try store.write(noteText, to: note)
+                } else if !store.exists(note) && replay.written.contains(replay.noteName) {
+                    // It reached disk and is gone: the user removed it.
+                    try? store.remove(spool)
+                    continue
+                } else {
+                    var created = false
+                    for _ in 0..<20 where !created {
+                        if store.exists(note) { note = NoteFileName.unique(base: base, in: folder, store: store) }
+                        do {
+                            try store.create(noteText, at: note)
+                            created = true
+                        } catch TranscriptStoreError.exists {
+                            continue
+                        }
+                    }
+                    guard created else { continue }
+                }
             } catch {
                 continue
             }
             written.append(note)
-            if let path = replay.dailyPath, let line = replay.dailyLine {
-                _ = try? DailyNote.append(line, marker: DailyNote.marker(callId: r.callId), to: URL(fileURLWithPath: path), store: store)
+            if let rel = replay.dailyPath, let style = replay.dailyStyle {
+                let vault = ObsidianVault.root(containing: folder, store: store)
+                if let daily = DailyNote.url(pattern: rel, date: r.start, root: vault ?? folder, timeZone: timeZone) {
+                    let line = DailyNote.line(note: note, vaultRoot: vault, start: r.start, title: r.info.title ?? wording.untitled,
+                                              style: style, callId: r.callId, timeZone: timeZone)
+                    _ = try? DailyNote.append(line, marker: DailyNote.marker(callId: r.callId), to: daily, store: store)
+                }
             }
             try? store.remove(spool)
         }
@@ -538,21 +648,28 @@ public enum TranscriptMaintenance {
     }
 
     /// Retention: removes notes this app wrote in `folder` whose call started more than `days` days
-    /// before `now` and that haven't changed since then. Never looks in subfolders. Returns the notes removed.
+    /// before `now` and that nobody changed after MeetingCard's last write (the call's `end`, or
+    /// `recovered`, plus `writeSlack`). Looks only at names `pattern` could have made, directly in
+    /// `folder`, reads only their properties, and never removes a note still in progress. Returns
+    /// the notes removed.
     @discardableResult
-    public static func prune(folder: URL, store: TranscriptStore, olderThanDays days: Int, now: Date = Date(),
-                             timeZone: TimeZone = .current, keep: Set<URL> = []) -> [URL] {
+    public static func prune(folder: URL, store: TranscriptStore, olderThanDays days: Int, pattern: String = NoteFileName.defaultPattern,
+                             now: Date = Date(), timeZone: TimeZone = .current, keep: Set<URL> = []) -> [URL] {
         guard days > 0 else { return [] }
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
         // A listing can name the same file by another path (macOS: /private/var for /var).
         func key(_ u: URL) -> String { u.standardizedFileURL.resolvingSymlinksInPath().path }
         let kept = Set(keep.map(key))
+        func date(_ s: String?) -> Date? { s.flatMap { TranscriptFormat.parse($0, CallNote.dateTimeFormat, timeZone) } }
         var removed: [URL] = []
-        for url in store.contents(of: folder) where url.pathExtension == NoteFileName.fileExtension && !kept.contains(key(url)) {
-            guard let m = store.modified(url), m < cutoff, let text = store.read(url) else { continue }
+        for url in store.contents(of: folder) where url.pathExtension == NoteFileName.fileExtension
+            && !url.lastPathComponent.hasPrefix(".") && NoteFileName.matches(url.lastPathComponent, pattern: pattern)
+            && !kept.contains(key(url)) {
+            guard let m = store.modified(url), m < cutoff, let text = store.head(url, bytes: propertiesBytes) else { continue }
             let props = CallNote.properties(text)
-            guard props[CallNote.callProperty] != nil, let s = props["start"],
-                  let start = TranscriptFormat.parse(s, "yyyy-MM-dd'T'HH:mm:ss", timeZone), start < cutoff else { continue }
+            guard props[CallNote.callProperty] != nil, let start = date(props["start"]), start < cutoff,
+                  let lastWrite = date(props[CallNote.recoveredProperty]) ?? date(props["end"]),
+                  m <= lastWrite.addingTimeInterval(writeSlack) else { continue }
             do {
                 try store.remove(url)
                 removed.append(url)

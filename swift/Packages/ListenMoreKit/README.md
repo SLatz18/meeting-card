@@ -49,10 +49,14 @@ caption UI: the host renders the lines (MeetingCard: `CaptionFeedView` in its ca
 
 Saved transcripts are Obsidian-ready notes (`CallNote`): YAML properties, a summary placeholder,
 the coaching cues linked to their transcript lines by block ID, then the transcript with its gaps
-(the coach's Mute, Pause, the call app's mute, transcriber stops and retries, capture reconnects;
-`CallConditions`). Every line, gap and cue is appended to the call's spool and synced before the
-note is replaced atomically, so `TranscriptMaintenance.recover` can finish a call the app quit
-during; the recorder never writes over a note edited since its last write. File names come from a
+(the coach's Mute, Pause, the call app's mute and the transcriber stopping; `CallConditions` also
+has transcriber retries and capture reconnects for a host that reports them, which MeetingCard
+doesn't yet). Every line, gap and cue is appended to the call's spool and synced before the note is
+replaced atomically, all on the recorder's I/O queue, so `TranscriptMaintenance.recover` can finish a
+call the app quit during. Recovery takes only plain note names from a spool, finds the daily note
+again through `DailyNote.url`, and leaves a spool another process or device is still writing. The
+recorder never writes over a note edited (or unreadable) since its last write, and a note's first
+write never replaces a file. File names come from a
 pattern (`NoteFileName`), the daily-note line is append-only and idempotent (`DailyNote`), and
 `TranscriptMaintenance.prune` is the opt-in retention. All of it is plain files and runs on Linux.
 

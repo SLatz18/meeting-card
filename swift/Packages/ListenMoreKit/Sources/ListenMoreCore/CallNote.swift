@@ -62,6 +62,9 @@ public enum NoteFileName {
     public static let defaultPattern = "{date} {time} {title}"
     /// Characters, before the extension and any " (n)" suffix.
     public static let maxLength = 120
+    /// UTF-8 bytes, before the extension: a name, its " (n)", ".md" and its hidden temporary sibling's
+    /// extra bytes stay under the usual 255-byte limit.
+    public static let maxBytes = 255 - FileTranscriptStore.tempNameOverhead - " (9999)".utf8.count - ".md".utf8.count
     public static let fileExtension = "md"
     /// Not allowed in file names on macOS, Windows or Android, or meaningful in Obsidian links.
     static let unsafe: Set<Character> = ["/", "\\", ":", "*", "?", "\"", "<", ">", "|", "#", "^", "[", "]", "%", "\u{0}"]
@@ -82,25 +85,63 @@ public enum NoteFileName {
         return sanitize(fill(defaultPattern))
     }
 
-    /// Unsafe characters and control characters become spaces, whitespace runs collapse, leading and
-    /// trailing dots and spaces go (a leading dot hides a file), and the result is cut to `maxLength`
-    /// characters. A reserved Windows device name gets a trailing underscore.
+    /// Unsafe characters and control characters become spaces, whitespace runs collapse, runs of dots
+    /// become one, leading and trailing dots and spaces go (a leading dot hides a file), and the result
+    /// is cut to `maxLength` characters and `maxBytes` bytes. A reserved Windows device name (the part
+    /// before the first dot) gets an underscore. Sanitizing twice changes nothing more.
     public static func sanitize(_ s: String) -> String {
         var out = ""
         for ch in s.precomposedStringWithCanonicalMapping {
             let control = ch.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) }
+            if ch == ".", out.last == "." { continue }
             out.append(control || unsafe.contains(ch) ? " " : ch)
         }
         out = out.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         out = trimDotsAndSpaces(out)
-        if out.count > maxLength { out = trimDotsAndSpaces(String(out.prefix(maxLength))) }
-        let stem = out.split(separator: ".", maxSplits: 1).first.map { String($0).uppercased() } ?? ""
-        if reserved.contains(stem) { out += "_" }
+        if out.count > maxLength { out = String(out.prefix(maxLength)) }
+        while out.utf8.count > maxBytes { out.removeLast() }
+        out = trimDotsAndSpaces(out)
+        let stem = out.prefix { $0 != "." }
+        if reserved.contains(stem.uppercased()) { out.insert("_", at: stem.endIndex) }
         return out
+    }
+
+    /// A single plain note file name: no folders, no `..`, not hidden, `.md`, within the byte limit.
+    /// Anything a spool names must pass before it is used.
+    public static func isPlainNoteName(_ s: String) -> Bool {
+        s.hasSuffix(".\(fileExtension)") && s.count > fileExtension.count + 1 && !s.hasPrefix(".") && !s.contains("..")
+            && !s.contains("/") && !s.contains("\\") && s.utf8.count <= 255
+            && !s.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
+
+    /// Names the pattern could have made: its date and time tokens in order, anything between, and an
+    /// optional " (n)". Retention looks only at these.
+    public static func matches(_ name: String, pattern: String) -> Bool {
+        var re = "^"
+        var rest = Substring(pattern)
+        let tokens = ["{date}": #"\d{4}-\d{2}-\d{2}"#, "{time}": #"\d{4}"#]
+        while let next = tokens.keys.compactMap({ k in rest.range(of: k).map { (k, $0) } }).min(by: { $0.1.lowerBound < $1.1.lowerBound }) {
+            re += ".*" + tokens[next.0]!
+            rest = rest[next.1.upperBound...]
+        }
+        re += #".*\.md$"#
+        return name.range(of: re, options: .regularExpression) != nil
     }
 
     static func trimDotsAndSpaces(_ s: String) -> String {
         s.trimmingCharacters(in: CharacterSet(charactersIn: ". ").union(.whitespaces))
+    }
+
+    /// The first of `<base>.md`, `<base> (2).md`… not in `reserved`, without looking at disk (the
+    /// I/O queue checks the folder and never writes over a file).
+    public static func unclaimed(base: String, in folder: URL, reserved: Set<String>) -> URL {
+        let taken = Set(reserved.map { $0.lowercased() })
+        var n = 1
+        while true {
+            let name = n == 1 ? "\(base).\(fileExtension)" : "\(base) (\(n)).\(fileExtension)"
+            if !taken.contains(name.lowercased()) { return folder.appendingPathComponent(name) }
+            n += 1
+        }
     }
 
     /// `<base>.md` in `folder`, or `<base> (2).md`, `(3)`… when the name is taken. Names compare
@@ -134,12 +175,17 @@ public enum ObsidianVault {
 
     /// `url`'s path under `root`, without the `.md` extension, for a wikilink; nil if it isn't under `root`.
     public static func linkPath(of url: URL, under root: URL) -> String? {
+        guard let rel = relativePath(of: url, under: root) else { return nil }
+        return rel.hasSuffix(".\(NoteFileName.fileExtension)") ? String(rel.dropLast(NoteFileName.fileExtension.count + 1)) : rel
+    }
+
+    /// `url`'s path under `root`; nil if it isn't under `root`.
+    public static func relativePath(of url: URL, under root: URL) -> String? {
         let base = root.standardizedFileURL.path
         let full = url.standardizedFileURL.path
         let prefix = base.hasSuffix("/") ? base : base + "/"
         guard full.hasPrefix(prefix) else { return nil }
-        let rel = String(full.dropFirst(prefix.count))
-        return rel.hasSuffix(".\(NoteFileName.fileExtension)") ? String(rel.dropLast(NoteFileName.fileExtension.count + 1)) : rel
+        return String(full.dropFirst(prefix.count))
     }
 }
 
@@ -151,14 +197,19 @@ public enum ObsidianVault {
 public enum CallNote {
     public static let callProperty = "meetingcard-call"
     public static let statusProperty = "transcript-status"
+    public static let recoveredProperty = "recovered"
+    static let dateTimeFormat = "yyyy-MM-dd'T'HH:mm:ss"
     public static let defaultTag = "meeting/transcript"
 
+    /// `recoveredAt`: when recovery finished the note after a quit (its own `recovered` property,
+    /// which retention reads as the note's last write).
     public static func render(_ r: CallRecord, labels: SpeakerLabels, status: NoteStatus,
-                              wording: NoteWording = NoteWording(), timeZone: TimeZone = .current) -> String {
+                              wording: NoteWording = NoteWording(), timeZone: TimeZone = .current,
+                              recoveredAt: Date? = nil) -> String {
         let lines = r.lines.enumerated().sorted { a, b in
             a.element.offset == b.element.offset ? a.offset < b.offset : a.element.offset < b.element.offset
         }
-        var out = frontmatter(r, labels: labels, status: status, timeZone: timeZone)
+        var out = frontmatter(r, labels: labels, status: status, timeZone: timeZone, recoveredAt: recoveredAt)
         out += "\n## \(wording.summaryHeading)\n\n\(wording.summaryPlaceholder)\n"
         out += "\n## \(wording.cuesHeading)\n\n"
         if r.cues.isEmpty { out += "\(wording.noCues)\n" }
@@ -198,7 +249,7 @@ public enum CallNote {
         return "\(base) \(n)"
     }
 
-    static func frontmatter(_ r: CallRecord, labels: SpeakerLabels, status: NoteStatus, timeZone: TimeZone) -> String {
+    static func frontmatter(_ r: CallRecord, labels: SpeakerLabels, status: NoteStatus, timeZone: TimeZone, recoveredAt: Date?) -> String {
         var speakers: [String] = []
         for l in r.lines {
             let s = label(l, labels)
@@ -212,6 +263,7 @@ public enum CallNote {
             out += "end: \(TranscriptFormat.stamp(r.start.addingTimeInterval(end), "yyyy-MM-dd'T'HH:mm:ss", timeZone))\n"
             out += "duration: \(yaml(TranscriptFormat.timestamp(end)))\n"
         }
+        if let recoveredAt { out += "\(recoveredProperty): \(TranscriptFormat.stamp(recoveredAt, dateTimeFormat, timeZone))\n" }
         if let app = r.info.app, !app.isEmpty { out += "meeting-app: \(yaml(app))\n" }
         if let title = r.info.title, !title.isEmpty { out += "title: \(yaml(title))\n" }
         if !r.info.participants.isEmpty { out += list("participants", r.info.participants) }
