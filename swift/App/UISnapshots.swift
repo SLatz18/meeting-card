@@ -488,7 +488,7 @@ enum UISnapshots {
         defaults.removePersistentDomain(forName: suite)
         defaults.set(true, forKey: CoachController.Keys.onboarded)
         var result = "unavailable"
-        if let coach = try? CoachController(defaults: defaults, keychain: KeychainStore(service: suite, account: "none"), showsStatusItem: false,
+        if let coach = try? CoachController(defaults: defaults, coachLogSink: DiscardingCoachLog(), keychain: KeychainStore(service: suite, account: "none"), showsStatusItem: false,
                                             transcriptStore: MemoryTranscriptStore()) {
             coach.showSettings()
             let before = coach.selfPivotNotice == nil ? "closed" : "open"
