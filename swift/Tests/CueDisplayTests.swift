@@ -162,13 +162,127 @@ final class CueDisplayTests: XCTestCase {
         XCTAssertEqual(CueDisplayPacer.frame(at: 11, events: late).decisions.last, .stale(k, at: 11))
     }
 
-    /// No `default:` in the code that switches over the cue enums: a new cue type fails to compile until
-    /// every one of them handles it.
-    func testCueSwitchesHaveNoDefault() throws {
-        for file in ["Core/CoachCard.swift", "Core/CueDisplay.swift", "Core/Theme.swift",
-                     "Packages/ListenMoreKit/Sources/ListenMoreCore/Config.swift"] {
-            let code = try read(file).components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
-            XCTAssertFalse(code.contains { $0.contains("default:") }, "\(file) has a default: case")
+    // MARK: scanning the sources for switches over the cue enums
+
+    /// Where the cue enums are switched over: the app, its Core, and the Kit's sources (not its tests).
+    static let sourceDirs = ["App", "Core", "Packages/ListenMoreKit/Sources/ListenMoreCore", "Packages/ListenMoreKit/Sources/ListenMoreMac"]
+
+    /// Every Swift source file under `sourceDirs`, as paths relative to the swift directory.
+    func sourceFiles() throws -> [String] {
+        try Self.sourceDirs.flatMap { dir -> [String] in
+            let root = Self.swiftDir.appendingPathComponent(dir).resolvingSymlinksInPath()
+            let names = try XCTUnwrap(FileManager.default.enumerator(atPath: root.path), dir).compactMap { $0 as? String }
+            return names.filter { $0.hasSuffix(".swift") }.sorted().map { "\(dir)/\($0)" }
+        }
+    }
+
+    /// `src` with comments and string literals (raw and multi-line too) blanked, newlines kept, so a brace or a
+    /// keyword inside one is never read as code.
+    static func stripped(_ src: String) -> String {
+        let c = Array(src), n = c.count
+        var out: [Character] = []
+        var i = 0
+        func blank(_ ch: Character) { out.append(ch == "\n" ? "\n" : " ") }
+        while i < n {
+            if c[i] == "/", i + 1 < n, c[i + 1] == "/" {
+                while i < n, c[i] != "\n" { blank(c[i]); i += 1 }
+            } else if c[i] == "/", i + 1 < n, c[i + 1] == "*" {
+                var depth = 0
+                repeat {
+                    if i + 1 < n, c[i] == "/", c[i + 1] == "*" { depth += 1; blank(c[i]); blank(c[i + 1]); i += 2 }
+                    else if i + 1 < n, c[i] == "*", c[i + 1] == "/" { depth -= 1; blank(c[i]); blank(c[i + 1]); i += 2 }
+                    else { blank(c[i]); i += 1 }
+                } while depth > 0 && i < n
+            } else if c[i] == "#" || c[i] == "\"" {
+                var hashes = 0
+                var j = i
+                while j < n, c[j] == "#" { hashes += 1; j += 1 }
+                guard j < n, c[j] == "\"" else { out.append(c[i]); i += 1; continue }
+                let multi = j + 2 < n && c[j + 1] == "\"" && c[j + 2] == "\""
+                let quote = String(repeating: "\"", count: multi ? 3 : 1) + String(repeating: "#", count: hashes)
+                let close = Array(quote)
+                var k = j + close.count - hashes
+                while k < n {
+                    if hashes == 0, c[k] == "\\" { k += 2; continue }
+                    if k + close.count <= n, Array(c[k..<(k + close.count)]) == close { k += close.count; break }
+                    k += 1
+                }
+                for idx in i..<min(k, n) { blank(c[idx]) }
+                i = min(k, n)
+            } else {
+                out.append(c[i]); i += 1
+            }
+        }
+        return String(out)
+    }
+
+    /// The bodies of the `switch` statements in `code` (already stripped), outermost and nested alike.
+    static func switchBodies(_ code: String) -> [String] {
+        let chars = Array(code)
+        let word = Array("switch")
+        var bodies: [String] = []
+        var i = 0
+        while i + word.count < chars.count {
+            let before = i == 0 ? " " : chars[i - 1]
+            let after = chars[i + word.count]
+            guard Array(chars[i..<(i + word.count)]) == word, !(before.isLetter || before.isNumber || before == "_" || before == "."),
+                  !(after.isLetter || after.isNumber || after == "_") else { i += 1; continue }
+            guard let open = chars[i...].firstIndex(of: "{") else { break }
+            var depth = 0, j = open
+            while j < chars.count {
+                if chars[j] == "{" { depth += 1 } else if chars[j] == "}" { depth -= 1; if depth == 0 { break } }
+                j += 1
+            }
+            bodies.append(String(chars[(open + 1)..<min(j, chars.count)]))
+            i += word.count
+        }
+        return bodies
+    }
+
+    /// A switch over a cue enum (`CueType`, `CoachNudge.Kind`): it names one of the cases only they have.
+    static func switchesOverCues(_ body: String) -> Bool {
+        body.range(of: #"\bcase\b[^:]*\.(notListening|missedQuestion|aggressive|selfPivot)\b"#, options: .regularExpression) != nil
+    }
+
+    /// A catch-all arm: `default:`, `case _:`, a wildcard in a list of patterns, or a bare binding.
+    static func hasCatchAll(_ body: String) -> Bool {
+        let patterns = [#"\bdefault\s*:"#,
+                        #"\bcase\b[^:]*(?<![\w.])_(?![\w])[^:]*:"#,
+                        #"\bcase\s+(let|var)\s+\w+\s*(where[^:]*)?:"#,
+                        #"\bcase\s+[a-z_]\w*\s*(where[^:]*)?:"#]
+        return patterns.contains { body.range(of: $0, options: .regularExpression) != nil }
+    }
+
+    /// The scanner itself: it finds a switch over the cue enums and every spelling of a catch-all, and passes a
+    /// switch that names every case.
+    func testScannerSpotsCatchAllArms() {
+        func flagged(_ src: String) -> [Bool] {
+            Self.switchBodies(Self.stripped(src)).filter(Self.switchesOverCues).map(Self.hasCatchAll)
+        }
+        XCTAssertEqual(flagged("switch k { case .aggressive: 1\n case .interrupt: 2 }"), [false])
+        XCTAssertEqual(flagged("switch k { case .aggressive: 1\n default: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .aggressive: 1\n case _: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .aggressive: 1\n case .interrupt, _: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case let other: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case other: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case _ where x: 2 }"), [true])
+        XCTAssertEqual(flagged("switch k { case .notListening: switch j { case .a: 1\n default: 2 } }"), [true])
+        XCTAssertEqual(flagged("switch k { case .missedQuestion: 1 } // default: _\nlet s = \"default:\""), [false], "comments and strings don't count")
+        XCTAssertEqual(flagged("switch s { case \"not_listening\": 1\n default: 2 }"), [], "a switch over a String isn't one over the enums")
+        XCTAssertEqual(flagged("switch e { case .talkShare: 1\n default: 2 }"), [], "another enum's cases")
+    }
+
+    /// No `default:`, `case _:` or other catch-all in any switch over the cue enums, wherever it is: a new cue type
+    /// fails to compile until every switch handles it. The files come from scanning the sources, not a list.
+    func testCueSwitchesHaveNoCatchAll() throws {
+        var checked = Set<String>()
+        for file in try sourceFiles() {
+            let switches = Self.switchBodies(Self.stripped(try read(file))).filter(Self.switchesOverCues)
+            if !switches.isEmpty { checked.insert(file) }
+            for body in switches { XCTAssertFalse(Self.hasCatchAll(body), "\(file): a switch over the cue enums has a catch-all arm") }
+        }
+        for file in ["Core/CoachCard.swift", "Core/CueDisplay.swift", "Core/Theme.swift", "Packages/ListenMoreKit/Sources/ListenMoreCore/Config.swift"] {
+            XCTAssertTrue(checked.contains(file), "the scan finds the switches in \(file)")
         }
     }
 
@@ -354,7 +468,7 @@ final class CueDisplayTests: XCTestCase {
         // The test-only files, found in the tree: their first #if mentions MEETINGCARD_TEST_ID and they end in #endif.
         var found: [String] = []
         for dir in ["App", "Core"] {
-            let root = Self.swiftDir.appendingPathComponent(dir)
+            let root = Self.swiftDir.appendingPathComponent(dir).resolvingSymlinksInPath()
             let files = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
             for case let url as URL in files where url.pathExtension == "swift" {
                 let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
