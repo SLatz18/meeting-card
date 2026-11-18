@@ -123,14 +123,18 @@ public struct CardStyle: Sendable {
         public static var morph: TimeInterval { morphKeyframes[morphKeyframes.count - 1] }
         /// Reduce Motion: no frame animation; the surface fades out and back in.
         public static let reduceMotionCrossfade: TimeInterval = 0.200
-        /// Glide to the placement spot, and the pill widening for a nudge.
+        /// Glide to the placement spot, and the card or pill resizing (the tip row, Mute in Zoom).
         public static let move: TimeInterval = 0.240
     }
 
     /// The call coach card, its pill, and their nudges.
     public enum Coach {
-        /// How long a nudge tints the card or pill.
+        /// How long a nudge's words show on the card (and its tone on the pill).
         public static let nudgeHold: TimeInterval = 4.5
+        /// How long after a cue arrives its glyph stays in the status glyph, the hold included: the cue
+        /// policy's per-type cooldown (`cues.cooldown_s`), so the glyph is gone before the same cue can
+        /// come back. A newer cue replaces it.
+        public static let cueLinger: TimeInterval = 20
         public static let pill = (width: 200.0, height: 45.0, radius: 15.0)
         /// Nudge tint: the rose or amber tone at this alpha over the card's surface.
         public static let nudgeTint = (light: 0.12, dark: 0.16)
@@ -443,6 +447,9 @@ public enum Theme {
         public static let nudgeFont = Theme.FontSpec(CardStyle.Typography.body.size, .semibold)
         /// Nudge words on the tint (contrast checked against it).
         public static let nudgeText = CardStyle.Text.primary
+        /// After its words, a cue's glyph lingers in the status glyph in the held text role (no tone,
+        /// no band), until `CardStyle.Coach.cueLinger`.
+        public static let lingerGlyphText = Coach.heldText
         public static let captionsFont = CardStyle.Typography.caption
         public static let captionsText = CardStyle.Text.secondary
         public static let buttonFont = CardStyle.Typography.button
@@ -474,6 +481,21 @@ public enum Theme {
             public static let stop = "stop.fill"
             public static let minimize = "arrow.down.right.and.arrow.up.left"
             public static let expand = "arrow.up.left.and.arrow.down.right"
+
+            /// A cue's glyph in the status glyph (card and pill), one per cue type. Never a mic (Mute in
+            /// Zoom's), a waveform (the coach's hearing state) or an ear (the coach itself).
+            public static func cue(_ kind: CoachNudge.Kind) -> String {
+                switch kind {
+                case .interrupt: "hand.raised.fill"
+                case .talkOver: "bubble.left.and.bubble.right.fill"
+                case .aggressive: "thermometer.medium"
+                case .notListening: "arrowshape.turn.up.left.fill"
+                case .selfPivot: "person.fill.questionmark"
+                case .missedQuestion: "questionmark.bubble.fill"
+                case .monologue: "timer"
+                case .talkShare: "chart.pie.fill"
+                }
+            }
         }
 
         public struct Frame: Equatable, Sendable {
@@ -538,8 +560,9 @@ public enum Theme {
     }
 
     /// The minimized coach: a pill with a grabber, the coach glyph, and the coach's Mute, Mute in Zoom
-    /// (only while it can act), Pause/Resume and Stop.
-    /// While a nudge holds it tints, shows the nudge's leading bar, and widens for the nudge words.
+    /// (only while it can act), Pause/Resume and Stop. Its width never changes for a cue: while a nudge
+    /// holds, the glyph is the cue's in its tone with the tone's leading bar; while the cue lingers,
+    /// the cue's glyph in the held role. The words are in its tooltip and VoiceOver label.
     public enum CoachPill {
         public static let width = CardStyle.Coach.pill.width
         public static let height = CardStyle.Coach.pill.height
@@ -554,26 +577,18 @@ public enum Theme {
         public static let buttonRadius = Coach.pauseButtonRadius
         public static let buttonGlyph = CardStyle.Typography.caption
         public static let buttonGap = Coach.controlInset
-        public static let wordsFont = CoachCard.nudgeFont
-        /// Room each side of the nudge words for the text field's own inset.
-        public static let wordsInset = Coach.glyphGap
-        public static let maxWidth = CardLayout.W
+        /// A lingering cue's glyph: the held text role, no tone.
+        public static let lingerGlyphText = CoachCard.lingerGlyphText
         public static var glyphX: Double { CardStyle.Coach.nudgeBar + padding }
         /// The coach's Mute, Mute in Zoom (only while it can act), Pause/Resume and Stop.
         public static func buttonsWidth(_ n: Int = 3) -> Double { Double(n) * button + Double(max(0, n - 1)) * buttonGap }
         /// The row's vertical center, under the grabber.
         public static var rowMidY: Double { (height - grabberTop - grabber.height) / 2 }
 
-        /// Pill width for nudge words `wordsWidth` wide (nil: no nudge), between the pill and card widths.
-        public static func width(wordsWidth: Double?, buttons n: Int = 3) -> Double {
-            guard let w = wordsWidth else { return width }
-            let need = glyphX + glyphSize + glyphGap + w + CardStyle.Spacing.control + buttonsWidth(n) + padding
-            return min(maxWidth, max(width, need))
-        }
-
-        /// The words' room in a pill `pillWidth` wide.
-        public static func wordsRoom(pillWidth: Double, buttons n: Int = 3) -> Double {
-            max(0, pillWidth - glyphX - glyphSize - glyphGap - CardStyle.Spacing.control - buttonsWidth(n) - padding)
+        /// Room between the glyph and the buttons in a pill `pillWidth` wide (it must stay positive:
+        /// the pill doesn't widen).
+        public static func glyphRoom(pillWidth: Double, buttons n: Int = 3) -> Double {
+            pillWidth - glyphX - glyphSize - CardStyle.Spacing.control - buttonsWidth(n) - padding
         }
 
         /// The buttons' x positions (pill coordinates), right-aligned.

@@ -250,7 +250,7 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
                     case .aggressive: aggressive
                     case .notListening: notListening
                     case .missedQuestion: missedQuestion
-                    case .interrupt, .talkOver, .monologue, .talkShare: nil
+                    case .interrupt, .talkOver, .monologue, .talkShare, .selfPivot: nil
                     }
                 }
             }

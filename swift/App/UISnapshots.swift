@@ -248,8 +248,9 @@ enum UISnapshots {
     static let roseNudge = CoachNudge(kind: .interrupt, tone: .rose)
 
     static func shotState(_ st: CoachCardState.Status, _ m: MuteControlPresentation, _ n: CoachNudge?, _ mode: CoachCardState.Mode,
-                          ic: Bool = false, saving: Bool = false, callModeTip: Bool = false, noMicNotice: Bool = false) -> CoachCardState {
-        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, coachMicMuted: st == .micOff, nudge: n, mode: mode,
+                          lingering: CoachNudge? = nil, ic: Bool = false, saving: Bool = false, callModeTip: Bool = false,
+                          noMicNotice: Bool = false) -> CoachCardState {
+        CoachCardState(status: st, mute: m, micMuted: m == mutedMute, coachMicMuted: st == .micOff, nudge: n, lingering: lingering, mode: mode,
                        increasedContrast: ic, savingBadge: saving ? CoachCopy.savingNow : nil, callModeTip: callModeTip,
                        noMicNotice: noMicNotice)
     }
@@ -266,6 +267,15 @@ enum UISnapshots {
         ("card-zoom-mute", shotState(.listening, liveMute, nil, .card), nil),
         ("card-nudge-amber", shotState(.listening, noZoomMute, amberNudge, .card), nil),
         ("card-nudge-rose", shotState(.listening, noZoomMute, roseNudge, .card), nil),
+        // After the words: the cue's glyph lingers in the status glyph (held role) until the linger
+        // ends; then the card is back to listening (the expiry state).
+        ("card-cue-linger-amber", shotState(.listening, noZoomMute, nil, .card, lingering: amberNudge), nil),
+        ("card-cue-linger-rose", shotState(.listening, noZoomMute, nil, .card, lingering: roseNudge), nil),
+        ("card-cue-expired", shotState(.listening, noZoomMute, nil, .card), nil),
+        // Increase Contrast: the lingering glyph in the high-contrast held role.
+        ("card-cue-linger-increased-contrast", shotState(.listening, noZoomMute, nil, .card, lingering: amberNudge, ic: true), nil),
+        // Paused with a cue still lingering from before: the cue is gone (a plain paused card).
+        ("card-cue-paused", shotState(.paused, noZoomMute, nil, .card, lingering: roseNudge), nil),
         ("card-increased-contrast", shotState(.listening, noZoomMute, amberNudge, .card, ic: true), nil),
         // Save transcripts on (#13c): the saving badge on the status line, and still there under a nudge.
         ("card-saving", shotState(.listening, noZoomMute, nil, .card, saving: true), nil),
@@ -283,8 +293,18 @@ enum UISnapshots {
         ("pill-mic-off", shotState(.micOff, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.unmuteMic),
         ("pill-zoom-mute", shotState(.listening, liveMute, nil, .pill), CoachMuteCopy.muteTooltip),
         ("pill-paused", shotState(.paused, noZoomMute, nil, .pill), nil),
-        ("pill-nudge-amber", shotState(.listening, noZoomMute, amberNudge, .pill), nil),
-        ("pill-nudge-rose", shotState(.listening, noZoomMute, roseNudge, .pill), nil),
+        // The pill never widens for a cue: the cue's glyph in its tone with the tone's bar while the
+        // nudge holds, then in the held role while it lingers; the words are its tooltip.
+        ("pill-nudge-amber", shotState(.listening, noZoomMute, amberNudge, .pill), amberNudge.words),
+        ("pill-nudge-rose", shotState(.listening, noZoomMute, roseNudge, .pill), roseNudge.words),
+        ("pill-cue-linger-amber", shotState(.listening, noZoomMute, nil, .pill, lingering: amberNudge), amberNudge.words),
+        ("pill-cue-linger-rose", shotState(.listening, noZoomMute, nil, .pill, lingering: roseNudge), roseNudge.words),
+        ("pill-cue-expired", shotState(.listening, noZoomMute, nil, .pill), CoachCardCopy.Tooltip.expand),
+        // Increase Contrast: the cue's bar at full strength, the glyph in the high-contrast tone.
+        ("pill-nudge-increased-contrast", shotState(.listening, noZoomMute, roseNudge, .pill, ic: true), roseNudge.words),
+        ("pill-cue-linger-increased-contrast", shotState(.listening, noZoomMute, nil, .pill, lingering: amberNudge, ic: true), amberNudge.words),
+        // Muted in Zoom with a cue from before: no cue glyph, edge or tooltip (Expand coach).
+        ("pill-cue-muted", shotState(.muted, mutedMute, nil, .pill, lingering: roseNudge), CoachCardCopy.Tooltip.expand),
     ]
 
     /// Every PNG `coachCardShots` writes, per appearance (the CI gate checks for them).

@@ -117,12 +117,12 @@ public enum DefaultConfig {
     "cooldown_s": 20,
     "global_cooldown_s": 20,
     "on_screen_s": 4.5,
-    "priority": ["talk_over", "interrupt", "missed_question", "aggressive", "monologue", "not_listening", "talk_share"],
+    "priority": ["talk_over", "interrupt", "missed_question", "aggressive", "monologue", "not_listening", "self_pivot", "talk_share"],
     "fade_s": 3,
     "gpt_min_confidence": 0.7,
     "colors": {
       "interrupt": "red", "talk_over": "red", "aggressive": "red",
-      "not_listening": "amber", "missed_question": "amber",
+      "not_listening": "amber", "self_pivot": "amber", "missed_question": "amber",
       "monologue": "amber", "talk_share": "amber"
     }
   },
