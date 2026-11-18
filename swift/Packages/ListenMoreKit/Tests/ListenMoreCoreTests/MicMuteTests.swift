@@ -728,6 +728,117 @@ final class LocalLayerMicMuteTests: XCTestCase {
         XCTAssertEqual(cues(run(8, me: me, others: others, mutes: [(0, true), (1.0, false)])), [.interrupt], "past the grace second")
     }
 
+    /// The first words back start inside the grace and run on past it with a short pause ("Sorry, I was
+    /// on mute, ..."): the onset after the pause lands past the grace second but is the same utterance,
+    /// so it opens no cut-in either. A pause of `cut_in_utterance_gap_ms` or more ends that utterance.
+    func testFirstWordsBackStaySettledThroughAShortPause() {
+        let others: [(Double, Double)] = [(1.0, 7.5)]
+        let firstWordsBack: [(Double, Double)] = [(3.2, 3.7), (4.05, 7.0)]
+        XCTAssertEqual(cues(run(9, me: firstWordsBack, others: others)), [.interrupt], "control: not muted")
+        let unmuted = run(9, me: firstWordsBack, others: others, mutes: [(0, true), (2.9, false)])
+        XCTAssertEqual(unmuted.filter { $0.kind == .meOnset }.count, 2, "the pause gives a second onset, past the grace")
+        XCTAssertEqual(cues(unmuted), [], "one utterance back from mute: no cut-in")
+        let newUtterance: [(Double, Double)] = [(3.2, 3.7), (4.5, 7.0)]
+        XCTAssertEqual(cues(run(9, me: newUtterance, others: others, mutes: [(0, true), (2.9, false)])), [.interrupt],
+                       "after a 0.8 s pause the next words are a new utterance")
+    }
+
+    /// `n` stretches of 3 s of speech from 3.2 s (right after a 2.9 s unmute), 0.4 s apart.
+    func talkingOn(_ n: Int) -> [(Double, Double)] {
+        var out: [(Double, Double)] = []
+        for i in 0..<n {
+            let start = 3.2 + 3.4 * Double(i)
+            out.append((start, start + 3.0))
+        }
+        return out
+    }
+
+    /// The user talks on in 3 s chunks with 0.4 s pauses; the other side, quiet since before unmute, comes
+    /// back at 20 s during a pause and the user talks over them: a cut-in, like any other.
+    func testOtherSideComingBackAfterUnmuteIsCutInAsUsual() {
+        let chunks = talkingOn(7)
+        let others: [(Double, Double)] = [(1.0, 2.5), (20.0, 25.0)]
+        let evs = run(28, me: chunks, others: others, mutes: [(0, true), (2.9, false)])
+        let cuts = evs.filter { $0.kind == .interrupt }
+        XCTAssertFalse(cuts.isEmpty)
+        XCTAssertEqual(cuts.first?.onset ?? 0, 20.2, accuracy: 0.1, "the onset right after they came back")
+        XCTAssertEqual(cuts.first?.t ?? 0, 21.4, accuracy: 0.1)
+        XCTAssertTrue(cuts.allSatisfy { $0.onset >= 20 }, "nothing while they were quiet")
+    }
+
+    /// The other side starting a new utterance ends the first words back's exemption even before the cap.
+    func testOtherSideStartingANewUtteranceEndsTheExemption() {
+        let me: [(Double, Double)] = [(3.2, 4.0), (4.4, 8.0)]
+        let others: [(Double, Double)] = [(1.0, 2.5), (4.2, 7.5)]
+        let cuts = run(10, me: me, others: others, mutes: [(0, true), (2.9, false)]).filter { $0.kind == .interrupt }
+        XCTAssertEqual(cuts.count, 1, "the user's onset at 4.4 s, past the grace, cuts in on words they began at 4.2 s")
+        XCTAssertEqual(cuts.first?.onset ?? 0, 4.4, accuracy: 0.1)
+    }
+
+    /// The mute-unmute scenario's live TTS takes (box run at e2e6b84, from the shadow trace). You's first
+    /// words back ("Sorry, I was on mute, give me one second…") start 0.3 s after Unmute and re-onset at
+    /// their commas, over Them's sentence ("…settle it on the next call, I just want the whole
+    /// picture…"), which pauses at its comma: 0.6 s judge off (silent from 28.56 s, back by 29.2 s), at
+    /// least 0.46 s judge on (0.56 s here). Both takes raised an interrupt from You's last comma onset
+    /// 1.2 s later (31.58 and 31.32 s). A comma pause is not a new utterance: nothing cuts in, nor after
+    /// 0.98 s of quiet. A full second is, and the same words cut in.
+    func testLiveFirstWordsBackOverThemsCommaPauseStaySettled() {
+        func themGap(_ evs: [LocalEvent]) -> Double? {
+            guard let off = evs.first(where: { $0.kind == .othersOffset }),
+                  let on = evs.first(where: { $0.kind == .othersOnset && $0.onset > off.onset }) else { return nil }
+            return on.onset - off.onset
+        }
+        let takes: [(name: String, unmute: Double, me: [(Double, Double)], them: Double, quiet: Double)] = [
+            ("judge off", 27.98, [(28.28, 28.80), (29.12, 29.94), (30.38, 32.5)], 25.98, 28.56),
+            ("judge on", 28.06, [(28.36, 29.70), (30.12, 32.3)], 26.04, 28.50),
+        ]
+        for take in takes {
+            func others(pause: Double) -> [(Double, Double)] { [(take.them, take.quiet), (take.quiet + pause, 31.9)] }
+            let lastOnset = take.me[take.me.count - 1].0
+            let control = run(34, me: take.me, others: others(pause: 0.6))
+            XCTAssertTrue(control.contains { $0.kind == .interrupt }, "\(take.name) control: not muted, a cut-in")
+            let comma = run(34, me: take.me, others: others(pause: take.name == "judge off" ? 0.6 : 0.56),
+                            mutes: [(0, true), (take.unmute, false)])
+            XCTAssertEqual(cues(comma), [], "\(take.name): Them's comma pause is not a new utterance")
+            let justUnder = run(34, me: take.me, others: others(pause: 0.98), mutes: [(0, true), (take.unmute, false)])
+            XCTAssertEqual(themGap(justUnder) ?? 0, 0.98, accuracy: 1e-9, "\(take.name): the VAD measures the pause as written")
+            XCTAssertEqual(cues(justUnder), [], "\(take.name): 0.98 s of quiet is not a new utterance")
+            let newUtterance = run(34, me: take.me, others: others(pause: 1.00), mutes: [(0, true), (take.unmute, false)])
+            XCTAssertEqual(themGap(newUtterance) ?? 0, 1.00, accuracy: 1e-9, "\(take.name): the VAD measures the pause as written")
+            let cut = newUtterance.first { $0.kind == .interrupt }
+            XCTAssertEqual(cut?.onset ?? 0, lastOnset, accuracy: 0.05, "\(take.name): 1.00 s of quiet ends the exemption")
+        }
+    }
+
+    /// A back-and-forth right after unmute, the user's pauses under `cut_in_utterance_gap_ms`: the other
+    /// side's first turn is a new utterance, so the user's later onsets are speaker switches and the
+    /// exchange talks over well inside `firstWordsBackMaxS` (only the new-utterance rule ends the
+    /// exemption that early). The pattern then repeats for 22 s.
+    func testBackAndForthAfterUnmuteStillTalksOver() {
+        var me: [(Double, Double)] = [(3.2, 4.0), (4.4, 5.2), (5.6, 9.0)]
+        var others: [(Double, Double)] = [(1.0, 2.0), (3.8, 4.6), (5.0, 5.8)]
+        for c in stride(from: 10.0, through: 20.0, by: 5.0) {
+            others += [(c, c + 0.9), (c + 1.3, c + 2.1)]
+            me += [(c + 0.5, c + 1.5), (c + 1.9, c + 4.6)]
+        }
+        let unmuted = run(26, me: me, others: others, mutes: [(0, true), (2.9, false)])
+        let talkOvers = unmuted.filter { $0.kind == .talkOver }
+        let capEnd = 2.9 + config.frameS + config.local.unmuteGraceS + LocalLayer.firstWordsBackMaxS
+        XCTAssertEqual(talkOvers.first?.onset ?? 0, 5.6, accuracy: 0.1, "\(cues(unmuted))")
+        XCTAssertLessThan(talkOvers.first?.onset ?? .infinity, capEnd, "switches logged before the cap would have ended the exemption")
+        XCTAssertGreaterThanOrEqual(talkOvers.count, 3)
+    }
+
+    /// The exemption is capped: talking on over the other side in 3 s chunks with 0.4 s pauses for 60 s,
+    /// the cut-ins come back `firstWordsBackMaxS` after the grace.
+    func testFirstWordsBackExemptionIsCapped() {
+        let chunks = talkingOn(18)
+        let cuts = run(64, me: chunks, others: [(1.0, 63.0)], mutes: [(0, true), (2.9, false)]).filter { $0.kind == .interrupt }
+        XCTAssertGreaterThanOrEqual(cuts.count, 10)
+        let graceEnd = 2.9 + config.frameS + config.local.unmuteGraceS
+        XCTAssertGreaterThanOrEqual(cuts.first?.onset ?? 0, graceEnd + LocalLayer.firstWordsBackMaxS - 1e-9)
+    }
+
     /// The grace is the rules' `local.unmute_grace_s` (1 s by default), not a constant in the layer.
     func testUnmuteGraceComesFromTheRules() {
         XCTAssertEqual(config.local.unmuteGraceS, 1.0)
@@ -747,8 +858,9 @@ final class LocalLayerMicMuteTests: XCTestCase {
     }
 
     /// Mute drops the user's turn: talking again after unmute starts a new run, so no monologue spans the gap.
+    /// The new run (from 5.0 s) is 4.0 s long at the end of the clip, so the soft limit sits above that.
     func testMuteDropsTheTurnSoNoMonologueSpansTheGap() {
-        config.local.monologueSoftS = 4
+        config.local.monologueSoftS = 4.5
         config.local.monologueStrongS = 100
         config.local.monologueRelativeMinRuns = 1000
         let me: [(Double, Double)] = [(1.0, 4.0), (5.0, 7.5)]

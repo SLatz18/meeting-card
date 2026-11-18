@@ -64,12 +64,12 @@ enum Synthetic {
 
     /// Runs the local layer frame by frame like the Python `run_local` helper; returns cue events.
     static func runLocal(_ config: ListenMoreConfig, mic: [Float], call: [Float], participants: Int = 2,
-                         context: LocalTextContext? = nil) -> [LocalEvent] {
+                         context: LocalTextContext? = nil, startFrame: Int = 0) -> [LocalEvent] {
         let ll = LocalLayer(config: config, participants: participants, context: context)
         let hop = config.frameSamples
         var out: [LocalEvent] = []
         for i in 0..<(min(mic.count, call.count) / hop) {
-            let r = ll.step(t: Double(i + 1) * config.frameS, mic: mic[(i * hop)..<((i + 1) * hop)],
+            let r = ll.step(t: Double(startFrame + i + 1) * config.frameS, mic: mic[(i * hop)..<((i + 1) * hop)],
                             call: call[(i * hop)..<((i + 1) * hop)])
             out += r.events.filter { $0.cueType != nil }
         }

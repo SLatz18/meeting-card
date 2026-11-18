@@ -32,6 +32,53 @@ final class LocalLayerTests: XCTestCase {
 
     // MARK: cut-in
 
+    /// A gap in the other side's speech during the cut-in's opening overlap: one of
+    /// `LocalLayer.cutInMaxOthersGapS` (0.16 s) keeps the cut-in, one frame more (0.18 s) drops it, at
+    /// any point on the clock (absolute times change how frame-time differences round).
+    func testCutInSurvivesThemGapUpToTheTolerance() {
+        XCTAssertEqual(LocalLayer.cutInMaxOthersGapS, 0.16, accuracy: 1e-12)
+        for offset in [0.0, 10.0, 100.0] {
+            func cut(gap: Double) -> [LocalEvent.Kind] {
+                kinds(run(offset + 9, me: [(offset + 3.2, offset + 6.5)],
+                          others: [(offset + 1.0, offset + 3.5), (offset + 3.5 + gap, offset + 7.0)]))
+            }
+            XCTAssertEqual(cut(gap: 0.16), [.interrupt], "a 0.16 s gap at offset \(offset)")
+            XCTAssertEqual(cut(gap: 0.18), [], "a 0.18 s gap at offset \(offset)")
+        }
+    }
+
+    /// A cut-in fires on the frame its utterance reaches `cut_in_backchannel_max_ms` (1.2 s), wherever
+    /// on the clock it starts.
+    func testCutInFiresAtTheBackchannelLengthAnywhereOnTheClock() throws {
+        XCTAssertEqual(config.local.cutInBackchannelMaxMs, 1200)
+        let mic = Synthetic.track(8, [(3.0, 6.0)], f0: meF0)
+        let call = Synthetic.track(8, [(1.0, 5.5)], f0: othersF0)
+        var off: [Int] = []
+        for k in 0..<200 {
+            let start = k * 137
+            let evs = Synthetic.runLocal(config, mic: mic, call: call, startFrame: start)
+            let cut = try XCTUnwrap(evs.first { $0.kind == .interrupt }, "no interrupt from frame \(start)")
+            if abs(cut.t - cut.onset - 1.2) > 1e-9 { off.append(start) }
+        }
+        XCTAssertEqual(off, [], "the interrupt fired a frame off 1.20 s after onset from these start frames")
+    }
+
+    /// The user starting exactly `cut_in_others_pause_ms` (0.3 s) after the other side's last voiced
+    /// frame, once their VAD hangover has ended, still cuts in on them, wherever on the clock; a frame
+    /// later does not. They come back 60 ms after the user's onset, inside the overlap's gap tolerance.
+    func testCutInOpensAtTheMidPauseLimitAnywhereOnTheClock() throws {
+        XCTAssertEqual(config.local.cutInOthersPauseMs, 300)
+        let call = Synthetic.track(6, [(1.0, 3.5), (3.86, 6.0)], f0: othersF0)
+        func cutIn(_ mic: [Float], startFrame: Int) -> Bool {
+            Synthetic.runLocal(config, mic: mic, call: call, startFrame: startFrame).contains { $0.kind == .interrupt }
+        }
+        XCTAssertFalse(cutIn(Synthetic.track(6, [(3.82, 6.0)], f0: meF0), startFrame: 0),
+                       "control: 0.32 s into their pause is past the limit")
+        let mic = Synthetic.track(6, [(3.80, 6.0)], f0: meF0)
+        let missed = (0..<100).map { $0 * 137 }.filter { !cutIn(mic, startFrame: $0) }
+        XCTAssertEqual(missed, [], "no cut-in 0.30 s into their pause from these start frames")
+    }
+
     func testCutInNeedsTheOverlapAndThemContinuing() throws {
         let evs = run(8, me: [(3.0, 6.0)], others: [(1.0, 5.5)])
         XCTAssertEqual(kinds(evs), [.interrupt])
@@ -40,6 +87,31 @@ final class LocalLayerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(cut.t - cut.onset, 0.6 + 0.5 - 0.05, "600 ms overlap, then 500 ms of them continuing")
         XCTAssertEqual(cut.othersActive, true)
         XCTAssertFalse(cut.trailing)
+    }
+
+    /// The pause scenario's live miss (judge on, after Resume): You start 0.24 s into a 0.46 s pause of
+    /// theirs, so the opening overlap can't build and one long sentence never cuts in. Broken into two
+    /// sentences, the second onset lands while they talk and cuts in.
+    func testCutInStartingInTheirPauseNeedsASecondOnset() throws {
+        let them: [(Double, Double)] = [(1.0, 4.2), (4.66, 9.2)]
+        XCTAssertEqual(kinds(run(10, me: [(4.44, 7.4)], others: them)), [])
+        let cut = try XCTUnwrap(run(10, me: [(4.44, 5.4), (5.85, 8.0)], others: them).first { $0.kind == .interrupt })
+        XCTAssertEqual(cut.onset, 5.85, accuracy: 0.05)
+    }
+
+    /// cost-cap's judge-on take at 0390f5e (raw voicing from its shadow trace), which missed its
+    /// interrupt after the budget cap: Them's a2 breathes about once a second (quiet 9.64-9.90,
+    /// 11.46-11.90, 12.52-12.74, 13.66-14.00 and 14.64-14.86 s, and 0.14 s after 13.08 s). You start at
+    /// 11.60 s inside one of those breaths and again at 13.08 s, 0.58 s before the next: neither opening
+    /// overlap builds, so the local layer raises nothing, cap or no cap. With Them talking straight
+    /// through, the same You cuts in.
+    func testCostCapLiveTakeThemBreathsLeaveNoCutIn() {
+        let breaths: [(Double, Double)] = [(8.3, 9.64), (9.90, 11.46), (11.90, 12.52), (12.74, 13.30), (13.44, 13.66),
+                                           (14.00, 14.64), (14.86, 15.6)]
+        let you: [(Double, Double)] = [(11.60, 12.72), (13.08, 17.4)]
+        XCTAssertEqual(kinds(run(18, me: you, others: breaths)), [])
+        let straight = run(18, me: you, others: [(8.3, 15.6)]).filter { $0.kind == .interrupt }
+        XCTAssertEqual(straight.first?.onset ?? 0, 11.60, accuracy: 0.05, "the first onset cuts in")
     }
 
     func testBackchannelIsNotACutIn() {
@@ -108,6 +180,21 @@ final class LocalLayerTests: XCTestCase {
         XCTAssertEqual(evs.map(\.level), [.soft, .strong])
         XCTAssertEqual(evs[0].onset, 1.0 + 4, accuracy: 0.05)
         XCTAssertEqual(evs[1].onset, 1.0 + 6, accuracy: 0.05)
+    }
+
+    /// The soft monologue fires on the frame the run reaches `monologue_soft_s`, wherever on the clock.
+    func testMonologueFiresAtTheSoftLimitAnywhereOnTheClock() throws {
+        scaledMonologue()
+        let mic = Synthetic.track(6, [(1.0, 6.0)], f0: meF0)
+        let call = Synthetic.track(6, [], f0: othersF0)
+        var off: [Int] = []
+        for k in 0..<100 {
+            let start = k * 137
+            let evs = Synthetic.runLocal(config, mic: mic, call: call, startFrame: start)
+            let soft = try XCTUnwrap(evs.first { $0.kind == .monologue }, "no monologue from frame \(start)")
+            if abs(soft.t - soft.onset) > 1e-9 { off.append(start) }
+        }
+        XCTAssertEqual(off, [], "the soft monologue fired a frame off a 4.00 s run from these start frames")
     }
 
     func testShortPausesDoNotResetTheRunButLongOnesDo() {
