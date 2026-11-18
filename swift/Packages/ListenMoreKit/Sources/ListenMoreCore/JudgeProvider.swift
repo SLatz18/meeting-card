@@ -142,6 +142,16 @@ public enum JudgeReply: Sendable {
 public protocol JudgeProvider: Sendable {
     var kind: JudgeProviderKind { get }
     func judge(_ input: JudgeInput) async throws -> JudgeReply
+    /// The same call, counting each HTTP post it makes in `posts`. A provider that posts once per call needs
+    /// nothing more than the default, which counts one.
+    func judge(_ input: JudgeInput, posts: JudgePosts) async throws -> JudgeReply
+}
+
+extension JudgeProvider {
+    public func judge(_ input: JudgeInput, posts: JudgePosts) async throws -> JudgeReply {
+        posts.recordSent()
+        return try await judge(input)
+    }
 }
 
 /// The GPT judge as a provider: the prompt goes to the wrapped `CueJudge` untouched, and its result and
@@ -156,7 +166,11 @@ public struct GptJudgeProvider: JudgeProvider {
     public var kind: JudgeProviderKind { .gpt }
 
     public func judge(_ input: JudgeInput) async throws -> JudgeReply {
-        let (result, usage) = try await cueJudge.judge(prompt: input.prompt)
+        try await judge(input, posts: JudgePosts())
+    }
+
+    public func judge(_ input: JudgeInput, posts: JudgePosts) async throws -> JudgeReply {
+        let (result, usage) = try await cueJudge.judge(prompt: input.prompt, posts: posts)
         return .gpt(result, usage)
     }
 }
@@ -187,9 +201,10 @@ public enum JudgeProviders {
 
     /// The self-pivot judge, on the configured provider only: the GPT judge asks it on the OpenAI key. nil
     /// when that provider can't ask it (`judgesSelfPivot`): then self-pivot is off. Never another provider's.
-    public static func selfPivotJudge(config: ListenMoreConfig, openAIKey: APIKey, http: HTTPTransport) -> CueJudge? {
+    public static func selfPivotJudge(config: ListenMoreConfig, openAIKey: APIKey, http: HTTPTransport,
+                                      hosts: LearnedHosts = .shared) -> CueJudge? {
         switch config.judge.provider {
-        case .gpt: LiveJudge(config: config, key: openAIKey, http: http, spec: .selfPivot)
+        case .gpt: LiveJudge(config: config, key: openAIKey, http: http, hosts: hosts, spec: .selfPivot)
         case .typesafe: nil
         }
     }

@@ -83,12 +83,16 @@ public final class GptCore {
         public var pivotRateLimited: Int
         public var pivotLateTranscripts: Int
         /// The self-pivot judge (`SelfPivotLane`), counts only: whether it can judge (a judge for the
-        /// configured provider is wired and the cue isn't disabled), requests sent this run and this call,
-        /// candidates it didn't judge (a cap or a stop), verdicts under the floor or too late, candidates and
-        /// verdicts dropped by the host's switch, failed calls, and why it stopped for the call.
+        /// configured provider is wired and the cue isn't disabled), judge calls started this run and this call
+        /// (one per candidate judged) and the HTTP posts they made (a call posts once, or twice after a
+        /// `401 incorrect_hostname`; the per-call cap counts posts), candidates it didn't judge (a cap or a
+        /// stop), verdicts under the floor or too late, candidates and verdicts dropped by the host's switch,
+        /// failed calls, and why it stopped for the call.
         public var selfPivotAvailable: Bool
         public var selfPivotJudgeCalls: Int
         public var selfPivotCallJudgeCalls: Int
+        public var selfPivotPosts: Int
+        public var selfPivotCallPosts: Int
         public var selfPivotCapped: Int
         public var selfPivotBelowFloor: Int
         public var selfPivotStale: Int
@@ -102,6 +106,8 @@ public final class GptCore {
         public var selfPivotCallUsd: Double
         /// Answered judge calls that were the cue judge's (`judgeCalls` less the self-pivot judge's).
         public var otherJudgeCalls: Int
+        /// HTTP posts the cue judge made this run (a call posts once, or twice after a `401 incorrect_hostname`).
+        public var otherJudgePosts: Int
 
         /// Provider tokens per hour of coached call (the provider reports cost as tokens, with no
         /// dollar rate). nil before any audio.
@@ -149,6 +155,8 @@ public final class GptCore {
     public private(set) var judgeInputTokens = 0
     public private(set) var judgeOutputTokens = 0
     public private(set) var judgeModel: String?
+    /// HTTP posts the cue judge made (see `JudgePosts`).
+    public private(set) var cuePosts = 0
     public private(set) var callSeconds = 0.0
     private var failuresInARow = 0
     private let judges: Bool
@@ -193,12 +201,13 @@ public final class GptCore {
                         pivotCandidates: pivot.counters.candidates, pivotRateLimited: pivot.counters.rateLimited,
                         pivotLateTranscripts: pivot.counters.lateTranscripts,
                         selfPivotAvailable: selfPivot.available, selfPivotJudgeCalls: selfPivot.counters.calls,
-                        selfPivotCallJudgeCalls: selfPivot.ledger.judgeCalls, selfPivotCapped: selfPivot.counters.capped,
+                        selfPivotCallJudgeCalls: selfPivot.ledger.judgeCalls, selfPivotPosts: selfPivot.postsSent,
+                        selfPivotCallPosts: selfPivot.ledger.posts, selfPivotCapped: selfPivot.counters.capped,
                         selfPivotBelowFloor: selfPivot.counters.belowFloor, selfPivotStale: selfPivot.counters.stale,
                         selfPivotSwitchedOff: selfPivot.counters.switchedOff, selfPivotFailures: selfPivot.counters.failures,
                         selfPivotStop: selfPivot.ledger.stop, selfPivotJudgeUsd: cost.selfPivotJudgeUsd,
                         selfPivotInputTokens: cost.selfPivotInTok, selfPivotOutputTokens: cost.selfPivotOutTok,
-                        selfPivotCallUsd: selfPivot.ledger.usd, otherJudgeCalls: cost.judgeCalls - cost.selfPivotCalls)
+                        selfPivotCallUsd: selfPivot.ledger.usd, otherJudgeCalls: cost.judgeCalls - cost.selfPivotCalls, otherJudgePosts: cuePosts)
     }
 
     /// A self-pivot judge for the configured provider is there (`JudgeProviders.selfPivotJudge`).
@@ -211,6 +220,10 @@ public final class GptCore {
     public func stopJudging() {
         judgeActive = false
         pending = nil
+    }
+
+    public func recordCuePosts(_ n: Int) {
+        cuePosts += n
     }
 
     public func recordJudgeLatency(ms: Int) {
@@ -451,7 +464,14 @@ public final class GptCore {
     public func finishJudge(_ req: JudgeRequest, result: Result<(JudgeResult, JudgeUsage), Error>, now: TimeInterval) -> Offer? {
         switch result {
         case .failure(let error):
-            if GptError.isTransient(error) {
+            if case .untrustedHost? = error as? GptError {
+                judgeFailures += 1
+                lastJudgeFailure = .http(401)
+                if judgeActive {
+                    judgeStopReason = .http(401)
+                    stopJudging()
+                }
+            } else if GptError.isTransient(error) {
                 transientErrors += 1
                 if transientErrors >= config.gpt.judgeMaxTransientErrors { fail("judge: repeated transient errors") }
             } else {
@@ -514,6 +534,11 @@ public final class GptCore {
         selfPivot.gap(now: now)
     }
 
+    /// The posts of the self-pivot call `beginSelfPivot` just allowed.
+    func selfPivotPosts() -> JudgePosts {
+        selfPivot.newPosts()
+    }
+
     /// The prompt to send, or nil. The call's budget cap stops the whole layer, as for the cue judge.
     func beginSelfPivot(_ req: SelfPivotLane.Request, now: TimeInterval) -> String? {
         guard enabled else { return nil }
@@ -554,7 +579,7 @@ public final class GptLayer: @unchecked Sendable {
         case micMuted(Bool)
         case transcript(TranscriptEvent)
         case runJudge(GptCore.JudgeRequest)
-        case judgeDone(GptCore.JudgeRequest, Result<JudgeReply, Error>, latencyMs: Int)
+        case judgeDone(GptCore.JudgeRequest, Result<JudgeReply, Error>, latencyMs: Int, posts: Int)
         case runSelfPivot(SelfPivotLane.Request)
         case selfPivotDone(SelfPivotLane.Request, Result<(JudgeResult, JudgeUsage), Error>, latencyMs: Int)
         case snapshot(CheckedContinuation<Snapshot, Never>)
@@ -722,8 +747,9 @@ public final class GptLayer: @unchecked Sendable {
             core.fail(msg)
         case .runJudge(let req):
             runJudge(req)
-        case let .judgeDone(req, result, latencyMs):
+        case let .judgeDone(req, result, latencyMs, posts):
             core.recordJudgeLatency(ms: latencyMs)
+            core.recordCuePosts(posts)
             for o in core.finishJudge(req, reply: result, now: now()) { offer(o.label, o.t, o.refT, o.confidence) }
             onMeter?(core.cost.reading)
             if let next = core.judgeEnded() { schedule(next) }
@@ -826,11 +852,12 @@ public final class GptLayer: @unchecked Sendable {
             if let next = core.selfPivotEnded() { scheduleSelfPivot(next) }
             return
         }
+        let posts = core.selfPivotPosts()
         spawn { [scheduler, inbox] in
             let start = scheduler.monotonic()
             let result: Result<(JudgeResult, JudgeUsage), Error>
             do {
-                result = .success(try await judge.judge(prompt: prompt))
+                result = .success(try await judge.judge(prompt: prompt, posts: posts))
             } catch {
                 result = .failure(error)
             }
@@ -844,16 +871,17 @@ public final class GptLayer: @unchecked Sendable {
             if let next = core.judgeEnded() { schedule(next) }
             return
         }
+        let posts = JudgePosts()
         spawn { [scheduler, inbox] in
             let start = scheduler.monotonic()
             let result: Result<JudgeReply, Error>
             do {
-                result = .success(try await judge.judge(input))
+                result = .success(try await judge.judge(input, posts: posts))
             } catch {
                 result = .failure(error)
             }
             let ms = Int(((scheduler.monotonic() - start) * 1000).rounded())
-            inbox.yield(.judgeDone(req, result, latencyMs: ms))
+            inbox.yield(.judgeDone(req, result, latencyMs: ms, posts: posts.sent))
         }
     }
 }

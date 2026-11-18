@@ -9,13 +9,15 @@ public enum SelfPivotStop: String, Equatable, Sendable {
 }
 
 /// One call's self-pivot state, shared by every engine run of the call (Pause and the call app's mute
-/// restart the engine): the gate's candidates, judge calls sent, spend, the last candidate's turn end on
-/// the call's clock, and why judging stopped. Numbers and times only. `CoachSession` starts a new one
+/// restart the engine): the gate's candidates, judge calls started, HTTP posts sent (the per-call cap counts
+/// these), spend, the last candidate's turn end on the call's clock, and why judging stopped. Numbers and
+/// times only. `CoachSession` starts a new one
 /// with each call.
 public final class SelfPivotLedger: @unchecked Sendable {
     private let lock = NSLock()
     private var _candidates = 0
     private var _judgeCalls = 0
+    private var _posts = 0
     private var _usd = 0.0
     private var _lastCandidateTurnEnd: TimeInterval?
     private var _stop: SelfPivotStop?
@@ -23,8 +25,11 @@ public final class SelfPivotLedger: @unchecked Sendable {
     public init() {}
 
     public var candidates: Int { lock.withLock { _candidates } }
-    /// Self-pivot judge requests sent this call (the per-call cap counts these).
+    /// Self-pivot judge calls started this call: one per candidate judged.
     public var judgeCalls: Int { lock.withLock { _judgeCalls } }
+    /// HTTP posts the self-pivot judge sent this call: each call's first, and its one resend after a
+    /// `401 incorrect_hostname`. The per-call cap counts these.
+    public var posts: Int { lock.withLock { _posts } }
     public var usd: Double { lock.withLock { _usd } }
     /// On the call's clock (`CoachCallContext.offset` + run time).
     public var lastCandidateTurnEnd: TimeInterval? { lock.withLock { _lastCandidateTurnEnd } }
@@ -38,6 +43,7 @@ public final class SelfPivotLedger: @unchecked Sendable {
     }
 
     func recordCall() { lock.withLock { _judgeCalls += 1 } }
+    func recordPost() { lock.withLock { _posts += 1 } }
     func addUsd(_ usd: Double) { lock.withLock { _usd += usd } }
     /// The first reason sticks.
     func stop(_ reason: SelfPivotStop) { lock.withLock { if _stop == nil { _stop = reason } } }
@@ -62,11 +68,22 @@ public struct CoachCallContext: Sendable {
 /// - a self-pivot judge is wired (`wire()`): the configured provider can ask the question
 ///   (`JudgeProviders.selfPivotJudge`); nothing ever goes to another provider;
 /// - `self_pivot` isn't in `cues.disabled`, and `allowed()` (the host's switch, read at each step) says yes;
-/// - the call is under `gpt.self_pivot_max_judge_calls_per_call` calls and `gpt.self_pivot_budget_usd_per_call`
-///   of spend, and judging hasn't stopped for the call.
+/// - the call is under `gpt.self_pivot_max_judge_calls_per_call` HTTP posts and `gpt.self_pivot_budget_usd_per_call`
+///   of spend, and judging hasn't stopped for the call. A candidate gets one judge call: one post, and one
+///   more only after a `401 incorrect_hostname` (`JudgePosts`), which must pass the same checks and is
+///   counted like any post.
 /// A verdict becomes an offer when it says self_pivot at `gpt.self_pivot_min_confidence` or more, within
 /// `gpt.self_pivot_max_verdict_age_s` of the reply's end, while still allowed. The judge sees only the two
 /// turns, redacted (`JudgeRedactor`); the prompt lives in the request, in RAM, and is never logged.
+/// Posts one engine run's self-pivot judge sent; the resend gate runs on the judge's task, so it is locked.
+final class PostTally: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = 0
+
+    var value: Int { lock.withLock { _value } }
+    func add() { lock.withLock { _value += 1 } }
+}
+
 final class SelfPivotLane {
     struct Request: Equatable, Sendable {
         /// The user's last speech in the reply: the cue's onset.
@@ -78,7 +95,7 @@ final class SelfPivotLane {
 
     /// Per engine run, counts only.
     struct Counters: Equatable, Sendable {
-        /// Requests sent.
+        /// Judge calls started (one per candidate judged); the posts are `postsSent`.
         var calls = 0
         /// Candidates not judged because of the per-call cap, the spend cap or a stop.
         var capped = 0
@@ -98,6 +115,7 @@ final class SelfPivotLane {
     private let names: [String]
     private let allowed: @Sendable () -> Bool
     private let enabledByConfig: Bool
+    private let runPosts = PostTally()
     private(set) var wired = false
     private var inFlight = false
     private var pending: Request?
@@ -114,6 +132,9 @@ final class SelfPivotLane {
         self.allowed = allowed
         enabledByConfig = !config.cues.disabledTypes.contains(.selfPivot) && config.gpt.selfPivotMaxJudgeCallsPerCall > 0
     }
+
+    /// HTTP posts sent this engine run.
+    var postsSent: Int { runPosts.value }
 
     /// A self-pivot judge is there to ask.
     func wire() { wired = true }
@@ -133,7 +154,7 @@ final class SelfPivotLane {
             counters.switchedOff += 1
             return
         }
-        guard ledger.stop == nil, ledger.judgeCalls < gpt.selfPivotMaxJudgeCallsPerCall else {
+        guard ledger.stop == nil, ledger.posts < gpt.selfPivotMaxJudgeCallsPerCall else {
             counters.capped += 1
             return
         }
@@ -170,14 +191,30 @@ final class SelfPivotLane {
             return nil
         }
         if ledger.stop == nil && ledger.usd >= gpt.selfPivotBudgetUsdPerCall { ledger.stop(.budgetCap) }
-        guard ledger.stop == nil, ledger.judgeCalls < gpt.selfPivotMaxJudgeCallsPerCall else {
+        guard ledger.stop == nil, ledger.posts < gpt.selfPivotMaxJudgeCallsPerCall else {
             counters.capped += 1
             return nil
         }
         ledger.recordCall()
+        ledger.recordPost()
+        runPosts.add()
         counters.calls += 1
         lastJudgeAt = now
         return req.prompt
+    }
+
+    /// The posts of the call `begin` just allowed (its first post is already counted). The judge asks the
+    /// gate before its one resend: allowed only while the switch is on, judging hasn't stopped and the call is
+    /// under both caps, and then the resend is counted as a post.
+    func newPosts() -> JudgePosts {
+        let ledger = ledger, gpt = gpt, allowed = allowed, tally = runPosts
+        return JudgePosts {
+            guard allowed(), ledger.stop == nil, ledger.posts < gpt.selfPivotMaxJudgeCallsPerCall,
+                  ledger.usd < gpt.selfPivotBudgetUsdPerCall else { return false }
+            ledger.recordPost()
+            tally.add()
+            return true
+        }
     }
 
     /// A self-pivot judge call finished. Errors stop self-pivot judging only (for the rest of the call).

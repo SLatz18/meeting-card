@@ -38,13 +38,10 @@ public struct JudgeSpec: Equatable, Sendable {
     public var name: String
     public var instructions: String
     public var labels: [String]
-    /// Whether `LiveJudge` may send the same question again on another host after a rejection (the regional
-    /// host `401 incorrect_hostname` names). The self-pivot judge's one request per candidate is never resent.
-    public var resendsOnOtherHost = true
 
     public static let cue = JudgeSpec(name: "listen_more_cue", instructions: GptJudgeSpec.instructions, labels: GptJudgeSpec.labels)
     public static let selfPivot = JudgeSpec(name: SelfPivotJudgeSpec.name, instructions: SelfPivotJudgeSpec.instructions,
-                                            labels: SelfPivotJudgeSpec.labels, resendsOnOtherHost: false)
+                                            labels: SelfPivotJudgeSpec.labels)
 
     public var schema: [String: Any] {
         [
@@ -122,6 +119,9 @@ public enum GptError: Error, Equatable, CustomStringConvertible {
     /// The configured Responses host answered 401 incorrect_hostname and the regional host it named
     /// failed too. Hosts and the inner error class only.
     case hostRejected(first: String, regional: String, inner: String)
+    /// A 401 incorrect_hostname named a host that isn't `api.openai.com` or `*.api.openai.com` over https.
+    /// Nothing is sent to it. A judge error: it stops that judge's cue only.
+    case untrustedHost
 
     public var description: String {
         switch self {
@@ -129,6 +129,7 @@ public enum GptError: Error, Equatable, CustomStringConvertible {
         case .badResponse: return "bad response"
         case .notConnected: return "not connected"
         case .budgetExhausted: return "budget cap reached"
+        case .untrustedHost: return "responses host redirect to a host that is not an OpenAI API host; set gpt.responses_url"
         case let .hostRejected(first, regional, inner):
             return "responses host \(first) rejected the key (incorrect_hostname) and the regional host \(regional) failed too (\(inner)); set gpt.responses_url"
         }
