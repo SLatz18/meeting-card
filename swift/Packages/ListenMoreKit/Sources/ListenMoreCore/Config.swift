@@ -135,6 +135,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var pivotFirstPerson: [String]
         public var pivotOtherPerson: [String]
         public var pivotFirstPersonMinWords: Int
+        /// With a pivot opener, this many first-person words are enough.
+        public var pivotOpenerMinFirstPerson: Int
         public var pivotFirstPersonShare: Double
         public var pivotSympathy: [String]
         public var pivotFirstPersonPlural: [String]
@@ -334,7 +336,7 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         guard gpt.store == false else { throw ConfigError.invalid("gpt.store must be false") }
         try judge.typesafe.validate()
         guard text.pivotShareMinWords > 0, text.pivotReplyMinWords > 0, text.pivotReplyMaxStartS >= 0,
-              text.pivotFirstPersonMinWords > 0, (0...1).contains(text.pivotFirstPersonShare),
+              text.pivotFirstPersonMinWords > 0, text.pivotOpenerMinFirstPerson > 0, (0...1).contains(text.pivotFirstPersonShare),
               text.pivotTurnEndGapS > 0, text.pivotTranscriptWaitS >= 0, text.pivotRearmS >= 0,
               text.pivotMaxPerCall >= 0 else { throw ConfigError.invalid("bad text.pivot limits") }
         guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,

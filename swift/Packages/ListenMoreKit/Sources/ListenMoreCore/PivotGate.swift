@@ -15,8 +15,8 @@ import Foundation
 /// 2. The user starts within `pivot_reply_max_start_s` of their last speech and says at least
 ///    `pivot_reply_min_words` about themselves: first-person words make up `pivot_first_person_share`
 ///    of the person words (`pivot_other_person` counts you, he, she, they and the like against it),
-///    and either a sentence opens with a pivot opener or there are at least
-///    `pivot_first_person_min_words` of them. A reply that opens with sympathy (`pivot_sympathy`:
+///    and either a sentence opens with a pivot opener and there are `pivot_opener_min_first_person`
+///    of them, or there are at least `pivot_first_person_min_words`. A reply that opens with sympathy (`pivot_sympathy`:
 ///    "sorry to hear", "i hope he", "congratulations", "that's rough") is judged on what follows the
 ///    sympathy, where "we", "our" and "us" count as the user too (`pivot_first_person_plural`): "i'm
 ///    so sorry. my mom was in the hospital last year and i was there every night…" is a pivot, and
@@ -308,11 +308,12 @@ final class PivotGate {
     }
 
     /// First-person words are `pivot_first_person_share` of the person words, and either the text
-    /// opens with a pivot opener or there are `pivot_first_person_min_words` of them.
+    /// opens with a pivot opener and has `pivot_opener_min_first_person` of them ("me too" alone
+    /// isn't enough), or there are `pivot_first_person_min_words` of them.
     private func aboutUser(_ words: [String], firstPerson: Set<String>, opens: Bool) -> Bool {
         let first = words.filter(firstPerson.contains).count, other = words.filter(otherPerson.contains).count
         let aboutMe = first > 0 && Double(first) >= x.pivotFirstPersonShare * Double(first + other)
-        if aboutMe && opens { return true }
+        if aboutMe && opens && first >= x.pivotOpenerMinFirstPerson { return true }
         return aboutMe && first >= x.pivotFirstPersonMinWords
     }
 

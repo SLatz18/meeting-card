@@ -10,7 +10,7 @@ enum PivotLines {
     static let moved = "We just moved into a new apartment and I am still unpacking boxes every evening."
     static let relateThenAskMark = "Same thing happened to me last year, it took me weeks. The boxes must be everywhere by now?"
     static let relateThenAskNoMark = "Same thing happened to me last year, it took me weeks. How did the move go in the end"
-    static let openerOneFirstPerson = "Same thing happened to me last spring, it took weeks and weeks before the whole place finally felt settled again."
+    static let openerTwoFirstPerson = "Same thing happened to me last spring, it took me weeks before the whole place finally felt settled again."
     static let openerMidSentence = "The long ride last spring left all of us sore, the same thing happened to me on the hills and the wind."
     static let worried = "My dad has been in the hospital all week and I have been so worried about him."
     static let engaged = "We just got engaged last weekend and I am still so excited about it."
@@ -179,9 +179,26 @@ final class PivotGateTests: XCTestCase {
         XCTAssertEqual(run(pivot(reply: PivotLines.mostlyMe), until: 30).counters.candidates, 1)
     }
 
-    /// A sentence opening with a pivot opener needs only the first-person share, not the word count.
-    func testAnOpenerAtASentenceStartNeedsOneFirstPersonWord() {
-        XCTAssertEqual(run(pivot(reply: PivotLines.openerOneFirstPerson), until: 30).counters.candidates, 1)
+    /// A sentence opening with a pivot opener needs two first-person words, not three.
+    func testAnOpenerAtASentenceStartNeedsTwoFirstPersonWords() {
+        XCTAssertEqual(run(pivot(reply: PivotLines.openerTwoFirstPerson), until: 30).counters.candidates, 1)
+    }
+
+    /// "Me too" alone (one first-person word) doesn't make a reply about the user.
+    func testMeTooAndTalkAboutTheirDayIsNone() {
+        assertNoCandidate(pivot(reply: "Oh nice, me too, that sounds like such a great day, the weather on Sunday was perfect for a long race."))
+    }
+
+    /// Three first-person words against one "you": not enough about the user.
+    func testAnOpenerInAReplyAboutTheirNewsIsNone() {
+        assertNoCandidate(pivot(reply: "When my sister told me the news I was so thrilled for you, it is such wonderful news for the whole family.",
+                                share: PivotLines.engaged))
+    }
+
+    /// "I hope to…" is the user's own plan, not sympathy.
+    func testIHopeAboutTheUserIsNotSympathy() {
+        XCTAssertEqual(run(pivot(reply: "I hope to run one someday, I did a ten k last spring and I was wiped out for the whole weekend after."),
+                           until: 30).counters.candidates, 1)
     }
 
     // MARK: openers
