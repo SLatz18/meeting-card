@@ -375,6 +375,55 @@ final class PivotGateTests: XCTestCase {
         XCTAssertEqual(heldAt[1260], 0)
     }
 
+    // MARK: group calls (every voice on the call stream is "them")
+
+    /// One of them shares, another adds a line; the user answers 5.5 s after the share but 1.5 s after
+    /// the second voice: the window counts from their last speech, and both lines are their turn.
+    func testAnotherVoiceAfterTheShareJoinsTheirTurn() throws {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.them("Wow, congratulations, that is huge news!", 8.0, 9.5)
+        s.you(PivotLines.pivot, 11.0, 17.0)
+        let c = try XCTUnwrap(run(s, until: 30).candidates.first)
+        XCTAssertEqual(c.themEnd, 9.5, accuracy: 1e-9)
+    }
+
+    func testAnotherVoiceInvitingTheUserIsNone() {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.them("What about you, have you ever run one?", 6.0, 7.5)
+        s.you(PivotLines.pivot, 8.0, 14.0)
+        assertNoCandidate(s)
+    }
+
+    /// Another voice asks the one who shared a question; the user answering it about themselves
+    /// isn't counted.
+    func testAnotherVoiceAskingTheSharerIsNone() {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.them("How long did the whole race take you", 6.0, 7.5)
+        s.you(PivotLines.pivot, 8.0, 14.0)
+        assertNoCandidate(s)
+    }
+
+    /// A different voice starting after the user's reply ends the turn at its onset.
+    func testAnotherVoiceStartingEndsTheUsersTurn() throws {
+        var s = pivot()
+        s.them("Okay, shall we move on to the next item on the agenda then.", 13.0, 16.0)
+        let c = try XCTUnwrap(run(s, until: 30).candidates.first)
+        XCTAssertEqual(c.turnEnd, 13.0, accuracy: 1e-9)
+    }
+
+    /// A different voice talking over the user's reply (after a short pause in it) drops the reply.
+    func testAnotherVoiceOverTheUsersReplyIsNone() {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.you(PivotLines.pivotStart, 6.0, 11.0)
+        s.you("And the hills on the second day were even worse than the first.", 12.0, 15.0)
+        s.them("Sorry, I think we lost the screen share for a second there.", 13.5, 16.0)
+        assertNoCandidate(s)
+    }
+
     // MARK: one condition at a time
 
     /// About the user (no other person), but only two first-person words and no opener.

@@ -26,6 +26,12 @@ import Foundation
 /// 5. Nothing within `pivot_rearm_s` of the last candidate's turn end, at most `pivot_max_per_call`,
 ///    nothing while muted. Mute and Unmute drop the turn in progress.
 ///
+/// Group calls: "they" are every voice on the call stream (the engine has no diarization), so one of
+/// them can share and another speak next. Their turn is all of the stream's speech since the user's
+/// last reply, from any voice; the reply window counts from its last speech, whoever spoke; any
+/// voice's invitation in that turn, or question at its end (one of them asking another), holds the
+/// candidate back; and any voice starting to talk while the user is quiet ends the user's turn.
+///
 /// The counters, the re-arm and the cap are per engine run, not per call: Pause and the call app's
 /// mute stop the engine, and the next start builds a new `GptCore` with a new gate. A count for the
 /// whole call is the sum over its engine runs.
