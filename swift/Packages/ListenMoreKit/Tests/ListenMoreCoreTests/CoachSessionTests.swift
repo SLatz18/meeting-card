@@ -243,6 +243,32 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertTrue(renderer.rendered.isEmpty)
     }
 
+    /// Flow lines every ten seconds, then silence of the call's zeros is reported to the log and the host.
+    func testCoachLogShowsAudioFlowAndSilentCall() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        let ready = await eventually { self.call.handler != nil && self.mic.handler != nil }
+        XCTAssertTrue(ready)
+        for _ in 0..<20 {
+            clock.advance(1)
+            call.handler?([Float](repeating: 0, count: 480))
+            mic.handler?([Float](repeating: 0.1, count: 480))
+            s.tick()
+        }
+        let lines = sink.lines
+        XCTAssertTrue(lines.contains { $0.hasPrefix("audio.flow source=call seconds=10 buffers=") && $0.hasSuffix("voiced=0 peakDb=-120") }, "\(lines)")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("audio.flow source=mic seconds=10") && $0.hasSuffix("peakDb=-20") }, "\(lines)")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("callAudio.silent source=call") && $0.contains("kind=digitalSilence") }, "\(lines)")
+        XCTAssertFalse(lines.contains { $0.hasPrefix("callAudio.silent source=mic") })
+        XCTAssertEqual(delegate.problems.filter { $0 == .callAudioSilent(.digitalSilence) }.count, 1, "the host hears once")
+        s.stopForThisCall()
+        XCTAssertTrue(sink.lines.contains { $0.hasPrefix("audio.flow source=mic") && $0.contains("seconds=") }, "the last window is logged when capture stops")
+    }
+
     /// A call that never starts says why in the log, once per change and once per ten seconds otherwise; the
     /// line when it does start says so, with the timer.
     func testCoachLogExplainsWhyNoSessionStarts() async {
@@ -272,6 +298,21 @@ final class CoachSessionTests: XCTestCase {
         clock.advance(0.5); s.tick()
         XCTAssertTrue(detect().last?.contains("reason=inSession") ?? false)
         XCTAssertFalse(sink.lines.contains { $0.contains("sk-") })
+    }
+
+    func testCoachLogRecordsTheFallback() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        _ = await eventually { self.call.starts.count == 1 }
+        for _ in 0..<5 {
+            clock.advance(1)
+            s.tick()
+        }
+        XCTAssertTrue(sink.lines.contains("callAudio.fallbackEngaged stage=helperApps"), "\(sink.lines)")
     }
 
     func testHelperFallbackEscalates() async {

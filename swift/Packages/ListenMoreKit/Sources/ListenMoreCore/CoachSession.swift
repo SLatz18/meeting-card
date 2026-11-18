@@ -73,6 +73,8 @@ public final class CoachSession {
         case callCaptureFailed(stage: CaptureStage)
         case keyUnreadable
         case fallbackEngaged(stage: CaptureStage)
+        /// The call's audio is silent (no buffers, or buffers of zeros): see `AudioFlowMeter`.
+        case callAudioSilent(SilenceKind)
         /// The transcriber refused `input_audio_buffer.clear` after Mute; nothing stopped.
         case transcriberClearRejected
     }
@@ -113,6 +115,8 @@ public final class CoachSession {
     private var detectionThrottle = DetectionLogThrottle()
     /// What the host knows about the permissions a call needs; shown beside each detection check.
     public var permissionSummary: () -> PermissionSummary = { .unknown }
+    private let callFlow = AudioFlowMeter(source: .call, watchesSilence: true)
+    private let micFlow = AudioFlowMeter(source: .mic, watchesSilence: false)
     private var shownAt: [CueType: TimeInterval] = [:]
     private var timer: Timer?
     private var callTask: Task<Void, Never>?
@@ -302,6 +306,7 @@ public final class CoachSession {
         let micChanged = syncMic()
         if actions.isEmpty && (captureChanged || micChanged || indicator != before) { changed() }
         checkCallFallback()
+        logAudioFlow()
     }
 
     /// One detection check, logged when what was seen or decided changes, else once per ten seconds.
@@ -314,6 +319,18 @@ public final class CoachSession {
                                                   startTimers: trigger.startTimers(now: now), started: started,
                                                   permission: permissionSummary())
         if detectionThrottle.shouldLog(check, now: now) { CoachLog.record(.detectCheck(check)) }
+    }
+
+    /// Flow lines every ten seconds while capturing, and a note when the call's audio goes silent.
+    private func logAudioFlow() {
+        guard isCapturing else { return }
+        let now = wallClock()
+        for event in callFlow.tick(now: now) + micFlow.tick(now: now) {
+            CoachLog.record(event)
+            if case .callAudioSilent(_, _, let kind, _) = event {
+                delegate?.coachSession(self, didReport: .callAudioSilent(kind))
+            }
+        }
     }
 
     private func apply(_ actions: [TriggerAction]) {
@@ -379,6 +396,8 @@ public final class CoachSession {
         if isNewSession {
             fallback.reset()
             callLevel.reset()
+            callFlow.start(now: wallClock())
+            micFlow.start(now: wallClock())
             let key: APIKey?
             var availability = KeyAvailability.absent
             if (keys as? KeyGateStateProviding)?.gateState == .rejected {
@@ -406,6 +425,7 @@ public final class CoachSession {
             if micDeviceOff { micGate.pause() }
         }
         let level = callLevel
+        let flow = callFlow
         let call = call
         let rate = config.audio.sampleRate
         let gen = gateGeneration
@@ -419,6 +439,7 @@ public final class CoachSession {
                 try await call.start(bundleIds: bundleIds, stage: stage, sampleRate: rate) { samples in
                     guard gate.admits(gen) else { return }
                     level.record(samples)
+                    flow.record(samples)
                     engine.ingest(.call, samples: samples, time: 0)
                 }
                 if !gate.admits(gen) { await call.stop() }
@@ -439,9 +460,13 @@ public final class CoachSession {
         let gen = gateGeneration
         let micGate = micGate
         let micGen = micGate.openNew()
+        let flow = micFlow
         do {
             try mic.start(sampleRate: config.audio.sampleRate) { samples in
-                if gate.admits(gen) && micGate.admits(micGen) { engine.ingest(.mic, samples: samples, time: 0) }
+                if gate.admits(gen) && micGate.admits(micGen) {
+                    flow.record(samples)
+                    engine.ingest(.mic, samples: samples, time: 0)
+                }
             }
         } catch {
             micGate.close()
@@ -471,6 +496,8 @@ public final class CoachSession {
         // Closed first and synchronously: not one buffer reaches the engine (or OpenAI) after this,
         // even while call capture is still stopping asynchronously.
         gate.close()
+        let now = wallClock()
+        for event in callFlow.finish(now: now) + micFlow.finish(now: now) { CoachLog.record(event) }
         capturingBundleIds = []
         captureStage = .parentApps
         let previous = callTask
@@ -495,6 +522,7 @@ public final class CoachSession {
         let helpersAudible = signal.helpersAudible(bundleIds: capturingBundleIds)
         let now = wallClock()
         if let next = fallback.observe(callDbfs: callLevel.recentDbfs(now: now), helpersAudible: helpersAudible, now: now) {
+            CoachLog.record(.fallbackEngaged(stage: next))
             delegate?.coachSession(self, didReport: .fallbackEngaged(stage: next))
             startCapture(bundleIds: capturingBundleIds, stage: next)
         }

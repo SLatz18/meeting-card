@@ -152,6 +152,14 @@ public enum CoachLogEvent: Equatable, Sendable {
     /// One call-detection check: which app holds the mic, whether it plays audio, and why a session did
     /// or did not start.
     case detectCheck(DetectionCheck)
+    /// What a source delivered over `seconds`: buffers, buffers with sound, and the peak in dBFS (-120 is silence).
+    case audioFlow(source: AudioSource, seconds: Int, buffers: Int, voiced: Int, peakDb: Int)
+    /// A source with no sound for `seconds`: no buffers at all, or buffers of zeros (which is what a refused
+    /// System Audio Recording permission delivers).
+    case callAudioSilent(source: AudioSource, seconds: Int, kind: SilenceKind, buffers: Int)
+    case callAudioSound(source: AudioSource)
+    /// Per-app capture heard nothing while the app's helper processes were audible, so capture moved to `stage`.
+    case fallbackEngaged(stage: CaptureStage)
     case permission(PermissionKind, PermissionState)
     case transcriberConnected(speaker: Speaker, model: LogToken)
     case transcriberDisconnected(speaker: Speaker)
@@ -202,6 +210,14 @@ public enum CoachLogEvent: Equatable, Sendable {
             return line("detect.check", ("micApp", .word(c.micApp?.value ?? "none")), ("callAudio", .flag(c.callAudio)),
                         ("result", .word(c.result.rawValue)), ("reason", .word(c.reason.rawValue)), ("timerS", .number(c.timerSeconds)),
                         ("perm", .word(c.permission.rawValue)))
+        case .audioFlow(let source, let seconds, let buffers, let voiced, let peak):
+            return line("audio.flow", ("source", .word(source.rawValue)), ("seconds", .number(seconds)), ("buffers", .number(buffers)),
+                        ("voiced", .number(voiced)), ("peakDb", .number(peak)))
+        case .callAudioSilent(let source, let seconds, let kind, let buffers):
+            return line("callAudio.silent", ("source", .word(source.rawValue)), ("seconds", .number(seconds)), ("kind", .word(kind.rawValue)),
+                        ("buffers", .number(buffers)))
+        case .callAudioSound(let source): return line("callAudio.sound", ("source", .word(source.rawValue)))
+        case .fallbackEngaged(let stage): return line("callAudio.fallbackEngaged", ("stage", .word(stage.name)))
         case .permission(let kind, let state): return line("permission", ("kind", .word(kind.rawValue)), ("state", .word(state.rawValue)))
         case .transcriberConnected(let speaker, let model):
             return line("transcriber.connected", ("speaker", .word(Self.name(speaker))), ("model", .token(model)))

@@ -99,7 +99,7 @@ final class PrivacyGuardTests: XCTestCase {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
                 calls += 1
                 let arg = (text as NSString).substring(with: m.range(at: 1))
-                XCTAssertTrue(arg.hasPrefix("."), "\(name): CoachLog.record(\(arg)")
+                XCTAssertTrue(arg.hasPrefix(".") || arg.hasPrefix("event"), "\(name): CoachLog.record(\(arg)")
                 XCTAssertFalse(arg.contains("\"") && !arg.contains("LogToken("), "\(name): a string literal outside a LogToken")
             }
         }

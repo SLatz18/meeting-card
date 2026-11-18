@@ -43,6 +43,9 @@ final class CoachLogTests: XCTestCase {
             .callAudioFailed(stage: .helperApps, domain: LogToken("com.apple.ScreenCaptureKit.SCStreamErrorDomain"), code: -3801),
             .callAudioFailed(stage: .processTap, domain: LogToken("OSStatus"), code: -50),
             .callAudioStopped(code: -3805),
+            .audioFlow(source: .call, seconds: 10, buffers: 480, voiced: 120, peakDb: -31), .audioFlow(source: .mic, seconds: 10, buffers: 0, voiced: 0, peakDb: -120),
+            .callAudioSilent(source: .call, seconds: 15, kind: .digitalSilence, buffers: 750), .callAudioSilent(source: .call, seconds: 15, kind: .noBuffers, buffers: 0),
+            .callAudioSound(source: .call), .fallbackEngaged(stage: .helperApps),
             .detectCheck(DetectionCheck(micApp: app, callAudio: true, result: .notMet, reason: .startTimer, timerSeconds: 1, permission: .granted)),
             .detectCheck(DetectionCheck(micApp: nil, callAudio: false, result: .notMet, reason: .inputDeviceIdle)),
             .detectCheck(DetectionCheck(micApp: hostile, callAudio: false, result: .notMet, reason: .appNotAllowed, permission: .notGranted)),
@@ -83,6 +86,11 @@ final class CoachLogTests: XCTestCase {
         XCTAssertEqual(CoachLogEvent.transcriberError(speaker: .others, model: LogToken("gpt-live-transcribe"), httpStatus: 401,
                                                       code: LogToken("invalid_api_key")).rendered,
                        "transcriber.error speaker=others model=gpt-live-transcribe http=401 code=invalid_api_key")
+        XCTAssertEqual(CoachLogEvent.audioFlow(source: .call, seconds: 10, buffers: 480, voiced: 120, peakDb: -31).rendered,
+                       "audio.flow source=call seconds=10 buffers=480 voiced=120 peakDb=-31")
+        XCTAssertEqual(CoachLogEvent.callAudioSilent(source: .call, seconds: 15, kind: .digitalSilence, buffers: 750).rendered,
+                       "callAudio.silent source=call seconds=15 kind=digitalSilence buffers=750")
+        XCTAssertEqual(CoachLogEvent.fallbackEngaged(stage: .processTap).rendered, "callAudio.fallbackEngaged stage=processTap")
         XCTAssertEqual(CoachLogEvent.captionSegments(me: 1, others: 0).rendered, "captions.segments me=1 others=0")
         XCTAssertEqual(CoachLogEvent.sessionStarted(reason: .audio, bundleId: LogToken("us.zoom.xos")).rendered,
                        "session.started reason=audio app=us.zoom.xos")
