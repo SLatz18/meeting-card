@@ -149,6 +149,9 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var pivotFirstPersonShare: Double
         public var pivotSympathy: [String]
         public var pivotFirstPersonPlural: [String]
+        /// After sympathy, these make "we" the group, not the user's household ("we should all go out to
+        /// celebrate, I will book us a table"): the plurals don't count as the user.
+        public var pivotPluralTeam: [String]
         public var pivotHelpOffers: [String]
         /// A sentence or clause starting with one of these (after any lead-in word) asks a question.
         public var pivotQuestionOpeners: [String]

@@ -23,7 +23,8 @@ import Foundation
 ///    of them, or there are at least `pivot_first_person_min_words`. A reply that opens with sympathy (`pivot_sympathy`:
 ///    "sorry to hear", "i hope he", "congratulations", "that's rough") is judged on what follows the
 ///    sympathy, where "we", "our" and "us" count as the user too (`pivot_first_person_plural`) when
-///    that text also has "i", "my" or the like, or a share marker ("we just"): "i'm
+///    that text also has "i", "my" or the like, or a share marker ("we just"), and no group plan
+///    (`pivot_plural_team`: "we should all", "celebrate", "book us"): "i'm
 ///    so sorry. my mom was in the hospital last year and i was there every night…" is a pivot, and
 ///    sympathy with only talk about them is commiseration. A reply offering help or well-wishes
 ///    (`pivot_help_offers`: "let me know", "if you need", "no stress", "in my thoughts", "fingers
@@ -314,7 +315,8 @@ final class PivotGate {
         let opening = sympathyOpening(lines)
         if opening.led {
             let rest = opening.rest.flatMap(TextRules.tokens)
-            let ownStory = rest.contains(where: firstPerson.contains) || opening.rest.contains(where: { has($0, x.pivotShareMarkers) })
+            let ownStory = (rest.contains(where: firstPerson.contains) || opening.rest.contains(where: { has($0, x.pivotShareMarkers) }))
+                && !opening.rest.contains(where: { has($0, x.pivotPluralTeam) })
             return aboutUser(rest, firstPerson: ownStory ? firstPersonAfterSympathy : firstPerson,
                              reactions: reactions(opening.rest), opens: opening.starts.contains(where: opensWithOpener))
         }

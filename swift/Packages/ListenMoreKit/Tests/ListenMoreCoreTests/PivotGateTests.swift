@@ -294,6 +294,19 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(pivot(reply: "My legs would never manage that and I would be so tired after, I love that, so exciting, that sounds like my kind of day."))
     }
 
+    /// The group-plan words only keep "we" from counting as the user; on their own they don't make a
+    /// reply about them.
+    func testGroupPlanWordsInTheUsersOwnStoryStillCount() {
+        for (share, reply) in [
+            ("We just got back from a family trip to the coast and I was so relaxed the whole week.",
+             "I celebrate my birthday next week, we're doing a big trip to the coast and I have been planning it for months."),
+            ("I just got back from a long hike on the coast trail and I was so exhausted by the end.",
+             "We should all go sometime, I did that trail last year and I was exhausted for days, my legs were sore all week."),
+        ] {
+            XCTAssertEqual(run(pivot(reply: reply, share: share), until: 30).counters.candidates, 1, reply)
+        }
+    }
+
     /// Planning a celebration for them is about them, though "I will book us a table" unlocks "we".
     func testPlanningACelebrationForThemIsNone() {
         let house = "We finally bought our first house last week and I am so excited to move in."
