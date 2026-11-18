@@ -286,13 +286,29 @@ final class CueDisplayTests: XCTestCase {
         }
     }
 
-    /// The self-pivot cue stays off in MeetingCard, and nothing in the code raises it yet.
+    /// The self-pivot cue stays off in MeetingCard, and nothing in the code raises it yet. The files that may name
+    /// it are the ones that define, colour, rank, draw or disable it; every other source file under `sourceDirs`
+    /// is scanned (the judges, the engines, the rules, the session, the pipeline and the views included), so a new
+    /// file that raises it fails here without anyone adding it to a list. PivotGate.swift (#39) is picked up
+    /// the same way once this is restacked onto it: that PR's allowance for it belongs in `mayNameSelfPivot`.
+    static let mayNameSelfPivot: Set<String> = [
+        "App/CoachController.swift",
+        "Core/CoachCard.swift", "Core/CueDisplay.swift", "Core/Theme.swift",
+        "Packages/ListenMoreKit/Sources/ListenMoreCore/Config.swift",
+        "Packages/ListenMoreKit/Sources/ListenMoreCore/CuePolicy.swift",
+        "Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift",
+    ]
+
     func testSelfPivotIsDisabledAndNeverRaised() throws {
         let controller = try read("App/CoachController.swift")
         XCTAssertTrue(controller.contains("CueType.selfPivot.rawValue"))
-        let raisers = ["CueDisplayViews.swift", "CueTimelines.swift"].map { "Core/\($0)" } +
-            ["LocalLayer", "TextRules", "GptLayer", "CoachPipeline", "EngineBridge", "CoachSession"].map { "Packages/ListenMoreKit/Sources/ListenMoreCore/\($0).swift" }
-        for file in raisers {
+        let files = try sourceFiles()
+        for file in Self.mayNameSelfPivot { XCTAssertTrue(files.contains(file), "\(file) is a source file") }
+        for file in ["LocalLayer", "TextRules", "GptLayer", "CoachPipeline", "EngineBridge", "CoachSession", "TypeSafeJudge", "JudgeProvider",
+                     "LocalCoachEngine", "SystemOne"].map({ "Packages/ListenMoreKit/Sources/ListenMoreCore/\($0).swift" }) {
+            XCTAssertTrue(files.contains(file), "the scan covers \(file)")
+        }
+        for file in files where !Self.mayNameSelfPivot.contains(file) {
             let code = try read(file)
             XCTAssertFalse(code.contains(".selfPivot") || code.contains("self_pivot"), "\(file) raises or shows the self-pivot cue")
         }
