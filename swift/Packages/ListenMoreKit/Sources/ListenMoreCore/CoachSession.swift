@@ -116,6 +116,10 @@ public final class CoachSession {
     /// cue policy compares engine times shifted by `engineOffset`: cooldowns carry across a restart.
     private var sessionCaptureStart: TimeInterval?
     private var engineOffset: TimeInterval = 0
+    /// Which engine start is running (counted here and on the engine queue in the same order): a
+    /// suggestion the previous engine raised but that reaches the main thread after a restart carries
+    /// the old number and is dropped.
+    private var engineGeneration = 0
     private var timer: Timer?
     private var callTask: Task<Void, Never>?
     private var bridge: EngineDelegateBridge?
@@ -140,6 +144,7 @@ public final class CoachSession {
         cuePolicy = CuePolicy(config: config.cues)
         let bridge = EngineDelegateBridge()
         self.bridge = bridge
+        bridge.queue = self.engine
         self.engine.delegate = bridge
         bridge.session = self
     }
@@ -370,6 +375,7 @@ public final class CoachSession {
             let start = sessionCaptureStart ?? now
             sessionCaptureStart = start
             engineOffset = now - start
+            engineGeneration += 1
             engine.start(config: config, apiKey: key)
             // Muted before it starts (the user's Mute or a pending call end), so the device never
             // opens even briefly; the gate stays closed until `setMicDevice(on: true)` reopens it.
@@ -472,13 +478,13 @@ public final class CoachSession {
         }
     }
 
-    fileprivate func show(_ s: CueSuggestion) {
+    fileprivate func show(_ s: CueSuggestion, generation: Int) {
         let offset = engineOffset
-        guard isCapturing,
+        guard isCapturing, generation == engineGeneration,
               var cue = cuePolicy.offer(s.type, t: s.t + offset, onset: s.onset + offset, source: s.source,
                                         confidence: s.confidence, level: s.level) else { return }
-        cue.t -= offset
-        cue.onset -= offset
+        cue.t = s.t
+        cue.onset = s.onset
         shownAt[cue.type] = wallClock()
         cuesShown += 1
         renderer.render(cue)
@@ -526,10 +532,18 @@ public final class CoachSession {
         engine.drain()
     }
 
-    /// Test hook: deliver a suggestion as if the engine produced it.
+    /// Test hook: deliver a suggestion as if the running engine produced it.
     func deliverForTesting(_ s: CueSuggestion) {
-        show(s)
+        show(s, generation: engineGeneration)
     }
+
+    /// Test hook: deliver a suggestion as if the engine of start number `generation` produced it.
+    func deliverForTesting(_ s: CueSuggestion, generation: Int) {
+        show(s, generation: generation)
+    }
+
+    /// Test hook: the running engine's start number.
+    var engineGenerationForTesting: Int { engineGeneration }
 }
 
 /// On/off switch between capture callbacks (any thread) and the engine. Each session opens a new
@@ -577,10 +591,13 @@ final class AudioGate: @unchecked Sendable {
 /// Forwards engine callbacks (from the engine queue) to the session on the main thread.
 final class EngineDelegateBridge: CoachEngineDelegate, @unchecked Sendable {
     @MainActor weak var session: CoachSession?
+    weak var queue: EngineQueue?
 
+    /// Called on the engine queue, so `queue.generation` is the engine that raised the suggestion.
     func engine(_ engine: CoachEngine, didSuggest cue: CueSuggestion) {
+        let generation = queue?.generation ?? 0
         DispatchQueue.main.async {
-            MainActor.assumeIsolated { self.session?.show(cue) }
+            MainActor.assumeIsolated { self.session?.show(cue, generation: generation) }
         }
     }
 
@@ -619,6 +636,11 @@ final class EngineDelegateBridge: CoachEngineDelegate, @unchecked Sendable {
 public final class EngineQueue: @unchecked Sendable {
     private let engine: CoachEngine
     private let queue = DispatchQueue(label: "com.listenmore.engine", qos: .userInteractive)
+    private let generationLock = NSLock()
+    private var startCount = 0
+
+    /// How many times the engine has been started, counted on the queue as each start runs.
+    public var generation: Int { generationLock.withLock { startCount } }
 
     public init(_ engine: CoachEngine) {
         self.engine = engine
@@ -630,7 +652,10 @@ public final class EngineQueue: @unchecked Sendable {
     }
 
     public func start(config: ListenMoreConfig, apiKey: APIKey?) {
-        queue.async { self.engine.start(config: config, apiKey: apiKey) }
+        queue.async {
+            self.generationLock.withLock { self.startCount += 1 }
+            self.engine.start(config: config, apiKey: apiKey)
+        }
     }
 
     public func ingest(_ stream: AudioStream, samples: [Float], time: TimeInterval) {
