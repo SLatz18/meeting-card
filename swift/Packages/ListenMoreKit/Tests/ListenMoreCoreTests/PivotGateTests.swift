@@ -282,6 +282,17 @@ final class PivotGateTests: XCTestCase {
                                 share: PivotLines.worried))
     }
 
+    /// Planning a celebration for them is about them, though "I will book us a table" unlocks "we".
+    func testPlanningACelebrationForThemIsNone() {
+        let house = "We finally bought our first house last week and I am so excited to move in."
+        for reply in [
+            "That sounds great, we should all go out to celebrate, I will book us a table for Friday night at the usual place.",
+            "Congrats! We should all go out to celebrate, I will book us a table for Friday night at the usual place.",
+        ] {
+            XCTAssertEqual(run(pivot(reply: reply, share: house), until: 30).counters.candidates, 0, reply)
+        }
+    }
+
     /// "We" counts as the user only after sympathy: elsewhere it is often the team.
     func testWeCountsAsTheUserOnlyAfterSympathy() {
         assertNoCandidate(pivot(reply: "Oh nice, we just shipped the new build and we are moving the whole team to it, our rollout starts on Monday."))
