@@ -33,6 +33,12 @@ public protocol CallControlsReader: AnyObject {
     /// Lowercased bundle ID, as `TriggerSettings.appKey` makes them.
     var appKey: String { get }
     func read() -> CallObservation
+    /// Forget anything kept between readings (the provider was switched off and on).
+    func reset()
+}
+
+extension CallControlsReader {
+    public func reset() {}
 }
 
 /// Turns readings over time into call states: `started` / `muted` while in a call, `ended` for
@@ -110,6 +116,7 @@ public final class CallControlsProvider: CallStateProvider, @unchecked Sendable 
                 tracker.reset()
                 lastIssues = [:]
                 lastHints = [:]
+                readers.forEach { $0.reset() }
             }
         }
     }
@@ -163,6 +170,16 @@ public final class CallControlsProvider: CallStateProvider, @unchecked Sendable 
             }
         }
     }
+}
+
+/// A value behind a lock, for the little state a reader keeps between readings.
+final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) { self.value = value }
+
+    func withValue<R>(_ body: (inout Value) -> R) -> R { lock.withLock { body(&value) } }
 }
 
 // MARK: Zoom
@@ -222,8 +239,17 @@ public final class ZoomControlsReader: CallControlsReader {
     /// Zoom's menu bar can follow its key window, so with the home window in front the in-meeting
     /// shortcuts may be missing while the meeting goes on: that alone never reads as ended.
     public var callWindowPresent: (() -> Bool?)?
-    /// The last mute reading, kept while the shortcuts are hidden that way.
-    private var lastMuted: Bool?
+
+    /// What survives between readings. `epoch` changes on `reset()`, so a read that was already in
+    /// flight when the provider switched off and on can't write its result back.
+    private struct Memory {
+        var epoch = 0
+        /// The last mute reading, kept while the shortcuts are hidden by the home window in front.
+        var lastMuted: Bool?
+        /// The last reading was held (no shortcuts, the meeting window still there), not read.
+        var held = false
+    }
+    private let memory = LockedBox(Memory())
 
     public init(ax: ZoomAccessibility) {
         self.ax = ax
@@ -231,19 +257,52 @@ public final class ZoomControlsReader: CallControlsReader {
 
     public var isTrusted: Bool { ax.isTrusted }
 
+    /// The last reading was a held one: the call goes on, but Zoom's menu has no ⇧⌘A item to press,
+    /// so Mute in Zoom can't act (`CallControlsModel.muteUnavailableReason`).
+    public var isHeld: Bool { memory.withValue { $0.held } }
+
+    public func reset() {
+        memory.withValue {
+            $0.epoch += 1
+            $0.lastMuted = nil
+            $0.held = false
+        }
+    }
+
     public func read() -> CallObservation {
-        guard ax.isTrusted else { return .unavailable(.accessibilityDenied) }
-        guard ax.isRunning else { return .noCall }
-        guard let items = ax.menuShortcuts() else { return .unavailable(.readFailed) }
+        let epoch = memory.withValue { $0.epoch }
+        func remember(muted: Bool?, held: Bool) {
+            memory.withValue {
+                guard $0.epoch == epoch else { return }
+                $0.lastMuted = muted
+                $0.held = held
+            }
+        }
+        guard ax.isTrusted else {
+            remember(muted: memory.withValue { $0.lastMuted }, held: false)
+            return .unavailable(.accessibilityDenied)
+        }
+        guard ax.isRunning else {
+            remember(muted: nil, held: false)
+            return .noCall
+        }
+        guard let items = ax.menuShortcuts() else {
+            remember(muted: memory.withValue { $0.lastMuted }, held: false)
+            return .unavailable(.readFailed)
+        }
         let inMeeting = items.contains { i in Self.meetingShortcuts.contains { i.matches(key: $0.key, modifiers: $0.modifiers) } }
         guard inMeeting else {
-            if callWindowPresent?() == true { return .inCall(muted: lastMuted) }
-            lastMuted = nil
+            if callWindowPresent?() == true {
+                let muted = memory.withValue { $0.lastMuted }
+                remember(muted: muted, held: true)
+                return .inCall(muted: muted)
+            }
+            remember(muted: nil, held: false)
             return .noCall
         }
         let audio = items.first { $0.matches(key: Self.audioToggle.key, modifiers: Self.audioToggle.modifiers) }
-        lastMuted = audio?.offersUnmute
-        return .inCall(muted: lastMuted)
+        remember(muted: audio?.offersUnmute, held: false)
+        return .inCall(muted: audio?.offersUnmute)
     }
 
     /// Mute or unmute in Zoom: exactly one press on Zoom's own ⇧⌘A item, only while trusted and in a

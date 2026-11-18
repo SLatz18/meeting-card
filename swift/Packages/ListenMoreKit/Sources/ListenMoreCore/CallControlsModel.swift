@@ -6,7 +6,8 @@ public enum MuteUnavailableReason: String, Equatable, Sendable {
     case toggleOff
     /// Accessibility isn't granted (or was revoked).
     case permissionDenied
-    /// Zoom isn't in a meeting.
+    /// Zoom isn't in a meeting, or its menu has no Mute item to press right now (the home window is
+    /// in front: the coach holds the call on, but there is nothing to press).
     case noZoomCall
     /// The call is in Google Meet, which has no mute action here: mute from Meet.
     case meet
@@ -63,6 +64,7 @@ public final class CallControlsModel {
         if let callApp, Self.meetAppKeys.contains(callApp) { return .meet }
         guard zoom.isTrusted else { return .permissionDenied }
         guard zoomInCall else { return .noZoomCall }
+        guard !zoom.isHeld else { return .noZoomCall }
         return nil
     }
 

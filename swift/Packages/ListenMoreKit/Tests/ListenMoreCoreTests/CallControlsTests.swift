@@ -475,6 +475,68 @@ final class CallControlsTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(stops(run(30.5, 40)).first).0, 33.5, accuracy: 1e-9)
     }
 
+    /// With the home window in front the coach keeps listening on the held reading, but Zoom has no
+    /// ⇧⌘A item to press: Mute in Zoom must not look usable (#26: it shows only when it can act).
+    func testMuteInZoomIsNotActionableOnAHeldReading() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { true }
+        ax.inMeeting(muted: true)
+        _ = provider.callStates()
+        let (model, _) = makeModel(session: Self.zoom)
+        XCTAssertNil(model.muteUnavailableReason, "in the meeting window: Mute can act")
+        XCTAssertFalse(reader.isHeld)
+        ax.home()
+        _ = provider.callStates()
+        XCTAssertEqual(provider.currentStates[Self.zoom], .muted, "the coach still reads the call as on, muted")
+        XCTAssertTrue(reader.isHeld)
+        XCTAssertTrue(model.isMuted, "the held mute reading still shows")
+        XCTAssertEqual(model.muteUnavailableReason, .noZoomCall)
+        XCTAssertFalse(model.canMute)
+        XCTAssertEqual(model.toggleMute(), .unavailable(.noZoomCall))
+        XCTAssertEqual(ax.presses, 0, "no press is attempted without the ⇧⌘A item")
+        ax.inMeeting(muted: true)                  // the meeting window is back in front
+        _ = provider.callStates()
+        XCTAssertFalse(reader.isHeld)
+        XCTAssertNil(model.muteUnavailableReason)
+    }
+
+    func testHeldReadingEndsWhenTheWindowOrAccessIsGone() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        var present: Bool? = true
+        reader.callWindowPresent = { present }
+        ax.inMeeting()
+        _ = reader.read()
+        ax.home()
+        XCTAssertEqual(reader.read(), .inCall(muted: false))
+        XCTAssertTrue(reader.isHeld)
+        present = nil
+        XCTAssertEqual(reader.read(), .noCall)
+        XCTAssertFalse(reader.isHeld)
+        present = true
+        XCTAssertEqual(reader.read(), .inCall(muted: nil), "the muted reading went with the window")
+        ax.isRunning = false
+        XCTAssertEqual(reader.read(), .noCall)
+        XCTAssertFalse(reader.isHeld)
+    }
+
+    /// Turning "Use Zoom/Meet controls" off and on starts from nothing: the held mute reading and
+    /// the held mark don't survive it.
+    func testHeldMuteReadingIsClearedWhenTheProviderResets() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { true }
+        ax.inMeeting(muted: true)
+        _ = provider.callStates()
+        ax.home()
+        _ = provider.callStates()
+        XCTAssertEqual(provider.currentStates[Self.zoom], .muted)
+        XCTAssertTrue(reader.isHeld)
+        provider.isEnabled = false
+        XCTAssertFalse(reader.isHeld)
+        provider.isEnabled = true
+        _ = provider.callStates()
+        XCTAssertEqual(provider.currentStates[Self.zoom], .started, "no stale muted reading after the switch")
+    }
+
     func testZoomWithoutAWindowSignalKeepsTheMenuRule() {
         ax.inMeeting()
         XCTAssertEqual(ZoomControlsReader(ax: ax).read(), .inCall(muted: false))
