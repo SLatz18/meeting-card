@@ -17,13 +17,13 @@ public struct OpenProbe: Equatable, Sendable {
 }
 
 /// "Stay until the meeting opens" (#4): pure state over injected snapshots + a monotonic clock.
-/// Zoom: opened = a CptHost whose PID was NOT running at the Join click (Scott may already be in
+/// Zoom: opened = a CptHost whose PID was NOT running at the Join click (the user may already be in
 /// a meeting); the browser coming forward (Zoom's launch page) never counts (CTO ruling).
 /// Meet / Teams / Webex: opened = the default browser (as of the click) is frontmost.
 /// Accepted limit: a dead Meet / Teams tab looks opened.
 public struct OpenWatch: Equatable, Sendable {
     public static let timeout: TimeInterval = 15
-    /// #4 simplified (Scott 2026-10-06 10:24pm): detection is OFF. Join shows "Joining..." for
+    /// #4 simplified: detection is OFF. Join shows "Joining..." for
     /// `joinHold` seconds, then the card closes; no probe (process list, frontmost) ever runs.
     /// The detection code below stays for a later version; flip this to bring it back.
     public static let detectionEnabled = false

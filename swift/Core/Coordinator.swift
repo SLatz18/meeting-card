@@ -17,7 +17,7 @@ public struct CardModel: Equatable {
         // One rule (#13): the card view uses the same kind as the list filter and re-checks.
         switch Timing.cardKind(ev) {
         case .multi(let ls):
-            // Don't guess between video links; send Scott to the event (Scott, 2026-10-06).
+            // Don't guess between video links; send the user to the event.
             multi = true; link = calendar; flag = "\(ls.count) video links in this invite"
         case .join(let l):
             multi = false; link = l; flag = nil

@@ -131,13 +131,13 @@ public struct CardPalette: Sendable {
 public protocol KeySurface: AnyObject {
     /// Make the panel key (the gate is already armed, so `canBecomeKey` agrees).
     func makeKey()
-    /// Hand keyboard focus back to the app Scott was in.
+    /// Hand keyboard focus back to the app the user was in.
     func releaseKey()
     /// Cancel a pending delayed give-back (re-armed in the meantime).
     func cancelGiveBack()
 }
 
-/// Return/Esc gating (#12): keys only after Scott clicks or hovers the CARD, never on appear.
+/// Return/Esc gating (#12): keys only after the user clicks or hovers the CARD, never on appear.
 /// #12 review: hover arms only after a REAL pointer movement inside the card (cursor over the card)
 /// since the last appear / re-place: AppKit sends hover-enter when a panel appears or is re-stacked
 /// under a resting cursor, and that must not steal keys.
@@ -195,7 +195,7 @@ public struct KeyGate: Sendable {
             armed = false
             return .none
         case .opening(let on):
-            // v2.4: no arming while Joining (Scott's pointer crossing the card as the meeting app
+            // v2.4: no arming while Joining (the user's pointer crossing the card as the meeting app
             // takes over armed/released repeatedly). Entering Joining hands key back once.
             opening = on
             guard on, armed else { return .none }
@@ -263,7 +263,7 @@ public struct KeyGate: Sendable {
     }
 }
 
-/// v2.4 addendum (Scott's click -> exit repro): while a card is "Joining...", every gate step and
+/// v2.4 addendum (click -> exit repro): while a card is "Joining...", every gate step and
 /// every Join-title set is logged so a live run shows the sequence. Nothing is logged otherwise, and
 /// only event NAMES go out (never event JSON / coordinates).
 public extension KeyGate {
@@ -302,7 +302,7 @@ public enum Brand {
     public static let webexCyan: UInt32 = 0x07C1E4, webexGreen: UInt32 = 0x6CC04A
 }
 
-/// Provider-colored card outline (Scott 2026-10-06): a 1.3pt stroke on the card edge colored by the
+/// Provider-colored card outline: a 1.3pt stroke on the card edge colored by the
 /// card's CURRENT link. Meet / Webex = loop-closed conic stops, Zoom / Teams = one solid color.
 /// Multi-link and no-link cards ("calendar"), a forced fixture with no link, and unknown providers: nil.
 /// Readability: every stop is composited over cardFill at the per-appearance alpha and must clear

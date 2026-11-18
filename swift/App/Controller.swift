@@ -127,7 +127,7 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// v2.5 #1: launch at login. One attempt per launch, never a loop; never unregisters (Scott turns
+    /// v2.5 #1: launch at login. One attempt per launch, never a loop; never unregisters (the user turns
     /// it off in System Settings > General > Login Items). Gated by LoginItem.shouldRegister so a
     /// build/dd product, a scratch copy, a fixture run, or a test-identity build never becomes the login item.
     private func registerLoginItem() {
@@ -150,7 +150,7 @@ final class Controller: NSObject, NSApplicationDelegate {
             return
         }
         if svc.status == .enabled { log(LoginItem.logLine(status: "enabled", outcome: .already)); return }
-        // requiresApproval = pending, or Scott switched it off in Login Items: respect it, never re-register.
+        // requiresApproval = pending, or the user switched it off in Login Items: respect it, never re-register.
         if svc.status == .requiresApproval {
             log(LoginItem.logLine(status: "requiresApproval", outcome: .skipped("needs approval in Login Items"))); return
         }

@@ -20,7 +20,7 @@ public struct Attendee: Codable, Equatable, Sendable {
     }
 }
 
-/// The event organizer. `self` is true only when Scott organized it.
+/// The event organizer. `self` is true only when the user organized it.
 public struct Organizer: Codable, Equatable, Sendable {
     public var isSelf: Bool?
     public var email: String?

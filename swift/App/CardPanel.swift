@@ -348,7 +348,7 @@ final class Card: CardHandle {
     }
 
     /// Hand keyboard focus back (hover-exit, re-place, Join). The panel is nonactivating, so the app
-    /// Scott was typing in never stopped being active; re-activate it, and if the panel still holds
+    /// the user was typing in never stopped being active; re-activate it, and if the panel still holds
     /// key, resignKey() in place. v2.4: NEVER order the panel out/in here: that out/in was the
     /// "Joining..." flash (headless probe: resignKey() drops key with zero order-out calls).
     func releaseKey() {
