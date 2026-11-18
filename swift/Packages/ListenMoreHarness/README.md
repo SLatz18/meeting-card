@@ -15,8 +15,9 @@ Each run scores three things per scenario and writes one results table:
 - **Speaker identification**: every transcribed segment attributed to You or Them by audio timing (the
   script line whose span holds the segment's speech end and most of its words); correct means the right
   stream's transcriber, the right speaker on its caption and the right label in the caption feed. A
-  segment is only matched against lines whose audio could reach a transcriber (not You's lines spoken
-  while muted, nothing inside a Pause), and any wrong one is named in the report. With an accuracy
+  segment is matched against every line; on equal word share a line that could be heard wins (lines can
+  share words), and a segment that best matches a line spoken while muted or paused counts as wrong (that
+  audio should never reach a transcriber). Every wrong one is named in the report. With an accuracy
   figure, and what happens with two different Them voices.
 - **Coaching**: every cue (type, level, timing, source) against the cue rules: expected cues fire, no
   false cues (including right after unmute), and none while paused or muted.
@@ -64,8 +65,8 @@ and the call app's mute restart it) meters from 0; the log sums them. A failed j
 by class only (`HTTP 401 incorrect_hostname`, `URLError -1001`). A key whose project needs a regional
 host gets one `401 incorrect_hostname` on the first judge call of the run: the judge retries on the
 host OpenAI names and every later judge in the process starts there (`LearnedHosts`). A judge call
-cancelled when the engine stops (Pause, the call app's mute, the end of the call) is counted as
-`cancelled_at_engine_stop`, not as a failure.
+cancelled up to a second after the engine stops (Pause, the call app's mute, the end of the call) is
+counted as `cancelled_at_engine_stop`, not as a failure; any other cancel as `cancelled_otherwise`.
 
 On Linux, live HTTPS goes through FoundationNetworking and the system libcurl. libcurl 8.11 and newer
 abort a process that releases a URLSession ("_MultiHandle deallocated with non-zero retain count",
@@ -91,8 +92,9 @@ appeared anywhere else (temp dir, the repository, the home folder's top level).
 
 For each missed or false interrupt, the report adds a diagnostic: the run's own audio replayed through
 `LocalLayer` with the same Mutes and Pauses, saying whether the local rule raised the cut-in on that
-audio, where You's onsets fell, whether Them were talking, and Them's longest gap in the next 0.6 s
-(the cut-in rule drops a cut-in when Them pause for more than about 0.16 s in that span).
+audio, where You's onsets fell, whether Them were talking, and Them's longest raw-speech gap in the
+0.6 s after each onset (the cut-in rule drops a cut-in when Them's speech stops for longer than
+`LocalLayer.cutInMaxOthersGapS`, 0.16 s, before its opening overlap has built up).
 
 ## Scenarios
 
@@ -129,10 +131,13 @@ passed). A missed question can fire as soon as `question_decide_words` words of 
 transcribed, which with pauses (live, espeak) is before the reply ends; with the synthetic signal, one
 segment per line, it is due at the reply's end. A tolerated cue (a judge verdict on a reply,
 a borderline trailing cut-in, a counter-question) is tolerated only in a window around the line that
-justifies it, never for a cue type across the scenario. A cut-in needs Them to keep talking through
-its first 0.6 s of overlap (gaps up to about 0.16 s); where Them's own audio, measured by clip energy,
-pauses longer there, their restarts are speaker switches and the talk-over rule may raise the red cue
-instead, so `talk_over` is accepted for that cut-in, in a window after Them stop.
+justifies it, never for a cue type across the scenario. A cut-in needs Them to keep talking until
+`cut_in_min_overlap_ms` (0.6 s) of both speaking has built up: `LocalLayer` drops it when Them's speech
+stops for longer than `LocalLayer.cutInMaxOthersGapS` (0.16 s) before then. The oracle scans Them's audio
+(clip energy, not the engine's VAD) from You's onset only until 0.6 s of both voiced has built up; a
+longer gap there means Them's restarts are speaker switches and the talk-over rule may raise the red cue
+instead, so `talk_over` is accepted for that cut-in, in a window after Them stop. A gap after the
+overlap has built up changes nothing.
 
 ## Limits
 

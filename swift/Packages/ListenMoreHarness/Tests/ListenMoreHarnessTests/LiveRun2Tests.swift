@@ -20,8 +20,8 @@ final class LiveRun2Tests: XCTestCase {
 
     /// mute-unmute's muted You line disputes Them's ("...the database is the risky part..."). A Them
     /// segment holding just those words ties on word share with the muted line, which no transcriber
-    /// heard: it must match Them's line, not count as a wrong attribution.
-    func testMutedLineIsNoCandidateForASegment() throws {
+    /// should hear: the tie goes to Them's line, so it isn't a wrong attribution.
+    func testTieGoesToTheLineThatCouldBeHeard() throws {
         var r = try muteRecord()
         let a2 = r.timeline.line("a2")!, y2 = r.timeline.line("y2")!
         XCTAssertTrue(r.appliedWindows(.mute, .unmute).contains { $0.contains(y2.start) && $0.contains(y2.end) })
@@ -34,7 +34,22 @@ final class LiveRun2Tests: XCTestCase {
         XCTAssertEqual(sp.correct, 1, sp.mismatches.joined(separator: "; "))
         XCTAssertFalse(Scoring.reachableLines(r).contains { $0.line.id == "y2" })
         XCTAssertEqual(Scoring.line(for: r.sockets.segments[0], lines: r.timeline.lines, hangover: 0.2)?.line.id, "y2",
-                       "with the muted line as a candidate, the tie went to it")
+                       "without the preference, the tie went to the muted line")
+    }
+
+    /// The muted You line's own words on the call stream mean You's audio leaked onto Them's
+    /// transcriber while muted: a named mismatch, not a skipped segment.
+    func testMutedLineOnTheCallStreamFails() throws {
+        var r = try muteRecord()
+        let y2 = r.timeline.line("y2")!
+        r.sockets.segments = [TranscribedSegment(stream: .call, committedAt: y2.end - 1.0, transcribedAt: y2.end - 0.3,
+                                                 text: "hold on I want to argue with that because I am not sure")]
+        let sp = Scoring.speakers(r)
+        XCTAssertEqual(sp.total, 1)
+        XCTAssertEqual(sp.correct, 0)
+        XCTAssertTrue(sp.mismatches.first?.contains("holds y2 (you)") == true, sp.mismatches.joined())
+        XCTAssertTrue(sp.mismatches.first?.contains("spoken while muted or paused reached a transcriber") == true, sp.mismatches.joined())
+        XCTAssertEqual(Checks.evaluate(r).check("speaker-id")?.passed, false)
     }
 
     /// A wrong attribution names the segment, so a live report says which one.
@@ -50,27 +65,67 @@ final class LiveRun2Tests: XCTestCase {
         XCTAssertTrue(sp.mismatches[0].contains("holds y5 (you)"), sp.mismatches[0])
     }
 
-    /// When Them's own audio pauses longer than the cut-in rule tolerates during the opening overlap,
-    /// the talk-over rule may raise the red cue instead: the oracle accepts it, in a window after Them
-    /// stop. Without such a pause only an interrupt fits.
-    func testTalkOverIsTheAlternativeWhenThemPauseInTheOpeningOverlap() throws {
+    /// The interruption script's voiced frames (from line spans), with Them silent for `gapFrames`
+    /// frames starting `after` seconds into You's cut-in.
+    func interruptionFacts(gapFrames: Int, after: Double) throws -> (Timeline, CueOracle.Facts) {
         let s = Scenarios.interruption
         let t = try Timeline.realize(s, shapes: SyntheticVoice.shapes(s))
-        let y3 = t.line("y3")!, a1 = t.line("a1")!
-        let frames = Int(t.duration / 0.02) + 1
-        var voiced = [Bool](repeating: true, count: frames)
-        func expected(_ v: [Bool]) throws -> ExpectedCue {
-            try XCTUnwrap(CueOracle.expected(t, config: config, facts: .init(keyless: true, gptStopT: nil, mode: .live, callVoiced: v)).cues.first)
+        let n = Int(t.duration / 0.02) + 1
+        func voiced(_ stream: AudioStream) -> [Bool] {
+            (0..<n).map { i in t.lines.contains { $0.line.voice.stream == stream && Double(i) * 0.02 >= $0.start && Double(i) * 0.02 < $0.end } }
         }
-        XCTAssertNil(try expected(voiced).alternative, "Them talk straight through")
-        for i in Int((y3.start + 0.3) / 0.02)..<Int((y3.start + 0.56) / 0.02) { voiced[i] = false }
-        let e = try expected(voiced)
-        let alt = try XCTUnwrap(e.alternative)
-        XCTAssertEqual(alt.type, .talkOver)
-        let talkOver = CueRecord(t: a1.end + 1.9, engineT: 0, type: .talkOver, level: nil, source: .local, latencyMs: 0)
-        XCTAssertTrue(alt.window.contains(talkOver.t))
-        XCTAssertTrue(CueOracle.match(expected: [e], tolerated: [], actual: [talkOver]).passed)
-        XCTAssertFalse(CueOracle.match(expected: [try expected([Bool](repeating: true, count: frames))], tolerated: [], actual: [talkOver]).passed)
+        var call = voiced(.call)
+        let first = Int((t.line("y3")!.start + after) / 0.02)
+        for k in first..<(first + gapFrames) { call[k] = false }
+        return (t, .init(keyless: true, gptStopT: nil, mode: .live, callVoiced: call, micVoiced: voiced(.mic)))
+    }
+
+    func cutIn(gapFrames: Int, after: Double) throws -> ExpectedCue {
+        let (t, facts) = try interruptionFacts(gapFrames: gapFrames, after: after)
+        return try XCTUnwrap(CueOracle.expected(t, config: config, facts: facts).cues.first { $0.type == .interrupt })
+    }
+
+    /// The engine drops a cut-in when Them stop for longer than `LocalLayer.cutInMaxOthersGapS` before
+    /// its opening overlap has built up; only then does the talk-over rule get to raise the red cue.
+    func testTalkOverAlternativeFollowsTheEnginesGapTolerance() throws {
+        XCTAssertEqual(LocalLayer.cutInMaxOthersGapS, 0.16, accuracy: 1e-9)
+        XCTAssertNil(try cutIn(gapFrames: 0, after: 0.2).alternative, "Them talk straight through")
+        XCTAssertNil(try cutIn(gapFrames: 8, after: 0.2).alternative, "0.16 s: within the tolerance")
+        let over = try cutIn(gapFrames: 9, after: 0.2)
+        XCTAssertEqual(over.alternative?.type, .talkOver, "0.18 s: the engine drops the cut-in")
+        XCTAssertNil(try cutIn(gapFrames: 25, after: 1.0).alternative, "a pause after 0.6 s of overlap has built up changes nothing")
+    }
+
+    /// The alternative is accepted only in its window after Them stop, and only where it was offered.
+    func testTalkOverMatchesOnlyWhereOffered() throws {
+        let (t, _) = try interruptionFacts(gapFrames: 0, after: 0)
+        let talkOver = CueRecord(t: t.line("a1")!.end + 1.9, engineT: 0, type: .talkOver, level: nil, source: .local, latencyMs: 0)
+        let offered = try cutIn(gapFrames: 13, after: 0.3)
+        XCTAssertTrue(try XCTUnwrap(offered.alternative).window.contains(talkOver.t))
+        XCTAssertTrue(CueOracle.match(expected: [offered], tolerated: [], actual: [talkOver]).passed)
+        XCTAssertFalse(CueOracle.match(expected: [try cutIn(gapFrames: 0, after: 0)], tolerated: [], actual: [talkOver]).passed)
+    }
+
+    /// Only a cancel up to a second after an engine stop is the expected close on Pause; one before it isn't.
+    func testCancelWindowIsAfterTheStopOnly() async throws {
+        struct Cancelling: HTTPTransport {
+            func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
+                throw URLError(.cancelled)
+            }
+        }
+        var r = try muteRecord()
+        r.origin = 100
+        r.engineStops = [10]
+        let clock = HarnessClock(.simulated)
+        let http = MeteredHTTP(inner: Cancelling(), clock: clock)
+        for t in [109.5, 110.4] {
+            clock.advance(to: t)
+            do { _ = try await http.post(url: URL(string: "https://example.invalid")!, headers: [:], body: Data(), timeout: 1) } catch {}
+        }
+        let judge = try XCTUnwrap(Harness.costEntries(Checks.evaluate(r), record: r, http: http).first { $0.kind == "judge" })
+        XCTAssertEqual(judge.fields["cancelled_at_engine_stop"], 1)
+        XCTAssertEqual(judge.fields["cancelled_otherwise"], 1)
+        XCTAssertEqual(judge.fields["failed_calls"], 0)
     }
 
     /// A judge call cancelled when the engine stops (Pause) is counted as cancelled, not failed.

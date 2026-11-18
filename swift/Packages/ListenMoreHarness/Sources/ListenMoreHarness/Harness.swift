@@ -262,10 +262,10 @@ public enum Harness {
             judge["input_tokens"] = Double(http.tokens.input)
             judge["output_tokens"] = Double(http.tokens.output)
             judge["failed_calls"] = Double(http.failures.count)
-            // A judge call cancelled within a second of an engine stop is the GPT layer closing on Pause
-            // (or the call app's mute, or the call's end), as designed.
+            // A judge call cancelled up to a second after an engine stop is the GPT layer closing on Pause
+            // (or the call app's mute, or the call's end), as designed; a cancel before any stop is not.
             let cancels = http.cancelled.map { $0 - record.origin }
-            let atStop = cancels.filter { c in record.engineStops.contains { abs($0 - c) <= 1.0 } }
+            let atStop = cancels.filter { c in record.engineStops.contains { c >= $0 - 1e-6 && c - $0 <= 1.0 } }
             judge["cancelled_at_engine_stop"] = Double(atStop.count)
             judge["cancelled_otherwise"] = Double(cancels.count - atStop.count)
             if !http.failures.isEmpty {

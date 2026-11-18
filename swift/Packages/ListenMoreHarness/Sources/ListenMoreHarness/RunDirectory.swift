@@ -34,6 +34,9 @@ public struct RunDirectory {
         for name in names {
             guard let pid = ownerPid(name), !processAlive(pid) else { continue }
             let url = dir.appendingPathComponent(name)
+            // A directory's mtime changes when an entry in it is added or removed: here when the scenario
+            // creates its transcripts folder (writes inside that folder don't touch it), so it reads as
+            // about when the scenario started.
             guard let modified = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
                   now.timeIntervalSince(modified) >= minAge else { continue }
             if (try? fm.removeItem(at: url)) != nil { removed += 1 }
