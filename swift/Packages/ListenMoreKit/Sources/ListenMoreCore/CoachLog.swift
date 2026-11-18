@@ -51,10 +51,47 @@ public enum PermissionKind: String, Equatable, Sendable {
 
 public enum PermissionState: String, Equatable, Sendable {
     case granted
+    /// The user refused it (the OS reports "denied").
     case denied
+    /// The OS only says "not granted" and cannot tell denied from never asked (the screen-recording preflight).
+    case notGranted
     case notDetermined
     case restricted
 }
+
+/// Why a session is held (no capture): by the user's pause or by the call app's own mute.
+public enum HoldCause: String, Equatable, Sendable {
+    case none
+    case user
+    case callMuted
+}
+
+/// The step of opening the mic that failed.
+public enum MicOpenStep: String, Equatable, Sendable {
+    case voiceProcessing
+    case inputUnit
+    case device
+    case format
+    case engineStart
+}
+
+/// A mic open failure that knows its step and OSStatus.
+public protocol MicOpenFailure: Error {
+    var step: MicOpenStep { get }
+    var status: Int? { get }
+}
+
+/// The step of starting call-audio capture that failed (a Core Audio process tap).
+public enum CaptureStep: String, Equatable, Sendable {
+    case createTap
+    case tapFormat
+    case createAggregate
+    case ioProc
+    case start
+}
+
+/// A failure the code that raised it has already logged, with its step and status: the session does not log it again.
+public protocol LoggedFailure: Error {}
 
 /// Why the GPT layer (transcription and the cue judge) is on or off for a call.
 public enum GptLayerReason: String, Equatable, Sendable {
@@ -83,17 +120,21 @@ public enum CoachLogEvent: Equatable, Sendable {
     case keyStore(KeyStoreAction, ok: Bool, status: Int?)
     case callDetected(bundleId: LogToken?)
     case callEnded(bundleId: LogToken?, reason: CoachStopReason)
-    case sessionStarted(reason: CoachStartReason, bundleId: LogToken?)
+    /// `held`: the session starts with capture held (the call app already muted), and `cause` says by what.
+    case sessionStarted(reason: CoachStartReason, bundleId: LogToken?, held: Bool, cause: HoldCause)
     case sessionStopped(reason: CoachStopReason)
-    case sessionPaused(Bool)
+    case sessionPaused(Bool, cause: HoldCause)
     case micMuted(Bool)
     case micOpened(route: LogToken, source: LogToken, voiceProcessing: Bool, device: LogToken?)
     case micClosed
     case micRouteRestart(count: Int)
-    case micOpenFailed(route: LogToken, source: LogToken)
+    /// Opening the mic failed at `step` with `status` (an OSStatus), when known.
+    case micOpenFailed(route: LogToken, source: LogToken, step: MicOpenStep?, status: Int?)
     case micSilent
     case callAudioStarted(stage: CaptureStage, method: CaptureMethod, targets: Int)
-    case callAudioFailed(stage: CaptureStage, domain: LogToken, code: Int)
+    case callAudioFailed(stage: CaptureStage, step: CaptureStep?, domain: LogToken, code: Int)
+    /// The app started: its version and build and the macOS version.
+    case appStarted(version: LogToken?, build: LogToken?, os: LogToken)
     case callAudioStopped(code: Int)
     /// One call-detection check: which app holds the mic, whether it plays audio, and why a session did
     /// or did not start.
@@ -139,26 +180,31 @@ public enum CoachLogEvent: Equatable, Sendable {
             return line("key.store", ("action", .word(action.rawValue)), ("result", .word(ok ? "ok" : "failed")), ("status", .number(status)))
         case .callDetected(let app): return line("call.detected", ("app", .token(app)))
         case .callEnded(let app, let reason): return line("call.ended", ("app", .token(app)), ("reason", .word(reason.rawValue)))
-        case .sessionStarted(let reason, let app):
+        case .sessionStarted(let reason, let app, let held, let cause):
             let why: String
             switch reason {
             case .audio: why = "audio"
             case .manual: why = "manual"
             }
-            return line("session.started", ("reason", .word(why)), ("app", .token(app)))
+            return line("session.started", ("reason", .word(why)), ("app", .token(app)), ("held", .flag(held)), ("cause", .word(cause.rawValue)))
         case .sessionStopped(let reason): return line("session.stopped", ("reason", .word(reason.rawValue)))
-        case .sessionPaused(let on): return line("session.paused", ("on", .flag(on)))
+        case .sessionPaused(let on, let cause): return line("session.paused", ("on", .flag(on)), ("cause", .word(cause.rawValue)))
+        case .appStarted(let version, let build, let os):
+            return line("app.started", ("version", .token(version)), ("build", .token(build)), ("os", .token(os)))
         case .micMuted(let on): return line("mic.muted", ("on", .flag(on)))
         case .micOpened(let route, let source, let vp, let device):
             return line("mic.opened", ("route", .token(route)), ("source", .token(source)), ("voiceProcessing", .flag(vp)), ("device", .token(device)))
         case .micClosed: return line("mic.closed")
         case .micRouteRestart(let count): return line("mic.routeRestart", ("count", .number(count)))
-        case .micOpenFailed(let route, let source): return line("mic.openFailed", ("route", .token(route)), ("source", .token(source)))
+        case .micOpenFailed(let route, let source, let step, let status):
+            return line("mic.openFailed", ("route", .token(route)), ("source", .token(source)), ("step", .word(step?.rawValue ?? "unknown")),
+                        ("status", .number(status)))
         case .micSilent: return line("mic.silent")
         case .callAudioStarted(let stage, let method, let targets):
             return line("callAudio.started", ("stage", .word(stage.name)), ("method", .word(method.rawValue)), ("targets", .number(targets)))
-        case .callAudioFailed(let stage, let domain, let code):
-            return line("callAudio.failed", ("stage", .word(stage.name)), ("domain", .token(domain)), ("code", .number(code)))
+        case .callAudioFailed(let stage, let step, let domain, let code):
+            return line("callAudio.failed", ("stage", .word(stage.name)), ("step", .word(step?.rawValue ?? "unknown")), ("domain", .token(domain)),
+                        ("code", .number(code)))
         case .callAudioStopped(let code): return line("callAudio.stopped", ("code", .number(code)))
         case .detectCheck(let c):
             return line("detect.check", ("micApp", .word(c.micApp?.value ?? "none")), ("callAudio", .flag(c.callAudio)),

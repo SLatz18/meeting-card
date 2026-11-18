@@ -129,6 +129,13 @@ public final class CoachSession {
     public private(set) var micDeviceOff = false
     /// The session's app, as the diagnostics file names it (the app that started it, or the first one captured).
     private var loggedApp: LogToken?
+    /// Why capture is held now (for the pause line that releases it).
+    private var heldCause: HoldCause = .none
+
+    private static func holdCause(_ session: TriggerSession?) -> HoldCause {
+        guard let session else { return .none }
+        return session.paused ? .user : session.muted ? .callMuted : .none
+    }
 
     public init(config: ListenMoreConfig, engine: CoachEngine, mic: MicSource, call: CallSource, signal: CallSignal,
                 keys: APIKeyProvider, renderer: CueRenderer, settings: TriggerSettings, enabled: Bool = true,
@@ -177,6 +184,13 @@ public final class CoachSession {
     }
 
     public var isPolling: Bool { timer != nil }
+
+    /// The app is quitting: the session ends with reason `quit`, then capture stops.
+    public func quit() {
+        stopPolling()
+        apply(trigger.quit())
+        stopCapture()
+    }
 
     public func shutdown() {
         stopPolling()
@@ -353,7 +367,8 @@ public final class CoachSession {
                 let app = LogToken.bundleIdOrNil(started.appKey)
                 loggedApp = app
                 if started.reason == .audio { CoachLog.record(.callDetected(bundleId: app)) }
-                CoachLog.record(.sessionStarted(reason: started.reason, bundleId: app))
+                heldCause = Self.holdCause(started)
+                CoachLog.record(.sessionStarted(reason: started.reason, bundleId: app, held: started.held, cause: heldCause))
                 // A new session never inherits the previous one's engine (or OpenAI sessions).
                 stopCapture()
                 cuePolicy.reset()
@@ -370,7 +385,9 @@ public final class CoachSession {
                 renderer.clear()
                 micMuted = false
             case .pause(let paused):
-                CoachLog.record(.sessionPaused(paused))
+                if paused { heldCause = Self.holdCause(trigger.session) }
+                CoachLog.record(.sessionPaused(paused, cause: heldCause))
+                if !paused { heldCause = .none }
                 cuePolicy.paused = paused
                 if paused { renderer.clear() }
             }
@@ -461,8 +478,10 @@ public final class CoachSession {
             } catch {
                 guard let self, gate.admits(gen) else { return }
                 self.captureProblem = true
-                let failure = CoachLog.domainAndCode(error)
-                CoachLog.record(.callAudioFailed(stage: stage, domain: failure.domain, code: failure.code))
+                if !(error is LoggedFailure) {
+                    let failure = CoachLog.domainAndCode(error)
+                    CoachLog.record(.callAudioFailed(stage: stage, step: nil, domain: failure.domain, code: failure.code))
+                }
                 self.delegate?.coachSession(self, didReport: .callCaptureFailed(stage: stage))
                 self.changed()
             }

@@ -111,6 +111,11 @@ final class CoachController: NSObject {
         callControlsModel.onChange = { [weak self] in self?.refresh() }
         _ = keyPresence.load(from: keychain)
         typeSafeKeyStored = typeSafeKeychain.hasKey
+        let info = Bundle.main.infoDictionary
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        CoachLog.record(.appStarted(version: LogToken.version(info?["CFBundleShortVersionString"] as? String),
+                                    build: LogToken.version(info?["CFBundleVersion"] as? String),
+                                    os: LogToken.version("\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)") ?? LogToken.constant("unknown")))
         CoachLog.record(.coachEnabled(enabled))
         if enabled {
             makeService()
@@ -339,6 +344,11 @@ final class CoachController: NSObject {
     }
 
     // MARK: controls
+
+    /// The app is quitting (Quit in the menu, Cmd-Q): a running session ends with reason `quit`.
+    func willQuit() {
+        service?.quit()
+    }
 
     func joinHint(endsAt: Date?) {
         guard enabled, let endsAt else { return }

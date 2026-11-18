@@ -584,14 +584,16 @@ public final class GptLayer: @unchecked Sendable {
     private func handle(_ cmd: Command) async -> Bool {
         switch cmd {
         case .start:
+            var connecting: Speaker?
             do {
                 for speaker in Speaker.allCases {
+                    connecting = speaker
                     try await transcribers[speaker]?.start()
                     CoachLog.record(.transcriberOpened(speaker: speaker, model: transcribeModel))
                 }
             } catch {
                 let failure = CoachLog.describe(error)
-                CoachLog.record(.transcriberError(speaker: nil, model: transcribeModel,
+                CoachLog.record(.transcriberError(speaker: connecting, model: transcribeModel,
                                                   httpStatus: failure.httpStatus, code: failure.code))
                 core.fail("realtime connect: \(GptError.safe(error))")
             }

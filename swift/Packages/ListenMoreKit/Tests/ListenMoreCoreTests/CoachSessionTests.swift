@@ -476,6 +476,49 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertNil(s.session, "no restart while the app stays ended")
     }
 
+    /// A session that starts with the call app already muted says so, and why it pauses and resumes; quitting ends it with
+    /// reason quit.
+    func testCoachLogSaysWhyASessionIsHeldAndHowItEnds() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let provider = FakeAudioStateProvider()
+        let calls = FakeCallState()
+        let settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+        let clock = clock
+        let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: AudioActivitySignal(provider: provider),
+                             keys: FakeKeys(key: nil), renderer: renderer, settings: settings, callState: calls, wallClock: { clock.now() })
+        provider.zoomCall()
+        calls.states = ["us.zoom.xos": .muted]
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertTrue(sink.lines.contains("session.started reason=audio app=us.zoom.xos held=true cause=callMuted"), "\(sink.lines)")
+        calls.states = ["us.zoom.xos": .started]
+        poll(s, seconds: 1)
+        XCTAssertTrue(sink.lines.contains("session.paused on=false cause=callMuted"), "\(sink.lines)")
+        s.setPaused(true)
+        XCTAssertTrue(sink.lines.contains("session.paused on=true cause=user"))
+        s.setPaused(false)
+        XCTAssertTrue(sink.lines.contains("session.paused on=false cause=user"))
+        s.quit()
+        XCTAssertTrue(sink.lines.contains("session.stopped reason=quit"), "\(sink.lines)")
+        XCTAssertTrue(sink.lines.contains { $0.hasPrefix("call.ended") && $0.hasSuffix("reason=quit") })
+        XCTAssertNil(s.session)
+        XCTAssertFalse(sink.lines.contains("session.stopped reason=disabled"))
+    }
+
+    /// An unmuted call starts unheld.
+    func testCoachLogSessionStartedUnheld() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let (s, provider) = audioSession()
+        provider.zoomCall()
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertTrue(sink.lines.contains("session.started reason=audio app=us.zoom.xos held=false cause=none"), "\(sink.lines)")
+    }
+
     /// Local-only: with no key the session still captures and runs local cues; only GPT is off.
     func testNoKeyStillCoachesLocally() async {
         let (s, provider) = audioSession()
@@ -546,10 +589,10 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertNil(s.session)
         let lines = sink.lines
         XCTAssertEqual(lines.first, "call.detected app=company.thebrowser.dia")
-        XCTAssertTrue(lines.contains("session.started reason=audio app=company.thebrowser.dia"))
+        XCTAssertTrue(lines.contains("session.started reason=audio app=company.thebrowser.dia held=false cause=none"))
         XCTAssertTrue(lines.contains("key.read result=present at=call"))
         XCTAssertTrue(lines.contains("mic.muted on=true"))
-        XCTAssertTrue(lines.contains("session.paused on=true"))
+        XCTAssertTrue(lines.contains("session.paused on=true cause=user"))
         XCTAssertTrue(lines.contains("call.ended app=company.thebrowser.dia reason=audioEnded"))
         XCTAssertTrue(lines.contains("session.stopped reason=audioEnded"))
         XCTAssertFalse(lines.contains { $0.contains("sk-") || $0.contains("test-not-real") })
@@ -603,7 +646,7 @@ final class CoachSessionTests: XCTestCase {
         s.tick()
         let logged = await eventually { sink.lines.contains { $0.hasPrefix("callAudio.failed") } }
         XCTAssertTrue(logged)
-        XCTAssertTrue(sink.lines.contains("callAudio.failed stage=parentApps domain=FakeCall code=2"), "\(sink.lines)")
+        XCTAssertTrue(sink.lines.contains("callAudio.failed stage=parentApps step=unknown domain=FakeCall code=2"), "\(sink.lines)")
         XCTAssertTrue(sink.lines.contains("key.read result=absent at=call"))
     }
 

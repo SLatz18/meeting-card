@@ -131,6 +131,8 @@ public final class CoachService: CoachSessionDelegate {
     public func pause() { session.setPaused(true) }
     public func resume() { session.setPaused(false) }
     public func stop() { session.stopManual() }
+    /// The app is quitting: the session ends with reason `quit`.
+    public func quit() { session.quit() }
     /// The coach's own Mute: it stops listening to the user's mic only (`CoachSession.setMicMuted`).
     public var micMuted: Bool { session.micMuted }
     public func setMicMuted(_ muted: Bool) { session.setMicMuted(muted) }
@@ -185,7 +187,7 @@ public final class CoachService: CoachSessionDelegate {
         @unknown default: mic = .notDetermined
         }
         CoachLog.record(.permission(.microphone, mic))
-        CoachLog.record(.permission(.screenRecording, CGPreflightScreenCaptureAccess() ? .granted : .denied))
+        CoachLog.record(.permission(.screenRecording, CGPreflightScreenCaptureAccess() ? .granted : .notGranted))
     }
 
     public func coachSession(_ session: CoachSession, didShow cue: Cue) { onCue?(cue) }

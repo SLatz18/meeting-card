@@ -34,15 +34,17 @@ final class CoachLogTests: XCTestCase {
             .keyStore(.save, ok: true, status: nil), .keyStore(.remove, ok: false, status: -25244),
             .callDetected(bundleId: app), .callDetected(bundleId: nil),
             .callEnded(bundleId: app, reason: .audioEnded), .callEnded(bundleId: nil, reason: .manual),
-            .sessionStarted(reason: .audio, bundleId: app), .sessionStarted(reason: .manual, bundleId: nil),
-            .sessionStopped(reason: .callEnded), .sessionPaused(true), .micMuted(true),
+            .sessionStarted(reason: .audio, bundleId: app, held: false, cause: .none), .sessionStarted(reason: .manual, bundleId: nil, held: true, cause: .callMuted),
+            .sessionStopped(reason: .callEnded), .sessionStopped(reason: .quit), .sessionPaused(true, cause: .user), .sessionPaused(false, cause: .callMuted), .micMuted(true),
+            .appStarted(version: LogToken.version("2.0"), build: LogToken.version("1"), os: LogToken.version("15.1.0")!),
             .micOpened(route: LogToken.route(.speakers), source: LogToken.micSource(.builtIn), voiceProcessing: true, device: hostile),
             .micOpened(route: LogToken.route(.bluetooth), source: LogToken.micSource(.builtIn), voiceProcessing: false, device: nil),
-            .micClosed, .micRouteRestart(count: 2), .micOpenFailed(route: LogToken.route(.speakers), source: LogToken.micSource(.builtIn)), .micSilent,
+            .micClosed, .micRouteRestart(count: 2), .micOpenFailed(route: LogToken.route(.speakers), source: LogToken.micSource(.builtIn), step: .engineStart, status: -10875),
+            .micOpenFailed(route: LogToken.route(.bluetooth), source: LogToken.micSource(.none), step: nil, status: nil), .micSilent,
             .callAudioStarted(stage: .parentApps, method: .screenCapture, targets: 1),
             .callAudioStarted(stage: .processTap, method: .processTap, targets: 3),
-            .callAudioFailed(stage: .helperApps, domain: LogToken.errorDomain("com.apple.ScreenCaptureKit.SCStreamErrorDomain"), code: -3801),
-            .callAudioFailed(stage: .processTap, domain: LogToken.constant("OSStatus"), code: -50),
+            .callAudioFailed(stage: .helperApps, step: nil, domain: LogToken.errorDomain("com.apple.ScreenCaptureKit.SCStreamErrorDomain"), code: -3801),
+            .callAudioFailed(stage: .processTap, step: .createAggregate, domain: LogToken.constant("OSStatus"), code: -50),
             .callAudioStopped(code: -3805),
             .audioFlow(source: .call, seconds: 10, buffers: 480, voiced: 120, peakDb: -31), .audioFlow(source: .mic, seconds: 10, buffers: 0, voiced: 0, peakDb: -120),
             .callAudioSilent(source: .call, seconds: 15, kind: .digitalSilence, buffers: 750), .callAudioSilent(source: .call, seconds: 15, kind: .noBuffers, buffers: 0),
@@ -50,7 +52,7 @@ final class CoachLogTests: XCTestCase {
             .detectCheck(DetectionCheck(micApp: app, callAudio: true, result: .notMet, reason: .startTimer, timerSeconds: 1, permission: .granted)),
             .detectCheck(DetectionCheck(micApp: nil, callAudio: false, result: .notMet, reason: .inputDeviceIdle)),
             .detectCheck(DetectionCheck(micApp: hostile, callAudio: false, result: .notMet, reason: .appNotAllowed, permission: .notGranted)),
-            .permission(.microphone, .granted), .permission(.screenRecording, .denied),
+            .permission(.microphone, .granted), .permission(.microphone, .denied), .permission(.screenRecording, .notGranted),
             .transcriberOpened(speaker: .me, model: LogToken.model("gpt-live-transcribe")),
             .transcriberReady(speaker: .others, model: LogToken.model("gpt-live-transcribe")),
             .transcriberCounts(speaker: .me, counters: TranscriberCounters()),
@@ -85,8 +87,8 @@ final class CoachLogTests: XCTestCase {
         XCTAssertEqual(CoachLogEvent.keyGate(.rejected).rendered, "key.gate state=rejected")
         XCTAssertEqual(CoachLogEvent.keyStore(.save, ok: false, status: -25244).rendered, "key.store action=save result=failed status=-25244")
         XCTAssertEqual(CoachLogEvent.gptLayer(enabled: false, reason: .keyRejected).rendered, "gpt.layer enabled=false reason=keyRejected")
-        XCTAssertEqual(CoachLogEvent.callAudioFailed(stage: .processTap, domain: LogToken.constant("OSStatus"), code: -50).rendered,
-                       "callAudio.failed stage=processTap domain=OSStatus code=-50")
+        XCTAssertEqual(CoachLogEvent.callAudioFailed(stage: .processTap, step: .createTap, domain: LogToken.constant("OSStatus"), code: -50).rendered,
+                       "callAudio.failed stage=processTap step=createTap domain=OSStatus code=-50")
         XCTAssertEqual(CoachLogEvent.transcriberError(speaker: .others, model: LogToken.model("gpt-live-transcribe"), httpStatus: 401,
                                                       code: LogToken.serverCode("invalid_api_key")).rendered,
                        "transcriber.error speaker=others model=gpt-live-transcribe http=401 code=invalid_api_key")
@@ -104,9 +106,18 @@ final class CoachLogTests: XCTestCase {
         c.appends = 500; c.commits = 4; c.acks = 4; c.completions = 3; c.emptyCompletions = 1
         XCTAssertEqual(CoachLogEvent.transcriberCounts(speaker: .me, counters: c).rendered,
                        "transcriber.counts speaker=me appends=500 commits=4 acks=4 completions=3 empty=1")
-        XCTAssertEqual(CoachLogEvent.sessionStarted(reason: .audio, bundleId: LogToken.bundleId("us.zoom.xos")).rendered,
-                       "session.started reason=audio app=us.zoom.xos")
+        XCTAssertEqual(CoachLogEvent.sessionStarted(reason: .audio, bundleId: LogToken.bundleId("us.zoom.xos"), held: true, cause: .callMuted).rendered,
+                       "session.started reason=audio app=us.zoom.xos held=true cause=callMuted")
         XCTAssertEqual(CoachLogEvent.callDetected(bundleId: nil).rendered, "call.detected", "no app, no field")
+        XCTAssertEqual(CoachLogEvent.sessionPaused(true, cause: .callMuted).rendered, "session.paused on=true cause=callMuted")
+        XCTAssertEqual(CoachLogEvent.sessionStopped(reason: .quit).rendered, "session.stopped reason=quit")
+        XCTAssertEqual(CoachLogEvent.appStarted(version: LogToken.version("2.0"), build: LogToken.version("1"), os: LogToken.version("15.1.0")!).rendered,
+                       "app.started version=2.0 build=1 os=15.1.0")
+        XCTAssertEqual(CoachLogEvent.micOpenFailed(route: LogToken.route(.speakers), source: LogToken.micSource(.builtIn), step: .engineStart, status: -10875).rendered,
+                       "mic.openFailed route=speakers source=builtIn step=engineStart status=-10875")
+        XCTAssertEqual(CoachLogEvent.micOpenFailed(route: LogToken.route(.speakers), source: LogToken.micSource(.builtIn), step: nil, status: nil).rendered,
+                       "mic.openFailed route=speakers source=builtIn step=unknown")
+        XCTAssertEqual(CoachLogEvent.permission(.screenRecording, .notGranted).rendered, "permission kind=screenRecording state=notGranted")
     }
 
     // MARK: redaction

@@ -85,8 +85,8 @@ public final class MicCapture: MicSource {
         case let .restarted(count):
             CoachLog.record(.micRouteRestart(count: count))
             Log.capture.info("mic route restart, count \(count, privacy: .public)")
-        case let .openFailed(plan):
-            CoachLog.record(.micOpenFailed(route: LogToken.route(plan.route), source: LogToken.micSource(plan.micSource)))
+        case let .openFailed(plan, step, status):
+            CoachLog.record(.micOpenFailed(route: LogToken.route(plan.route), source: LogToken.micSource(plan.micSource), step: step, status: status))
             Log.capture.error("mic open failed: route \(plan.route.rawValue, privacy: .public), micSource \(plan.micSource.rawValue, privacy: .public)")
         case .inputSilent:
             CoachLog.record(.micSilent)
@@ -112,6 +112,12 @@ final class EngineMicInput: MicInput {
         case noFormat
     }
 
+    /// The step that failed and its OSStatus, for the diagnostics file.
+    struct OpenFailure: MicOpenFailure {
+        var step: MicOpenStep
+        var status: Int?
+    }
+
     private let engine = AVAudioEngine()
     private var observer: NSObjectProtocol?
     private(set) var applied = MicProcessing(voiceProcessing: false, ducking: nil)
@@ -122,6 +128,7 @@ final class EngineMicInput: MicInput {
     init(plan: MicPlan, sampleRate: Int, handler: @escaping @Sendable ([Float]) -> Void,
          onStopped: @escaping @Sendable () -> Void) throws {
         let input = engine.inputNode
+        var step = MicOpenStep.voiceProcessing
         do {
             if plan.processing.voiceProcessing {
                 try input.setVoiceProcessingEnabled(true)
@@ -129,6 +136,7 @@ final class EngineMicInput: MicInput {
                     input.voiceProcessingOtherAudioDuckingConfiguration = MicCapture.duckingConfiguration(ducking)
                 }
             }
+            step = .device
             if let device = plan.device {
                 // Voice processing follows the system devices; only a different mic is asked for there.
                 if !plan.processing.voiceProcessing {
@@ -137,6 +145,7 @@ final class EngineMicInput: MicInput {
                     try? Self.setDevice(device, on: input)
                 }
             }
+            step = .format
             let format = input.outputFormat(forBus: 0)
             guard format.sampleRate > 0, format.channelCount > 0 else { throw OpenError.noFormat }
             let resampler = MonoResampler(sampleRate: Double(sampleRate))
@@ -147,13 +156,24 @@ final class EngineMicInput: MicInput {
             observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine,
                                                               queue: nil) { _ in onStopped() }
             engine.prepare()
+            step = .engineStart
             try engine.start()
         } catch {
             release()
-            throw error
+            throw Self.failure(error, step: step)
         }
         applied = Self.readBack(input)
         deviceID = Self.currentDevice(of: input)
+    }
+
+    /// The error's step and status: an `OpenError` names its own, any other error keeps the step it was raised in.
+    static func failure(_ error: Error, step: MicOpenStep) -> OpenFailure {
+        switch error as? OpenError {
+        case .noInputUnit: return OpenFailure(step: .inputUnit, status: nil)
+        case .device(let status): return OpenFailure(step: .device, status: Int(status))
+        case .noFormat: return OpenFailure(step: .format, status: nil)
+        case nil: return OpenFailure(step: step, status: (error as NSError).code)
+        }
     }
 
     func stop() {

@@ -145,6 +145,8 @@ public enum CoachStopReason: String, Equatable, Sendable {
     /// The calendar event the user joined ended.
     case eventEnded
     case manual
+    /// The app is quitting.
+    case quit
     /// The opt-in setting was switched off.
     case disabled
 }
@@ -322,6 +324,12 @@ public struct CoachTrigger: Sendable {
         session = s
         offSince = nil
         return [.start(s)]
+    }
+
+    /// The app is quitting: ends any session, so the log says why it ended.
+    public mutating func quit() -> [TriggerAction] {
+        guard session != nil else { return [] }
+        return end(.quit)
     }
 
     public mutating func manualStop() -> [TriggerAction] {
