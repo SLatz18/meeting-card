@@ -266,6 +266,7 @@ public enum Harness {
             judge["input_tokens"] = Double(http.tokens.input)
             judge["output_tokens"] = Double(http.tokens.output)
             judge["failed_calls"] = Double(http.failures.count)
+            judge["host_redirects"] = Double(http.hostRedirects)
             // A judge call cancelled up to a second after an engine stop is the GPT layer closing on Pause
             // (or the call app's mute, or the call's end), as designed; a cancel before any stop is not.
             let cancels = http.cancelled.map { $0 - record.origin }

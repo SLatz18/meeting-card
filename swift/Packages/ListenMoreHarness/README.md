@@ -62,9 +62,10 @@ stay in memory. The whole set is about 7 minutes of audio; `cost-log.jsonl` reco
 seconds, transcription billed seconds and dollars, and judge calls, tokens and dollars (log only, no
 harness cap; the engine's own `gpt.budget_usd_per_call` still applies per scenario). Each engine (Pause
 and the call app's mute restart it) meters from 0; the log sums them. A failed judge call is logged
-by class only (`HTTP 401 incorrect_hostname`, `URLError -1001`). A key whose project needs a regional
-host gets one `401 incorrect_hostname` on the first judge call of the run: the judge retries on the
-host OpenAI names and every later judge in the process starts there (`LearnedHosts`). A judge call
+by class only (`HTTP 500`, `URLError -1001`). A key whose project needs a regional host gets one
+`401 incorrect_hostname` on the first judge call of the run: the judge retries on the host OpenAI
+names and every later judge in the process starts there (`LearnedHosts`). That reply is counted as
+`host_redirects`, not as a failed call. A judge call
 cancelled up to a second after the engine stops (Pause, the call app's mute, the end of the call) is
 counted as `cancelled_at_engine_stop`, not as a failure; any other cancel as `cancelled_otherwise`.
 

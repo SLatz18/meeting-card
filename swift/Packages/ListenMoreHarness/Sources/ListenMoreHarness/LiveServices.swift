@@ -97,6 +97,7 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
     private var _inputTokens = 0
     private var _outputTokens = 0
     private var _failures: [String] = []
+    private var _hostRedirects = 0
     private var _cancelled: [Double] = []
 
     public init(inner: HTTPTransport, clock: HarnessClock? = nil) {
@@ -117,6 +118,9 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
     /// One class per failed call: `HTTP <status> <error code>` or the thrown error's type (a timeout
     /// shows as its URLError code). Never a body, header or message text.
     public var failures: [String] { lock.withLock { _failures } }
+    /// `401 incorrect_hostname`: the configured host named the key's regional host and the judge retried
+    /// there (once per process; the learned host is kept). Not failures.
+    public var hostRedirects: Int { lock.withLock { _hostRedirects } }
 
     public func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
         let reply: (status: Int, body: Data)
@@ -134,12 +138,17 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
         let usage = root?["usage"] as? [String: Any]
         lock.withLock {
             _calls += 1
-            if reply.status != 200 { _failures.append(Self.failureClass(status: reply.status, root: root)) }
+            if reply.status != 200 {
+                let failure = Self.failureClass(status: reply.status, root: root)
+                if failure == Self.hostRedirect { _hostRedirects += 1 } else { _failures.append(failure) }
+            }
             _inputTokens += (usage?["input_tokens"] as? NSNumber)?.intValue ?? 0
             _outputTokens += (usage?["output_tokens"] as? NSNumber)?.intValue ?? 0
         }
         return reply
     }
+
+    static let hostRedirect = "HTTP 401 incorrect_hostname"
 
     /// `HTTP 401 incorrect_hostname`: the status and OpenAI's error code (a fixed identifier), if any.
     static func failureClass(status: Int, root: [String: Any]?) -> String {
