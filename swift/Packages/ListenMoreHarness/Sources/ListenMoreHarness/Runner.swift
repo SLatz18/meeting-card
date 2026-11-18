@@ -95,6 +95,9 @@ public struct RunServices: @unchecked Sendable {
     public var judgeCalls: () -> Int
     public var clips: [String: [Float]]
     public var shapes: [String: ClipShape]
+    /// Offline lockstep: how long the runner waits for the engine or the caption feed to catch up with a
+    /// frame before it counts a barrier timeout. Tests shorten it.
+    public var barrierTimeoutS = 10.0
 }
 
 public struct CaptionRecord: Sendable {
@@ -327,13 +330,13 @@ public final class ScenarioRun: CoachSessionDelegate {
             if offline {
                 if capturing && delivered {
                     expectedCallFrames += 1
-                    if !(await engine.callIngests.wait(atLeast: expectedCallFrames, timeout: 10)) {
+                    if !(await engine.callIngests.wait(atLeast: expectedCallFrames, timeout: services.barrierTimeoutS)) {
                         record.barrierTimeouts += 1
                         expectedCallFrames = engine.callIngests.current
                     }
                 }
                 if let server = services.offlineServer, session.gptStopped == nil, capturing {
-                    if !(await finalsDelivered.wait(atLeast: server.finalsSent.current - droppedFinals, timeout: 10)) {
+                    if !(await finalsDelivered.wait(atLeast: server.finalsSent.current - droppedFinals, timeout: services.barrierTimeoutS)) {
                         record.barrierTimeouts += 1
                         droppedFinals = server.finalsSent.current - finalsDelivered.current
                     }

@@ -43,10 +43,23 @@ public final class ScriptedRealtime: WebSocketConnector, @unchecked Sendable {
     private var _segments: [TranscribedSegment] = []
     /// Final transcripts sent (the runner waits until the session has delivered as many captions).
     public let finalsSent = AsyncCounter()
+    private var dropsRemaining = 0
 
     public init(clock: HarnessClock, sampleRate: Int) {
         self.clock = clock
         self.sampleRate = sampleRate
+    }
+
+    /// Test hook: the next `n` final transcripts are counted as sent but never delivered, as when the GPT
+    /// layer drops a final (text from a muted You, or after the layer is disabled).
+    public func dropNextFinals(_ n: Int) { lock.withLock { dropsRemaining = n } }
+
+    func shouldDeliverFinal() -> Bool {
+        lock.withLock {
+            guard dropsRemaining > 0 else { return true }
+            dropsRemaining -= 1
+            return false
+        }
     }
 
     /// The script and the device tracks, with the run time at which scenario time 0 starts.
@@ -171,8 +184,10 @@ final class ScriptedSocket: WebSocketConnection, @unchecked Sendable {
             for word in said.split(separator: " ") {
                 push(["type": "conversation.item.input_audio_transcription.delta", "item_id": item, "delta": word + " "])
             }
-            push(["type": "conversation.item.input_audio_transcription.completed", "item_id": item, "transcript": said,
-                  "usage": ["type": "duration", "seconds": seconds]])
+            if server.shouldDeliverFinal() {
+                push(["type": "conversation.item.input_audio_transcription.completed", "item_id": item, "transcript": said,
+                      "usage": ["type": "duration", "seconds": seconds]])
+            }
             server.finalsSent.add()
         case "input_audio_buffer.clear":
             server.onClear(stream)
