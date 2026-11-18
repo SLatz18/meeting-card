@@ -3,7 +3,7 @@ import XCTest
 import ListenMoreCore
 @testable import ListenMoreHarness
 
-/// The nine scenarios with the engine's `cut_in_overlap_gap_ms` swept (the oracle keeps the built-in
+/// The nine scenarios with the engine's `cut_in_onset_gap_ms` swept (the oracle keeps the built-in
 /// rules): per value and voice, the expected interrupts that fired or missed and every false cue.
 /// `LM_OVERLAP_GAP_SWEEP=1` runs it (160-600 ms, or the list in `LM_OVERLAP_GAP_SWEEP_MS`); espeak only
 /// where espeak-ng is installed.
@@ -15,7 +15,7 @@ final class OverlapGapSweepTests: XCTestCase {
         let values = env["LM_OVERLAP_GAP_SWEEP_MS"].map { $0.split(separator: ",").compactMap { Double($0) } }
             ?? Array(stride(from: 160.0, through: 600.0, by: 20.0))
         let voices: [OfflineVoices] = EspeakVoice.executable == nil ? [.synthetic] : [.synthetic, .espeak]
-        var lines = ["| cut_in_overlap_gap_ms | voices | scenarios passing | interrupts expected | fired | missed | false interrupts | other false cues |",
+        var lines = ["| cut_in_onset_gap_ms | voices | scenarios passing | interrupts expected | fired | missed | false interrupts | other false cues |",
                      "|---|---|---|---|---|---|---|---|"]
         var detail: [String] = []
         for ms in values {
@@ -23,7 +23,7 @@ final class OverlapGapSweepTests: XCTestCase {
                 let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-sweep-\(UUID().uuidString)", isDirectory: true)
                 defer { try? FileManager.default.removeItem(at: out) }
                 let summary = try await Harness.run(HarnessOptions(mode: .offline, outputDirectory: out, environment: [:], offlineVoices: v,
-                                                                   engineOverrides: ["local": ["cut_in_overlap_gap_ms": ms]]))
+                                                                   engineOverrides: ["local": ["cut_in_onset_gap_ms": ms]]))
                 let outcomes = summary.results.flatMap { r in r.cues.outcomes.filter { $0.expected.type == .interrupt }.map { (r.scenario, $0) } }
                 let fired = outcomes.filter { $0.1.actual != nil }
                 let falseCues = summary.results.flatMap { r in r.cues.falseCues.map { (r.scenario, $0) } }

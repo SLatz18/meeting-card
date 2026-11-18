@@ -72,18 +72,18 @@ public protocol LocalTextContext: AnyObject {
 
 public final class LocalLayer {
     /// "Speaking" = raw speech within this window (VAD hangover excluded from overlap).
-    static let speakingTailS = 0.06
-    /// The other side's speech is one stretch through VAD flicker this short (after `speakingTailS`).
+    public static let speakingTailS = 0.06
+    /// The other side must keep talking through a cut-in's opening overlap, bar VAD flicker this short.
     static let overlapGapS = 0.1
-    /// A cut-in's opening overlap (`cut_in_min_overlap_ms`) builds within one stretch of the other side's
-    /// speech: a pause in their raw speech longer than this, but inside `cut_in_overlap_gap_ms`, keeps
-    /// the cut-in and starts the overlap again. Two short words with a pause between ("yeah… right")
-    /// never add up to it.
-    public static let overlapStretchGapS = speakingTailS + overlapGapS
+    /// A cut-in is dropped when the other side's raw speech stops for longer than this before its
+    /// opening overlap (`cut_in_min_overlap_ms`) has built up: they count as speaking for
+    /// `speakingTailS` after their last voiced frame, then the gap may run to `overlapGapS`. The pause
+    /// the user's onset lands in may run longer, to `cut_in_onset_gap_ms` from the onset.
+    public static let cutInMaxOthersGapS = speakingTailS + overlapGapS
 
     // Every window comparison below reads its elapsed time through `Elapsed.span`. The cut-in's overlap
-    // is a sum of frame lengths from zero, which is exact at 20 ms frames: rounding it is defensive and
-    // changes nothing there.
+    // gap is a sum of frame lengths from zero, which is exact at 20 ms frames: rounding it is defensive
+    // and changes nothing there.
 
     /// The longest the user's first words back stay settled past the grace. A first reply after unmute
     /// ("Sorry, I was on mute, give me one second") runs about three seconds, so its comma onsets fall
@@ -97,9 +97,11 @@ public final class LocalLayer {
 
     struct CutIn {
         var onset: TimeInterval
-        /// Both speaking since the onset, and since the other side's last pause past `overlapStretchGapS`.
         var overlap = 0.0
-        var stretch = 0.0
+        var gap = 0.0
+        /// The other side has spoken since the onset: the pause the onset landed in is over. Their
+        /// speaking tail counts, so a last word ending within a frame or two before the onset does too.
+        var heard = false
         var othersAfter = 0.0
         var trailing = false
         var othersEnd = 0.0
@@ -113,7 +115,7 @@ public final class LocalLayer {
     public weak var context: LocalTextContext?
     private let frameS: Double
     private let prosodyEnabled: Bool
-    private let cutOverlap, cutOverlapGap, cutContinue, cutBackchannel, cutPause, cutMidPause, cutAfterTalkOver: Double
+    private let cutOverlap, cutOnsetGap, cutContinue, cutBackchannel, cutPause, cutMidPause, cutAfterTalkOver: Double
     private let cutTrailingOverlap, cutTrailingWindow, cutTrailingYield: Double
     private let unmuteGrace: Double
     private let toSwitches: Int
@@ -150,9 +152,6 @@ public final class LocalLayer {
     private var settlingRun = false
     /// When the other side's last utterance ended (their VAD offset).
     private var othersLastEnd = -Double.infinity
-    /// The other side's last voiced frame while their VAD was active: a lone voiced frame that never
-    /// confirms an onset doesn't end a pause in their speech.
-    private var othersHeardT = -Double.infinity
 
     /// `participants`: people on the call (2 = a 1:1), for the talk-share limit.
     public init(config: ListenMoreConfig, participants: Int = 2, context: LocalTextContext? = nil) {
@@ -164,7 +163,7 @@ public final class LocalLayer {
         self.context = context
         prosodyEnabled = l.prosodyEnabled
         cutOverlap = l.cutInMinOverlapMs / 1000
-        cutOverlapGap = l.cutInOverlapGapMs / 1000
+        cutOnsetGap = l.cutInOnsetGapMs / 1000
         cutContinue = l.cutInOthersContinueMs / 1000
         cutBackchannel = l.cutInBackchannelMaxMs / 1000
         cutPause = l.cutInUtteranceGapMs / 1000
@@ -238,7 +237,6 @@ public final class LocalLayer {
         let s = micMuted ? VadState(raw: false, active: false, onset: nil, offset: nil, dbfs: AudioMath.rmsDbfs(mic))
                          : me.process(tEnd: t, frame: mic)
         let o = others.process(tEnd: t, frame: call)
-        if o.active { othersHeardT = others.lastSpeechT }
         if prosodyEnabled {
             prosody.onFrame(active: s.active || s.offset != nil, raw: s.raw, db: s.dbfs)
         }
@@ -275,7 +273,7 @@ public final class LocalLayer {
         }
         let both = speaking(me, t) && speaking(others, t)
         if both { overlapFrames.append(t) }
-        cutIn(t, s, o, &ev, both)
+        cutIn(t, s, &ev, both)
         talkOver(t, &ev)
         monologue(t, s, o, &ev)
         talkShare(t, s, o, &ev)
@@ -289,24 +287,26 @@ public final class LocalLayer {
 
     // Cut-in: the user starts while others talk (or inside a pause in their speech shorter than
     // cut_in_others_pause_ms), the overlap from their onset lasts >= cut_in_min_overlap_ms, they keep going
-    // >= cut_in_others_continue_ms, and the user's utterance runs past the backchannel length. Until the
-    // overlap has built up, a pause in their raw speech may run to cut_in_overlap_gap_ms from the user's
-    // onset (checked on their unvoiced frames, so a frame that starts their next word ends the pause);
-    // past `overlapStretchGapS` it starts the overlap again. A longer one that ends with them stopping
-    // within cut_in_trailing_window_s of the start, after a shorter overlap, is a trailing candidate: it
-    // needs them to leave the floor for cut_in_trailing_yield_s, and the engine fires it only if their
-    // last words were unfinished.
-    private func cutIn(_ t: TimeInterval, _ s: VadState, _ o: VadState, _ ev: inout [LocalEvent], _ both: Bool) {
+    // >= cut_in_others_continue_ms, and the user's utterance runs past the backchannel length. Until they
+    // first speak after the onset, the pause the onset landed in may run to cut_in_onset_gap_ms from the
+    // onset (to the start of the frame their VAD dates their next speech from: a voiced frame it is
+    // still weighing counts, voiced, quiet, voiced included); after that, any pause of theirs
+    // gets `cutInMaxOthersGapS`. A shorter overlap that ends with them stopping within
+    // cut_in_trailing_window_s of the start is a trailing candidate: it needs them to leave the floor for
+    // cut_in_trailing_yield_s, and the engine fires it only if their last words were unfinished.
+    private func cutIn(_ t: TimeInterval, _ s: VadState, _ ev: inout [LocalEvent], _ both: Bool) {
         guard var c = cut else { return }
         let othersSpeaking = speaking(others, t)
-        if Elapsed.span(c.stretch) < cutOverlap && !c.trailing {
+        if othersSpeaking { c.heard = true }
+        if Elapsed.span(c.overlap) < cutOverlap && !c.trailing {
             if othersSpeaking {
+                c.gap = 0
                 c.overlap += both ? frameS : 0
-                c.stretch += both ? frameS : 0
-            } else if !o.raw {
-                let pause = Elapsed.span(t - max(c.onset, othersHeardT))
-                if pause > cutOverlapGap {
-                    let end = othersHeardT
+            } else {
+                c.gap += frameS
+                let onsetPause = Elapsed.span((others.pendingOnset ?? t) - c.onset)
+                if Elapsed.span(c.gap) > Self.overlapGapS && (c.heard || onsetPause > cutOnsetGap) {
+                    let end = others.lastSpeechT
                     if Elapsed.span(c.overlap) >= cutTrailingOverlap && Elapsed.span(abs(end - c.onset)) <= cutTrailingWindow {
                         c.trailing = true
                         c.othersEnd = end
@@ -314,8 +314,6 @@ public final class LocalLayer {
                         cut = nil
                         return
                     }
-                } else if pause > Self.overlapStretchGapS {
-                    c.stretch = 0
                 }
             }
         }
@@ -323,7 +321,7 @@ public final class LocalLayer {
             cut = nil
             return
         }
-        if othersSpeaking && Elapsed.span(t - c.onset) > 0 { c.othersAfter += frameS }
+        if othersSpeaking { c.othersAfter += frameS }
         cut = c
         if !s.active {
             if Elapsed.span(t - me.lastSpeechT) > cutPause { cut = nil }
@@ -333,7 +331,7 @@ public final class LocalLayer {
             ev.append(LocalEvent(kind: .interrupt, t: t, onset: c.onset, othersActive: false, othersLastSpeech: c.othersEnd,
                                  trailing: true))
             cut = nil
-        } else if Elapsed.span(c.stretch) >= cutOverlap && Elapsed.span(c.othersAfter) >= cutContinue
+        } else if Elapsed.span(c.overlap) >= cutOverlap && Elapsed.span(c.othersAfter) >= cutContinue
                     && Elapsed.span(t - c.onset) >= cutBackchannel {
             ev.append(LocalEvent(kind: .interrupt, t: t, onset: c.onset, othersActive: others.active,
                                  othersLastSpeech: others.lastSpeechT))

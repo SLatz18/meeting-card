@@ -95,7 +95,8 @@ For each missed or false interrupt, the report adds a diagnostic: the run's own 
 `LocalLayer` with the same Mutes and Pauses, saying whether the local rule raised the cut-in on that
 audio, where You's onsets fell, whether Them were talking, and Them's longest raw-speech gap in the
 0.6 s after each onset (the cut-in rule drops a cut-in when Them's speech stops for longer than
-`local.cut_in_overlap_gap_ms`, 0.3 s, before its opening overlap has built up).
+`LocalLayer.cutInMaxOthersGapS`, 0.16 s, before its opening overlap has built up; the pause You's onset
+lands in may run to `local.cut_in_onset_gap_ms`, 0.3 s, from the onset).
 
 ## Scenarios
 
@@ -133,10 +134,9 @@ transcribed, which with pauses (live, espeak) is before the reply ends; with the
 segment per line, it is due at the reply's end. A tolerated cue (a judge verdict on a reply,
 a borderline trailing cut-in, a counter-question) is tolerated only in a window around the line that
 justifies it, never for a cue type across the scenario. A cut-in needs Them to keep talking until
-`cut_in_min_overlap_ms` (0.6 s) of both speaking has built up within one stretch of Them's speech:
-`LocalLayer` drops it when Them's speech stops for longer than `local.cut_in_overlap_gap_ms` (0.3 s)
-before then, and a shorter pause past `LocalLayer.overlapStretchGapS` (0.16 s, VAD flicker) starts the
-overlap again, so two short words with a pause between never add up to it. The oracle scans Them's audio
+`cut_in_min_overlap_ms` (0.6 s) of both speaking has built up: `LocalLayer` drops it when Them's speech
+stops for longer than `LocalLayer.cutInMaxOthersGapS` (0.16 s) before then, or, for the pause You start in,
+longer than `local.cut_in_onset_gap_ms` (0.3 s) from You's onset. The oracle scans Them's audio
 (clip energy, not the engine's VAD) from You's onset only until 0.6 s of both voiced has built up; a
 longer gap there means Them's restarts are speaker switches and the talk-over rule may raise the red cue
 instead, so `talk_over` is accepted for that cut-in, in a window after Them stop. A gap after the

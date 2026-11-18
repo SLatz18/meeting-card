@@ -103,36 +103,69 @@ final class LiveRun2Tests: XCTestCase {
         return try XCTUnwrap(CueOracle.expected(t, config: config, facts: facts).cues.first { $0.type == .interrupt })
     }
 
-    /// The engine drops a cut-in when Them stop for longer than `cut_in_overlap_gap_ms` before its
-    /// opening overlap has built up; only then does the talk-over rule get to raise the red cue.
+    /// The engine drops a cut-in when Them stop for longer than `LocalLayer.cutInMaxOthersGapS` before
+    /// its opening overlap has built up; only then does the talk-over rule get to raise the red cue.
     func testTalkOverAlternativeFollowsTheEnginesGapTolerance() throws {
-        XCTAssertEqual(config.local.cutInOverlapGapMs, 300)
+        XCTAssertEqual(LocalLayer.cutInMaxOthersGapS, 0.16, accuracy: 1e-9)
         XCTAssertNil(try cutIn(gapFrames: 0, after: 0.2).alternative, "Them talk straight through")
-        XCTAssertNil(try cutIn(gapFrames: 15, after: 0.2).alternative, "0.30 s: within the tolerance")
-        let over = try cutIn(gapFrames: 16, after: 0.2)
-        XCTAssertEqual(over.alternative?.type, .talkOver, "0.32 s: the engine drops the cut-in")
+        XCTAssertNil(try cutIn(gapFrames: 8, after: 0.2).alternative, "0.16 s: within the tolerance")
+        let over = try cutIn(gapFrames: 9, after: 0.2)
+        XCTAssertEqual(over.alternative?.type, .talkOver, "0.18 s: the engine drops the cut-in")
         XCTAssertNil(try cutIn(gapFrames: 25, after: 1.0).alternative, "a pause after 0.6 s of overlap has built up changes nothing")
     }
 
-    /// The opening overlap builds within one stretch of Them's speech, as in the engine: a 0.18 s pause
-    /// starts it again, so a 0.32 s pause 0.5 s later is still inside it; after a 0.16 s pause it isn't.
-    func testOpeningOverlapScanStartsAgainAfterAPausePastTheStretch() throws {
-        func cutIn(firstGapFrames: Int) throws -> ExpectedCue {
-            let (t, facts0) = try interruptionFacts(gapFrames: firstGapFrames, after: 0.2)
+    /// The pause You start in is allowed `cut_in_onset_gap_ms` (0.3 s) from You's onset, as in the engine:
+    /// Them silent from two frames before y3's start (their speaking tail is over by the time You's VAD
+    /// confirms) for 15 frames past it leave the cut-in alone; 16 frames offer talk-over.
+    func testTalkOverAlternativeFollowsTheOnsetGapTolerance() throws {
+        XCTAssertEqual(config.local.cutInOnsetGapMs, 300)
+        func cutIn(onsetGapFrames: Int) throws -> ExpectedCue {
+            let (t, facts0) = try interruptionFacts(gapFrames: 0, after: 0)
             var facts = facts0
-            let second = Int((t.line("y3")!.start + 0.2 + Double(firstGapFrames) * 0.02 + 0.5) / 0.02)
-            for k in second..<(second + 16) { facts.callVoiced[k] = false }
+            let first = Int((t.line("y3")!.start / 0.02).rounded())
+            for k in (first - 2)..<(first + onsetGapFrames) { facts.callVoiced[k] = false }
             return try XCTUnwrap(CueOracle.expected(t, config: config, facts: facts).cues.first { $0.type == .interrupt })
         }
-        XCTAssertNil(try cutIn(firstGapFrames: 8).alternative, "one stretch: 0.7 s of overlap before the 0.32 s pause")
-        XCTAssertEqual(try cutIn(firstGapFrames: 9).alternative?.type, .talkOver, "0.5 s after the restart: the 0.32 s pause counts")
+        XCTAssertNil(try cutIn(onsetGapFrames: 15).alternative, "0.30 s from the onset: within the tolerance")
+        XCTAssertEqual(try cutIn(onsetGapFrames: 16).alternative?.type, .talkOver, "0.32 s: the engine drops the cut-in")
+    }
+
+    /// Them count as speaking for `LocalLayer.speakingTailS` after their last voiced frame, and the cut-in
+    /// starts once You's VAD has confirmed (two frames by default). Their last voiced frame one frame
+    /// before You's start is still inside that tail, so the pause that follows is a later one (0.16 s, 12
+    /// quiet frames being 0.24 s); with two frames between, You's start lands in the pause and the same
+    /// 0.24 s of quiet runs 0.20 s from it, inside the onset tolerance.
+    func testTalkOverAlternativeCountsTheEnginesSpeakingTail() throws {
+        XCTAssertEqual(config.vad.onsetFrames, 2)
+        func cutIn(framesBeforeStart back: Int, quietFrames: Int) throws -> ExpectedCue {
+            let (t, facts0) = try interruptionFacts(gapFrames: 0, after: 0)
+            var facts = facts0
+            let first = Int((t.line("y3")!.start / 0.02).rounded())
+            for k in (first - back)..<(first - back + quietFrames) { facts.callVoiced[k] = false }
+            return try XCTUnwrap(CueOracle.expected(t, config: config, facts: facts).cues.first { $0.type == .interrupt })
+        }
+        XCTAssertEqual(try cutIn(framesBeforeStart: 1, quietFrames: 12).alternative?.type, .talkOver, "still speaking at the onset: 0.24 s")
+        XCTAssertNil(try cutIn(framesBeforeStart: 2, quietFrames: 12).alternative, "the onset lands in the pause: 0.20 s from it")
+        XCTAssertNil(try cutIn(framesBeforeStart: 1, quietFrames: 8).alternative, "still speaking at the onset, 0.16 s: kept")
+    }
+
+    /// A line starting at or past the end of the known audio has no gaps to measure: (0, 0), not a read
+    /// past the end of the voicing arrays.
+    func testOpeningOverlapGapsPastTheEndOfTheAudioAreZero() {
+        let voiced = Array(repeating: true, count: 10)
+        let facts = CueOracle.Facts(keyless: true, gptStopT: nil, mode: .offline, callVoiced: voiced, micVoiced: voiced)
+        for start in [0.18, 0.20, 1.0, 100.0] {
+            let gaps = CueOracle.openingOverlapGaps(facts, from: start, until: start + 1.0, overlapS: 0.6, confirmFrames: 2)
+            XCTAssertEqual(gaps.atOnset, 0, "from \(start)")
+            XCTAssertEqual(gaps.later, 0, "from \(start)")
+        }
     }
 
     /// The alternative is accepted only in its window after Them stop, and only where it was offered.
     func testTalkOverMatchesOnlyWhereOffered() throws {
         let (t, _) = try interruptionFacts(gapFrames: 0, after: 0)
         let talkOver = CueRecord(t: t.line("a1")!.end + 1.9, engineT: 0, type: .talkOver, level: nil, source: .local, latencyMs: 0)
-        let offered = try cutIn(gapFrames: 16, after: 0.3)
+        let offered = try cutIn(gapFrames: 13, after: 0.3)
         XCTAssertTrue(try XCTUnwrap(offered.alternative).window.contains(talkOver.t))
         XCTAssertTrue(CueOracle.match(expected: [offered], tolerated: [], actual: [talkOver]).passed)
         XCTAssertFalse(CueOracle.match(expected: [try cutIn(gapFrames: 0, after: 0)], tolerated: [], actual: [talkOver]).passed)

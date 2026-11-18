@@ -143,15 +143,18 @@ public enum CueOracle {
                 e.line = u.line.id
                 // The cut-in needs Them to keep talking until its opening overlap (cut_in_min_overlap_ms of
                 // both speaking) has built up: LocalLayer drops it when Them's speech stops for longer than
-                // `cut_in_overlap_gap_ms` before then. Where Them's own audio pauses longer in that span
-                // (word gaps in real speech), their restarts are speaker switches and the talk-over rule may
-                // raise the red cue instead, once You hold the floor after they stop. A pause after the
-                // overlap has built up changes nothing.
-                let gap = openingOverlapGap(facts, from: u.start, until: th.end, overlapS: cutOverlap)
-                if gap > l.cutInOverlapGapMs / 1000 + 1e-9 {
+                // `cutInMaxOthersGapS` before then, or, for the pause You start in, `cut_in_onset_gap_ms`
+                // from You's onset. Where Them's own audio pauses longer in that span (word gaps in real
+                // speech), their restarts are speaker switches and the talk-over rule may raise the red cue
+                // instead, once You hold the floor after they stop. A pause after the overlap has built up
+                // changes nothing.
+                let gap = openingOverlapGaps(facts, from: u.start, until: th.end, overlapS: cutOverlap, confirmFrames: c.vad.onsetFrames)
+                let over = gap.atOnset > l.cutInOnsetGapMs / 1000 + 1e-9 ? gap.atOnset
+                    : gap.later > LocalLayer.cutInMaxOthersGapS + 1e-9 ? gap.later : nil
+                if let over {
                     let toHold = l.talkOverHoldFloorMs / 1000
                     e.alternative = (.talkOver, (u.start + 0.6)...max(window.upperBound, th.end + toHold + allowance))
-                    e.reason += "; Them pause \(String(format: "%.2f", gap)) s in the opening overlap, so talk_over also fits"
+                    e.reason += "; Them pause \(String(format: "%.2f", over)) s in the opening overlap, so talk_over also fits"
                 }
                 cands.append(e)
             } else if overlap >= l.cutInTrailingMinOverlapMs / 1000 && abs(th.end - u.start) <= l.cutInTrailingWindowS {
@@ -277,27 +280,41 @@ public enum CueOracle {
         return (accepted, tolerated)
     }
 
-    /// Longest run of unvoiced frames in Them's audio from `start` until `overlapS` of both streams
-    /// voiced has built up within one stretch of Them's speech (a pause past
-    /// `LocalLayer.overlapStretchGapS` starts it again), or `end`: the span in which the cut-in can still
-    /// be dropped. 0 when the audio isn't known.
-    static func openingOverlapGap(_ f: Facts, from start: Double, until end: Double, overlapS: Double) -> Double {
+    /// Runs of unvoiced frames in Them's audio from `start` until `overlapS` of both streams voiced has
+    /// built up (or `end`), the span in which the cut-in can still be dropped: the one `start` lands in
+    /// (from `start`), and the longest after Them speak again. The engine counts Them as speaking for
+    /// `LocalLayer.speakingTailS` after their last voiced frame, and starts the cut-in once You's VAD has
+    /// confirmed (`confirmFrames` voiced frames after the onset). If their last voiced frame is still
+    /// inside that tail then, `start` didn't land in a pause: their pause is a later one, measured from
+    /// that frame. (0, 0) when the audio isn't known or ends before `start`.
+    static func openingOverlapGaps(_ f: Facts, from start: Double, until end: Double, overlapS: Double,
+                                   confirmFrames: Int) -> (atOnset: Double, later: Double) {
         let n = min(f.callVoiced.count, f.micVoiced.count)
-        guard n > 0, end > start else { return 0 }
-        var overlap = 0.0, run = 0, longest = 0
+        guard n > 0, end > start else { return (0, 0) }
+        var overlap = 0.0, run = 0, atOnset = 0, longest = 0, heard = false
         var i = max(0, Int((start / f.frameS).rounded()))
+        guard i < n else { return (0, 0) }
+        var back = 0
+        while back < i && !f.callVoiced[i - 1 - back] && Double(back + 1) * f.frameS <= LocalLayer.speakingTailS + 1e-9 { back += 1 }
+        let spoke = back < i && f.callVoiced[i - 1 - back]
+        if spoke && Double(back + confirmFrames) * f.frameS <= LocalLayer.speakingTailS + 1e-9 {
+            heard = true
+            run = back
+        }
         while i < n && Double(i) * f.frameS < end && overlap < overlapS - 1e-9 {
             if f.callVoiced[i] {
-                if Double(run) * f.frameS > LocalLayer.overlapStretchGapS + 1e-9 { overlap = 0 }
+                if !heard { atOnset = run }
+                heard = true
                 run = 0
                 if f.micVoiced[i] { overlap += f.frameS }
             } else {
                 run += 1
-                longest = max(longest, run)
+                if heard { longest = max(longest, run) }
             }
             i += 1
         }
-        return Double(longest) * f.frameS
+        if !heard { atOnset = run }
+        return (Double(atOnset) * f.frameS, Double(longest) * f.frameS)
     }
 
     /// Each expected cue takes the first unused actual cue it accepts (its type and window, or its alternative).
