@@ -123,7 +123,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         /// `pivot_reply_min_words`, and is about the user: first-person words are at least
         /// `pivot_first_person_share` of first-person plus `pivot_other_person` words, and a sentence
         /// opens with a pivot opener or there are at least `pivot_first_person_min_words` first-person
-        /// words. A first sentence with a `pivot_sympathy` phrase makes the reply about them.
+        /// words. A reply opening with a `pivot_sympathy` phrase counts only with a pivot opener after
+        /// the sympathy (its next clause or a later sentence), so pure commiseration is never one.
         public var pivotReplyMaxStartS: Double
         public var pivotReplyMinWords: Int
         public var pivotOpeners: [String]

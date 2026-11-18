@@ -12,8 +12,11 @@ import Foundation
 ///    `pivot_reply_min_words` about themselves: first-person words make up `pivot_first_person_share`
 ///    of the person words (`pivot_other_person` counts you, he, she, they and the like against it),
 ///    and either a sentence opens with a pivot opener or there are at least
-///    `pivot_first_person_min_words` of them. A reply whose first sentence leads with sympathy
-///    (`pivot_sympathy`: "sorry to hear", "i hope", "congratulations") is about them.
+///    `pivot_first_person_min_words` of them. A reply that opens with sympathy (`pivot_sympathy`:
+///    "sorry to hear", "i hope", "congratulations", "that's rough") counts only when it then turns to
+///    the user's own story: a pivot opener in the clause right after the sympathy or at a later
+///    sentence start ("i'm so sorry, that's rough. when my dad had surgery i…"). Sympathy with only
+///    talk about them, or offers of help, is commiseration, not a pivot.
 /// 3. No question back anywhere in the reply: no "?", no sentence or clause that opens like a
 ///    question ("how's", "did your", "are they"), no sentence ending in a tag ("…, right"), no
 ///    invitation.
@@ -272,12 +275,31 @@ final class PivotGate {
               !lines.contains(where: { line in
                   has(line.text, invites) || pieces(line.text).contains(where: asks)
                       || TextRules.sentences(line.text).contains(where: endsWithTag)
-              }),
-              !has(lines.first.flatMap { TextRules.sentences($0.text).first } ?? "", x.pivotSympathy) else { return false }
+              }) else { return false }
         let first = words.filter(firstPerson.contains).count, other = words.filter(otherPerson.contains).count
         let aboutMe = first > 0 && Double(first) >= x.pivotFirstPersonShare * Double(first + other)
+        let opening = sympathyOpening(lines)
+        if opening.led {
+            let story = opening.next.map { next in x.pivotOpeners.contains { TextRules.startsWith(strippingLeadIns(next), $0) } } ?? false
+            return aboutMe && (story || lines.contains(where: opensWithPivot))
+        }
         if aboutMe && lines.contains(where: opensWithPivot) { return true }
         return aboutMe && first >= x.pivotFirstPersonMinWords
+    }
+
+    /// Does the reply open with sympathy for them ("oh no, i'm so sorry, that's rough")? If so, the
+    /// clause right after it, where a turn to the user's own story would start.
+    private func sympathyOpening(_ lines: [Line]) -> (led: Bool, next: String?) {
+        var led = false
+        for piece in lines.flatMap({ pieces($0.text) }) {
+            if TextRules.tokens(strippingLeadIns(piece)).isEmpty { continue }
+            if has(piece, x.pivotSympathy) {
+                led = true
+                continue
+            }
+            return (led, led ? piece : nil)
+        }
+        return (led, nil)
     }
 
     /// A sentence of the line starts with a pivot opener, after any lead-in words ("oh nice, that

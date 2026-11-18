@@ -18,6 +18,9 @@ enum PivotLines {
     static let meTooMidSentence = "That is wonderful news, congratulations to you both, your sister told me too and she was so thrilled for you."
     static let commiseration = "Oh no, I am so sorry to hear that, I hope he gets better soon, I will be thinking of him and I am here if I can help."
     static let sympathyThenStory = "I am so sorry to hear that, I had the same thing with my knee last year and I was on crutches for a month."
+    static let acknowledgeThenStory = "I'm so sorry, that's rough. When my dad had surgery I was at the hospital every night and I barely slept for a month."
+    static let pureCommiseration = "I'm so sorry to hear that, I hope he gets better soon, I'll be thinking of him."
+    static let commiserationAndHelp = "I am so sorry to hear that, I hope it gets easier, I will be thinking about it all week and I am here if I can help."
     static let aboutThirdPerson = "My week was busy, I had my brother over and he and his kids stayed with us, they loved the park."
     static let movedStory = "I had the same thing when I moved last year, the boxes took me a month to clear out."
     static let lostMarkQuestions = [
@@ -202,9 +205,21 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(pivot(reply: PivotLines.commiseration, share: PivotLines.worried))
     }
 
-    /// Mostly first person, but it leads with sympathy for them.
-    func testASympathyLedReplyIsNone() {
-        assertNoCandidate(pivot(reply: PivotLines.sympathyThenStory, share: PivotLines.worried))
+    /// Acknowledging their feeling and then telling the user's own story is still a pivot.
+    func testSympathyThenTheUsersOwnStoryIsACandidate() {
+        for reply in [PivotLines.acknowledgeThenStory, PivotLines.sympathyThenStory] {
+            XCTAssertEqual(run(pivot(reply: reply, share: PivotLines.worried), until: 30).counters.candidates, 1, reply)
+        }
+    }
+
+    /// Sympathy and talk about them, with no turn to the user's own experience.
+    func testPureCommiserationIsNone() {
+        assertNoCandidate(pivot(reply: PivotLines.pureCommiseration, share: PivotLines.worried))
+    }
+
+    /// Mostly first person ("i will be thinking", "i am here"), but only sympathy and an offer of help.
+    func testCommiserationWithAnOfferOfHelpIsNone() {
+        assertNoCandidate(pivot(reply: PivotLines.commiserationAndHelp, share: PivotLines.worried))
     }
 
     /// Three first-person words, but as many about someone else (he, his, they).

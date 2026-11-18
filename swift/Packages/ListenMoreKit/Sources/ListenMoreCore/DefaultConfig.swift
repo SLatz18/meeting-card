@@ -89,7 +89,7 @@ public enum DefaultConfig {
     "pivot_invites": ["what about you", "how about you", "what about yours", "how about yours", "have you ever", "did you ever", "do you ever", "has that ever", "same for you", "your turn", "tell me about yours", "anything like that"],
     "pivot_reply_max_start_s": 5.0,
     "pivot_reply_min_words": 15,
-    "pivot_openers": ["that reminds me", "reminds me of", "same thing happened to me", "that happened to me", "when i was", "i remember when", "i remember", "back when i", "i once", "i had the same", "i had a similar", "i did the same", "me too", "same with me", "same for me", "my own", "speaking of"],
+    "pivot_openers": ["that reminds me", "reminds me of", "same thing happened to me", "that happened to me", "when i was", "when my", "i remember when", "i remember", "back when i", "i once", "i had the same", "i had a similar", "i did the same", "me too", "same with me", "same for me", "my own", "speaking of"],
     "pivot_first_person": ["i", "i'm", "i've", "i'd", "i'll", "me", "my", "mine", "myself"],
     "pivot_other_person": ["you", "you're", "you've", "you'd", "you'll", "your", "yours", "yourself", "he", "he's", "he'd", "he'll", "him", "his", "himself", "she", "she's", "she'd", "she'll", "her", "hers", "herself", "they", "they're", "they've", "they'd", "they'll", "them", "their", "theirs", "themselves"],
     "pivot_first_person_min_words": 3,
