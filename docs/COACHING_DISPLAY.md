@@ -174,7 +174,7 @@ mark lingers like C and leaves when its row scrolls out of the three caption row
 
 ## 4. Snapshots
 
-Rendered by `CueDisplaySnapshotTests` (macOS CI, the `cue-display-snapshots` artifact); copies in
+Rendered by `CueDisplaySnapshotTests` (macOS CI, the `cue-display-snapshots` artifact); compressed copies in
 `docs/coaching-display/`. Card and pill: the busy call (harness, shipped pacing) at 30.5 s, during the talk-over
 cue. Strips: the surface at several moments of a timeline, each labelled with its time.
 
@@ -221,7 +221,7 @@ Card, dark:
 ![Burst, glyph state, dark](coaching-display/burst-card-glyph-state-dark.png)
 ![Burst, caption-anchored, dark](coaching-display/burst-card-caption-anchored-dark.png)
 
-Pill (rotating line, then glyph state), light and dark:
+Pill (rotating line, then glyph state; caption-anchored's pill is the rotating line's), light and dark:
 
 ![Burst, pill, rotating line](coaching-display/burst-pill-rotating-line-light.png)
 ![Burst, pill, glyph state](coaching-display/burst-pill-glyph-state-light.png)
@@ -238,7 +238,9 @@ shelf life.
 ![Before pacing, glyph state](coaching-display/before-pacing-card-glyph-state-light.png)
 ![Before pacing, caption-anchored](coaching-display/before-pacing-card-caption-anchored-light.png)
 
-Dark versions of every strip are in `docs/coaching-display/` (`*-dark.png`).
+The before-pacing strips in dark mode, and caption-anchored's pill (identical to the rotating line's), are only
+in the CI artifact; the images here are compressed with `pngquant 64` to keep the repository light (CI checks
+the sizes).
 
 ## Recommendation
 

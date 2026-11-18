@@ -108,6 +108,26 @@ jobs:
             done
           done
           [[ $missing == 0 ]]
+      # The doc's copies stay light: each image at most 64 KB, the folder at most 600 KB, and every image
+      # in the folder embedded in docs/COACHING_DISPLAY.md (and every embedded one present).
+      - name: Coaching display doc images
+        run: |
+          set -euo pipefail
+          dir=docs/coaching-display
+          doc=docs/COACHING_DISPLAY.md
+          total=0
+          for f in "$dir"/*.png; do
+            size=$(stat -f%z "$f")
+            echo "$(basename "$f"): $size bytes"
+            (( size <= 64 * 1024 )) || { echo "$f is over 64 KB"; exit 1; }
+            grep -qF "(coaching-display/$(basename "$f"))" "$doc" || { echo "$f is not embedded in $doc"; exit 1; }
+            total=$((total + size))
+          done
+          echo "$dir: $total bytes"
+          (( total <= 600 * 1024 )) || { echo "$dir is over 600 KB"; exit 1; }
+          for ref in $(grep -oE '\(coaching-display/[^)]+\.png\)' "$doc" | tr -d '()'); do
+            test -s "docs/$ref" || { echo "$doc embeds missing docs/$ref"; exit 1; }
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: cue-display-snapshots
