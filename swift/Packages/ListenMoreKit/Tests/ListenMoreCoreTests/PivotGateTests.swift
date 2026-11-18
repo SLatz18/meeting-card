@@ -354,6 +354,22 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(s)
     }
 
+    /// A pending invitation lapses `pivot_invite_hold_s` after it was heard.
+    func testAPendingInvitationExpires() {
+        var s = PivotScript()
+        s.them("Have you ever run a race? I always wanted to try one.", 0.5, 3.5)
+        s.you("Yeah.", 4.0, 4.4)
+        s.them(PivotLines.share, 60.0, 65.0)
+        s.you(PivotLines.pivot, 65.5, 71.5)
+        XCTAssertEqual(run(s, until: 80).counters.candidates, 1, "their share ends 67 s after the invitation's turn")
+        var inside = PivotScript()
+        inside.them("Have you ever run a race? I always wanted to try one.", 0.5, 3.5)
+        inside.you("Yeah.", 4.0, 4.4)
+        inside.them(PivotLines.share, 50.0, 55.0)
+        inside.you(PivotLines.pivot, 55.5, 61.5)
+        XCTAssertEqual(run(inside, until: 80).counters.candidates, 0, "57 s after: still invited")
+    }
+
     /// An invitation the user answered at length is spent: a later share and pivot still count.
     func testAnInvitationAnsweredAtLengthIsSpent() {
         var s = PivotScript()

@@ -122,6 +122,9 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         /// Phrases that hand the floor to the other person, anywhere in a turn (with `question_open_invites`):
         /// in their turn an invitation to share, in the user's reply a question back.
         public var pivotInvites: [String]
+        /// An invitation the user answered with less than `pivot_reply_min_words` still holds for
+        /// their turns ending within this long of it.
+        public var pivotInviteHoldS: Double
         /// The user's reply starts within this long of their last speech, runs at least
         /// `pivot_reply_min_words`, and is about the user: first-person words are at least
         /// `pivot_first_person_share` of first-person plus `pivot_other_person` words, and a sentence
@@ -337,7 +340,7 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         try judge.typesafe.validate()
         guard text.pivotShareMinWords > 0, text.pivotReplyMinWords > 0, text.pivotReplyMaxStartS >= 0,
               text.pivotFirstPersonMinWords > 0, text.pivotOpenerMinFirstPerson > 0, (0...1).contains(text.pivotFirstPersonShare),
-              text.pivotTurnEndGapS > 0, text.pivotTranscriptWaitS >= 0, text.pivotRearmS >= 0,
+              text.pivotTurnEndGapS > 0, text.pivotTranscriptWaitS >= 0, text.pivotRearmS >= 0, text.pivotInviteHoldS >= 0,
               text.pivotMaxPerCall >= 0 else { throw ConfigError.invalid("bad text.pivot limits") }
         guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,
               trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS else { throw ConfigError.invalid("bad trigger timing") }

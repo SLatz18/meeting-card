@@ -7,7 +7,8 @@ import Foundation
 /// 1. Their turn has at least `pivot_share_min_words`, a share marker ("i just", "we finally") and a
 ///    share word (a feeling, a life event or a personal topic), no invitation to share (`pivot_invites`,
 ///    `question_open_invites`) and no question at its end. An invitation the user answered with less
-///    than `pivot_reply_min_words` (a backchannel) still holds for their next turn. The share has to
+///    than `pivot_reply_min_words` (a backchannel) still holds for their turns ending within
+///    `pivot_invite_hold_s`. The share has to
 ///    be what the user answers: in their last line, followed in it only by sentences shorter than
 ///    `pivot_share_min_words` ("it was amazing."), and with no move-on or agenda language from the
 ///    share on (`pivot_move_on`, `update_handoff_phrases`: "let's", "next item", "you go first").
@@ -83,7 +84,9 @@ final class PivotGate {
 
     private struct TheirTurn {
         let shared: Bool
-        let invited: Bool
+        /// The turn end their invitation was heard at: this turn's, or a pending one's.
+        let invitedAt: TimeInterval?
+        var invited: Bool { invitedAt != nil }
     }
 
     private struct Ended {
@@ -118,9 +121,10 @@ final class PivotGate {
     private var reply: Reply?
     private var ended: Ended?
     private var muted = false
-    /// They invited the user to share, and the user hasn't answered at length yet (a backchannel such
-    /// as "yeah" split their turn): their next turn is still an invitation.
-    private var invitePending = false
+    /// They invited the user to share at this turn end, and the user hasn't answered at length yet (a
+    /// backchannel such as "yeah" split their turn): their turns ending within `pivot_invite_hold_s`
+    /// are still an invitation.
+    private var invitedAt: TimeInterval?
     private var lastCandidateTurnEnd: TimeInterval?
     private(set) var counters = Counters()
     private(set) var candidates: [Candidate] = []
@@ -207,7 +211,7 @@ final class PivotGate {
         boundary = -Double.infinity
         reply = nil
         ended = nil
-        invitePending = false
+        invitedAt = nil
     }
 
     // MARK: turns
@@ -242,12 +246,13 @@ final class PivotGate {
         if e.theirs == nil {
             let theirs = them.filter { Elapsed.span($0.end - boundary) > 0 && Elapsed.span($0.end - e.reply.themEnd) <= 0 }
             if theirs.last.map({ Elapsed.span($0.end - e.reply.themEnd) >= 0 }) ?? false {
-                e.theirs = TheirTurn(shared: shared(theirs), invited: invitePending || theirs.contains(where: { has($0.text, invites) }))
+                let pending = invitedAt.flatMap { Elapsed.span(e.at - $0) <= x.pivotInviteHoldS ? $0 : nil }
+                e.theirs = TheirTurn(shared: shared(theirs), invitedAt: theirs.contains(where: { has($0.text, invites) }) ? e.at : pending)
                 ended = e
             }
         }
         if let t = e.theirs, !t.invited, !t.shared {
-            invitePending = false
+            invitedAt = nil
             finish(e)
             return nil
         }
@@ -256,12 +261,12 @@ final class PivotGate {
         guard let t = e.theirs, haveMine else {
             if Elapsed.span(now - e.at) > x.pivotTranscriptWaitS {
                 counters.lateTranscripts += 1
-                if let t = e.theirs { invitePending = t.invited }
+                if let t = e.theirs { invitedAt = t.invitedAt }
                 finish(e)
             }
             return nil
         }
-        invitePending = t.invited && mine.reduce(0, { $0 + TextRules.tokens($1.text).count }) < x.pivotReplyMinWords
+        invitedAt = mine.reduce(0, { $0 + TextRules.tokens($1.text).count }) < x.pivotReplyMinWords ? t.invitedAt : nil
         finish(e)
         guard !t.invited, t.shared, pivots(mine) else { return nil }
         let rearmed = lastCandidateTurnEnd.map { Elapsed.span(e.at - $0) >= x.pivotRearmS } ?? true
