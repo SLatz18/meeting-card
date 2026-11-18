@@ -104,7 +104,7 @@ public enum Checks {
             let files = atEnd?.files ?? []
             let f = files.first
             let named = f.map { $0.name.hasPrefix("Call ") && $0.name.hasSuffix(".md") } ?? false
-            let labelled = f.map { $0.contents.contains("**[") && $0.contents.contains("You:**") } ?? false
+            let labelled = f.map { Self.timesAndLabels($0.contents, labels: Self.transcribedLabels(r)) } ?? false
             let after = r.transcripts.last { $0.phase == "after-teardown" }
             let wiped = r.transcriptDeletedAtTeardown && (after?.files.isEmpty ?? true)
             check("opt-in-transcript", files.count == 1 && named && f?.mode == 0o600 && labelled && wiped,
@@ -240,6 +240,24 @@ public enum Checks {
         return ScenarioResult(scenario: s.name, summary: s.summary, mode: r.mode, transcription: tx, speakers: sp, cues: match,
                               checks: checks, billedSeconds: r.sockets.billedSeconds, lastMeter: r.meters.last, judgeCalls: r.judgeCalls,
                               diagnostics: diagnostics)
+    }
+
+    /// The label of each side with a final transcript, as the caption feed showed it (Them can be renamed).
+    static func transcribedLabels(_ r: RunRecord) -> [String] {
+        [Speaker.me, .others].compactMap { speaker in
+            guard r.captions.contains(where: { $0.speaker == speaker && $0.isFinal }) else { return nil }
+            let shown = r.captionViews.reversed().lazy.compactMap { $0.rows.last { $0.speaker == speaker }?.label }.first
+            return shown ?? (speaker == .me ? "You" : "Them")
+        }
+    }
+
+    /// The saved transcript has a `**[hh:mm:ss] Label:**` line for each label, and at least one. A side
+    /// with nothing transcribed (You, when the budget cap comes before their first words) has no line.
+    static func timesAndLabels(_ contents: String, labels: [String]) -> Bool {
+        !labels.isEmpty && labels.allSatisfy { label in
+            contents.range(of: #"\*\*\[\d{2}:\d{2}:\d{2}\] "# + NSRegularExpression.escapedPattern(for: label) + #":\*\*"#,
+                           options: .regularExpression) != nil
+        }
     }
 
     static func holdReason(_ why: CuePolicy.HoldReason) -> String {
