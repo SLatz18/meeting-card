@@ -216,11 +216,12 @@ final class CueDisplayTests: XCTestCase {
         return String(out)
     }
 
-    /// The bodies of the `switch` statements in `code` (already stripped), outermost and nested alike.
+    /// The bodies of the `switch` statements in `code` (already stripped), outermost and nested alike. A body holds
+    /// only its own arms: the text of a switch nested inside it is blanked, so each switch is judged on its own.
     static func switchBodies(_ code: String) -> [String] {
         let chars = Array(code)
         let word = Array("switch")
-        var bodies: [String] = []
+        var ranges: [Range<Int>] = []
         var i = 0
         while i + word.count < chars.count {
             let before = i == 0 ? " " : chars[i - 1]
@@ -233,15 +234,34 @@ final class CueDisplayTests: XCTestCase {
                 if chars[j] == "{" { depth += 1 } else if chars[j] == "}" { depth -= 1; if depth == 0 { break } }
                 j += 1
             }
-            bodies.append(String(chars[(open + 1)..<min(j, chars.count)]))
+            ranges.append((open + 1)..<min(j, chars.count))
             i += word.count
         }
-        return bodies
+        return ranges.map { r in
+            var own = Array(chars[r])
+            for inner in ranges where inner != r && inner.lowerBound >= r.lowerBound && inner.upperBound <= r.upperBound {
+                for k in inner where own[k - r.lowerBound] != "\n" { own[k - r.lowerBound] = " " }
+            }
+            return String(own)
+        }
     }
 
-    /// A switch over a cue enum (`CueType`, `CoachNudge.Kind`): it names one of the cases only they have.
+    /// The cases only `LocalEvent.Kind` has. It shares `interrupt`, `talkOver`, `monologue` and `talkShare` with the
+    /// cue enums, so those four can't tell the two apart; these can.
+    static let localEventOnlyCases = ["prosody", "meOnset", "meOffset", "othersOnset", "othersOffset"]
+
+    /// The cue enums' case names (`CueType`, `CoachNudge.Kind`).
+    static let cueCases = ["interrupt", "talkOver", "aggressive", "notListening", "selfPivot", "missedQuestion", "monologue", "talkShare"]
+
+    /// A switch over a cue enum (`CueType`, `CoachNudge.Kind`): it names a cue case in an arm and none that only
+    /// `LocalEvent.Kind` has. A switch naming only the four shared names is taken for a cue switch, so a new one
+    /// with a `default:` can't hide behind `LocalEvent.Kind`; a real `LocalEvent.Kind` switch that names only
+    /// those four must be exhaustive too.
     static func switchesOverCues(_ body: String) -> Bool {
-        body.range(of: #"\bcase\b[^:]*\.(notListening|missedQuestion|aggressive|selfPivot)\b"#, options: .regularExpression) != nil
+        func names(_ cases: [String]) -> Bool {
+            body.range(of: #"\bcase\b[^:]*\.(\#(cases.joined(separator: "|")))\b"#, options: .regularExpression) != nil
+        }
+        return names(cueCases) && !names(localEventOnlyCases)
     }
 
     /// A catch-all arm: `default:`, `case _:`, a wildcard in a list of patterns, or a bare binding.
@@ -266,10 +286,17 @@ final class CueDisplayTests: XCTestCase {
         XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case let other: 2 }"), [true])
         XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case other: 2 }"), [true])
         XCTAssertEqual(flagged("switch k { case .selfPivot: 1\n case _ where x: 2 }"), [true])
-        XCTAssertEqual(flagged("switch k { case .notListening: switch j { case .a: 1\n default: 2 } }"), [true])
+        XCTAssertEqual(flagged("switch k { case .x: switch j { case .notListening: 1\n default: 2 } }"), [true], "a nested switch is judged on its own")
+        XCTAssertEqual(flagged("switch k { case .notListening: switch j { case .a: 1\n default: 2 } }"), [false], "and so is the outer one")
+        XCTAssertEqual(flagged("switch k { case .aggressive: switch j { case .prosody: 1\n case .meOnset: 2 }\n default: 3 }"), [true],
+                       "a nested LocalEvent.Kind switch doesn't make the outer one a LocalEvent.Kind switch")
         XCTAssertEqual(flagged("switch k { case .missedQuestion: 1 } // default: _\nlet s = \"default:\""), [false], "comments and strings don't count")
         XCTAssertEqual(flagged("switch s { case \"not_listening\": 1\n default: 2 }"), [], "a switch over a String isn't one over the enums")
-        XCTAssertEqual(flagged("switch e { case .talkShare: 1\n default: 2 }"), [], "another enum's cases")
+        XCTAssertEqual(flagged("switch e { case .prosody: 1\n case .interrupt: 2\n default: 3 }"), [], "LocalEvent.Kind: it has cases the cues don't")
+        XCTAssertEqual(flagged("switch e { case .interrupt, .talkOver: 1\n case .monologue: 2\n default: 3 }"), [true],
+                       "naming only the four names the two enums share still counts as a cue switch")
+        XCTAssertEqual(flagged("switch e { case .talkShare: 1\n default: 2 }"), [true])
+        XCTAssertEqual(flagged("switch e { case .interrupt: 1\n case .talkOver: 2\n case .monologue: 3\n case .talkShare: 4 }"), [false])
     }
 
     /// No `default:`, `case _:` or other catch-all in any switch over the cue enums, wherever it is: a new cue type
