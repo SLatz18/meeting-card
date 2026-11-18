@@ -499,7 +499,7 @@ public final class GptLayer: @unchecked Sendable {
                 provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
-        transcribeModel = LogToken(config.gpt.transcribeModel)
+        transcribeModel = LogToken.model(config.gpt.transcribeModel)
         if provider == nil { core.stopJudging() }
         self.now = now
         self.offer = offer

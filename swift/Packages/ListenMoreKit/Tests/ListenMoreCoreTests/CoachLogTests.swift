@@ -22,8 +22,8 @@ final class CoachLogTests: XCTestCase {
 
     /// One of every event, with awkward labels: every rendering is a name and `key=value` tokens.
     static func everyEvent() -> [CoachLogEvent] {
-        let hostile = LogToken("User's Headset Pro: \"hello, this is my transcript\"")
-        let app = LogToken("us.zoom.xos")
+        let hostile = LogToken.device("User's Headset Pro: \"hello, this is my transcript\"")
+        let app = LogToken.bundleId("us.zoom.xos")
         return [
             .coachEnabled(true), .coachEnabled(false), .screenshotSharing(true),
             .keyCheck(.ok, source: .stored, httpStatus: 200), .keyCheck(.rejected, source: .save, httpStatus: 401),
@@ -36,13 +36,13 @@ final class CoachLogTests: XCTestCase {
             .callEnded(bundleId: app, reason: .audioEnded), .callEnded(bundleId: nil, reason: .manual),
             .sessionStarted(reason: .audio, bundleId: app), .sessionStarted(reason: .manual, bundleId: nil),
             .sessionStopped(reason: .callEnded), .sessionPaused(true), .micMuted(true),
-            .micOpened(route: LogToken("speakers"), source: LogToken("builtIn"), voiceProcessing: true, device: hostile),
-            .micOpened(route: LogToken("bluetooth"), source: LogToken("builtIn"), voiceProcessing: false, device: nil),
-            .micClosed, .micRouteRestart(count: 2), .micOpenFailed(route: LogToken("speakers"), source: LogToken("builtIn")), .micSilent,
+            .micOpened(route: LogToken.route(.speakers), source: LogToken.micSource(.builtIn), voiceProcessing: true, device: hostile),
+            .micOpened(route: LogToken.route(.bluetooth), source: LogToken.micSource(.builtIn), voiceProcessing: false, device: nil),
+            .micClosed, .micRouteRestart(count: 2), .micOpenFailed(route: LogToken.route(.speakers), source: LogToken.micSource(.builtIn)), .micSilent,
             .callAudioStarted(stage: .parentApps, method: .screenCapture, targets: 1),
             .callAudioStarted(stage: .processTap, method: .processTap, targets: 3),
-            .callAudioFailed(stage: .helperApps, domain: LogToken("com.apple.ScreenCaptureKit.SCStreamErrorDomain"), code: -3801),
-            .callAudioFailed(stage: .processTap, domain: LogToken("OSStatus"), code: -50),
+            .callAudioFailed(stage: .helperApps, domain: LogToken.errorDomain("com.apple.ScreenCaptureKit.SCStreamErrorDomain"), code: -3801),
+            .callAudioFailed(stage: .processTap, domain: LogToken.constant("OSStatus"), code: -50),
             .callAudioStopped(code: -3805),
             .audioFlow(source: .call, seconds: 10, buffers: 480, voiced: 120, peakDb: -31), .audioFlow(source: .mic, seconds: 10, buffers: 0, voiced: 0, peakDb: -120),
             .callAudioSilent(source: .call, seconds: 15, kind: .digitalSilence, buffers: 750), .callAudioSilent(source: .call, seconds: 15, kind: .noBuffers, buffers: 0),
@@ -51,12 +51,12 @@ final class CoachLogTests: XCTestCase {
             .detectCheck(DetectionCheck(micApp: nil, callAudio: false, result: .notMet, reason: .inputDeviceIdle)),
             .detectCheck(DetectionCheck(micApp: hostile, callAudio: false, result: .notMet, reason: .appNotAllowed, permission: .notGranted)),
             .permission(.microphone, .granted), .permission(.screenRecording, .denied),
-            .transcriberOpened(speaker: .me, model: LogToken("gpt-live-transcribe")),
-            .transcriberReady(speaker: .others, model: LogToken("gpt-live-transcribe")),
+            .transcriberOpened(speaker: .me, model: LogToken.model("gpt-live-transcribe")),
+            .transcriberReady(speaker: .others, model: LogToken.model("gpt-live-transcribe")),
             .transcriberCounts(speaker: .me, counters: TranscriberCounters()),
             .transcriberDisconnected(speaker: .others),
-            .transcriberError(speaker: .others, model: LogToken("gpt-live-transcribe"), httpStatus: 401, code: LogToken("invalid_request_error/bad_key")),
-            .transcriberError(speaker: nil, model: LogToken("gpt-live-transcribe"), httpStatus: nil, code: LogToken("URLError-1011")),
+            .transcriberError(speaker: .others, model: LogToken.model("gpt-live-transcribe"), httpStatus: 401, code: LogToken.serverCode("invalid_request_error/bad_key")),
+            .transcriberError(speaker: nil, model: LogToken.model("gpt-live-transcribe"), httpStatus: nil, code: LogToken.serverCode("URLError-1011")),
             .transcriberTransport(httpStatus: 403, urlErrorCode: -1011, closeCode: -1),
             .transcriberTransport(httpStatus: nil, urlErrorCode: nil, closeCode: 1006),
             .captionsReceived(seconds: 10, final: 3, partial: 12),
@@ -85,10 +85,10 @@ final class CoachLogTests: XCTestCase {
         XCTAssertEqual(CoachLogEvent.keyGate(.rejected).rendered, "key.gate state=rejected")
         XCTAssertEqual(CoachLogEvent.keyStore(.save, ok: false, status: -25244).rendered, "key.store action=save result=failed status=-25244")
         XCTAssertEqual(CoachLogEvent.gptLayer(enabled: false, reason: .keyRejected).rendered, "gpt.layer enabled=false reason=keyRejected")
-        XCTAssertEqual(CoachLogEvent.callAudioFailed(stage: .processTap, domain: LogToken("OSStatus"), code: -50).rendered,
+        XCTAssertEqual(CoachLogEvent.callAudioFailed(stage: .processTap, domain: LogToken.constant("OSStatus"), code: -50).rendered,
                        "callAudio.failed stage=processTap domain=OSStatus code=-50")
-        XCTAssertEqual(CoachLogEvent.transcriberError(speaker: .others, model: LogToken("gpt-live-transcribe"), httpStatus: 401,
-                                                      code: LogToken("invalid_api_key")).rendered,
+        XCTAssertEqual(CoachLogEvent.transcriberError(speaker: .others, model: LogToken.model("gpt-live-transcribe"), httpStatus: 401,
+                                                      code: LogToken.serverCode("invalid_api_key")).rendered,
                        "transcriber.error speaker=others model=gpt-live-transcribe http=401 code=invalid_api_key")
         XCTAssertEqual(CoachLogEvent.audioFlow(source: .call, seconds: 10, buffers: 480, voiced: 120, peakDb: -31).rendered,
                        "audio.flow source=call seconds=10 buffers=480 voiced=120 peakDb=-31")
@@ -98,43 +98,71 @@ final class CoachLogTests: XCTestCase {
         XCTAssertEqual(CoachLogEvent.captionsReceived(seconds: 10, final: 1, partial: 0).rendered, "captions.received seconds=10 final=1 partial=0")
         XCTAssertEqual(CoachLogEvent.captionsState(captions: true, saving: false, keyUsable: true, inCall: false).rendered,
                        "captions.state captions=true saving=false keyUsable=true inCall=false")
-        XCTAssertEqual(CoachLogEvent.transcriberOpened(speaker: .me, model: LogToken("m")).rendered, "transcriber.opened speaker=me model=m")
-        XCTAssertEqual(CoachLogEvent.transcriberReady(speaker: .others, model: LogToken("m")).rendered, "transcriber.ready speaker=others model=m")
+        XCTAssertEqual(CoachLogEvent.transcriberOpened(speaker: .me, model: LogToken.model("m")).rendered, "transcriber.opened speaker=me model=m")
+        XCTAssertEqual(CoachLogEvent.transcriberReady(speaker: .others, model: LogToken.model("m")).rendered, "transcriber.ready speaker=others model=m")
         var c = TranscriberCounters()
         c.appends = 500; c.commits = 4; c.acks = 4; c.completions = 3; c.emptyCompletions = 1
         XCTAssertEqual(CoachLogEvent.transcriberCounts(speaker: .me, counters: c).rendered,
                        "transcriber.counts speaker=me appends=500 commits=4 acks=4 completions=3 empty=1")
-        XCTAssertEqual(CoachLogEvent.sessionStarted(reason: .audio, bundleId: LogToken("us.zoom.xos")).rendered,
+        XCTAssertEqual(CoachLogEvent.sessionStarted(reason: .audio, bundleId: LogToken.bundleId("us.zoom.xos")).rendered,
                        "session.started reason=audio app=us.zoom.xos")
         XCTAssertEqual(CoachLogEvent.callDetected(bundleId: nil).rendered, "call.detected", "no app, no field")
     }
 
     // MARK: redaction
 
-    func testLabelsKeepOnlyPlainCharactersAndALimitedLength() {
-        XCTAssertEqual(LogToken("MacBook Pro Microphone").value, "MacBook_Pro_Microphone")
-        XCTAssertEqual(LogToken("User's Headset").value, "User_s_Headset")
-        XCTAssertEqual(LogToken("us.zoom.xos").value, "us.zoom.xos")
-        XCTAssertEqual(LogToken("  \n ").value, "none")
-        XCTAssertEqual(LogToken("").value, "none")
-        XCTAssertEqual(LogToken("a,b;c=d\"e\n f").value, "a_b_c_d_e_f", "no separator, quote or newline survives")
-        XCTAssertEqual(LogToken(String(repeating: "ab.", count: 100)).value.count, LogToken.maxLength)
-        XCTAssertNil(LogToken(nil as String?))
+    func testDeviceNamesKeepOnlyPlainCharactersAndALimitedLength() {
+        XCTAssertEqual(LogToken.device("MacBook Pro Microphone").value, "MacBook_Pro_Microphone")
+        XCTAssertEqual(LogToken.device("User's Headset").value, "User_s_Headset")
+        XCTAssertEqual(LogToken.device("  \n ").value, "none")
+        XCTAssertEqual(LogToken.device("").value, "none")
+        XCTAssertEqual(LogToken.device("a,b;c=d\"e\n f").value, "a_b_c_d_e_f", "no separator, quote or newline survives")
+        XCTAssertEqual(LogToken.device(String(repeating: "ab.", count: 100)).value.count, LogToken.maxLength)
+        XCTAssertNil(LogToken.bundleIdOrNil(nil))
+        XCTAssertNil(LogToken.version(nil))
     }
 
-    /// Anything shaped like a key, a header or one long unbroken secret is replaced, wherever it sits.
-    func testKeyShapedLabelsAreRedacted() {
-        for raw in ["sk-test-not-real", "device sk-abc", "SK-UPPER", "Bearer abc", "Authorization: Bearer x",
-                    String(repeating: "A1b2", count: 12), "prefix." + String(repeating: "x", count: 40)] {
-            XCTAssertEqual(LogToken(raw).value, "redacted", raw)
+    /// Each constructor checks that its input looks like what it is named for; free text becomes `invalid`.
+    func testConstructorsCheckTheShapeOfTheirInput() {
+        XCTAssertEqual(LogToken.bundleId("us.zoom.xos").value, "us.zoom.xos")
+        XCTAssertEqual(LogToken.bundleId("com.google.Chrome.helper.renderer").value, "com.google.Chrome.helper.renderer")
+        XCTAssertEqual(LogToken.bundleId("Can you send me the budget numbers").value, "invalid", "a sentence is not a bundle ID")
+        XCTAssertEqual(LogToken.bundleId("nodots").value, "invalid")
+        XCTAssertEqual(LogToken.model("gpt-live-transcribe").value, "gpt-live-transcribe")
+        XCTAssertEqual(LogToken.model("gpt-live-transcribe-with-a-very-long-dated-name-2026-01-31").value,
+                       "gpt-live-transcribe-with-a-very-long-dated-name-2026-01-31", "long names with separators are kept")
+        XCTAssertEqual(LogToken.model("hello world").value, "invalid")
+        XCTAssertEqual(LogToken.version("15.1.0")?.value, "15.1.0")
+        XCTAssertEqual(LogToken.version("2.0 (1)")?.value, "invalid")
+        XCTAssertEqual(LogToken.errorDomain("NSOSStatusErrorDomain").value, "NSOSStatusErrorDomain")
+        XCTAssertEqual(LogToken.errorDomain("some sentence here").value, "invalid")
+        XCTAssertEqual(LogToken.serverCode("invalid_request_error/invalid_api_key").value, "invalid_request_error/invalid_api_key")
+        XCTAssertEqual(LogToken.serverCode("a message with spaces").value, "a_message_with_spaces")
+        XCTAssertEqual(LogToken.route(.bluetooth).value, "bluetooth")
+        XCTAssertEqual(LogToken.micSource(.builtIn).value, "builtIn")
+        XCTAssertEqual(LogToken.constant("OSStatus").value, "OSStatus")
+    }
+
+    /// Key-shaped input is replaced in every role; a name that only contains "sk-" is not a key.
+    func testKeyShapedLabelsAreRedactedButDeskMicIsNot() {
+        let keyish = ["sk-test-not-real", "device sk-abc12345", "SK-UPPERCASE1", "Bearer abc", "Authorization: Bearer x",
+                      String(repeating: "A1b2", count: 12), "prefix." + String(repeating: "x", count: 40)]
+        for raw in keyish {
+            XCTAssertEqual(LogToken.device(raw).value, "redacted", raw)
+            XCTAssertEqual(LogToken.serverCode(raw).value, "redacted", raw)
+            XCTAssertEqual(LogToken.model(raw).value, "redacted", raw)
+            XCTAssertEqual(LogToken.bundleId(raw).value, "redacted", raw)
         }
-        XCTAssertEqual(LogToken("gpt-live-transcribe").value, "gpt-live-transcribe")
+        XCTAssertEqual(LogToken.device("Desk-Mic").value, "Desk-Mic")
+        XCTAssertEqual(LogToken.device("Risk-Free Headset").value, "Risk-Free_Headset")
+        XCTAssertEqual(LogToken.device("Disk-Audio Interface").value, "Disk-Audio_Interface")
+        XCTAssertEqual(LogToken.model("gpt-live-transcribe").value, "gpt-live-transcribe")
     }
 
-    /// A sentence of transcript passed as a label keeps no spaces or punctuation, and is cut short.
+    /// A sentence of transcript passed as a device name keeps no spaces or punctuation, and is cut short.
     func testASentenceCannotPassForALabel() {
         let sentence = "Can you send me the budget numbers before Friday, please? I think the plan is fine."
-        let token = LogToken(sentence).value
+        let token = LogToken.device(sentence).value
         XCTAssertFalse(token.contains(" "))
         XCTAssertFalse(token.contains(","))
         XCTAssertFalse(token.contains("?"))
@@ -205,6 +233,9 @@ final class CoachLogTests: XCTestCase {
         struct Leaky: Error, CustomStringConvertible { var description: String { "Bearer sk-leak" } }
         XCTAssertEqual(CoachLog.describe(GptError.http(401)).httpStatus, 401)
         XCTAssertEqual(CoachLog.describe(GptError.http(401)).code.value, "http")
+        let hostRejected = CoachLog.describe(GptError.hostRejected(first: "a", regional: "b", inner: "c"))
+        XCTAssertNil(hostRejected.httpStatus, "no status is made up for the regional retry")
+        XCTAssertEqual(hostRejected.code.value, "hostRejected")
         XCTAssertEqual(CoachLog.describe(URLError(.timedOut)).code.value, "URLError-1001")
         XCTAssertNil(CoachLog.describe(URLError(.timedOut)).httpStatus)
         let other = CoachLog.describe(Leaky())

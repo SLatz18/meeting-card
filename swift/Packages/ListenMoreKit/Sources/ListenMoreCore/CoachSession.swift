@@ -350,7 +350,7 @@ public final class CoachSession {
         for a in actions {
             switch a {
             case .start(let started):
-                let app = LogToken(started.appKey)
+                let app = LogToken.bundleIdOrNil(started.appKey)
                 loggedApp = app
                 if started.reason == .audio { CoachLog.record(.callDetected(bundleId: app)) }
                 CoachLog.record(.sessionStarted(reason: started.reason, bundleId: app))
@@ -400,7 +400,7 @@ public final class CoachSession {
 
     private func startCapture(bundleIds: [String], stage: CaptureStage) {
         let isNewSession = capturingBundleIds.isEmpty
-        if loggedApp == nil, bundleIds.count == 1 { loggedApp = LogToken(bundleIds[0]) }
+        if loggedApp == nil, bundleIds.count == 1 { loggedApp = LogToken.bundleId(bundleIds[0]) }
         capturingBundleIds = bundleIds
         captureStage = stage
         let engine = engine

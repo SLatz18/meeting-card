@@ -81,7 +81,7 @@ final class ProcessTapCapture {
 
     private func check(_ step: String, _ status: OSStatus) throws {
         guard status == noErr else {
-            CoachLog.record(.callAudioFailed(stage: .processTap, domain: LogToken("OSStatus"), code: Int(status)))
+            CoachLog.record(.callAudioFailed(stage: .processTap, domain: LogToken.constant("OSStatus"), code: Int(status)))
             stop()
             throw TapError.status(step, status)
         }

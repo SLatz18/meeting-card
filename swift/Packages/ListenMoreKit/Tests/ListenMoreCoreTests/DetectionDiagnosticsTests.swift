@@ -138,7 +138,7 @@ final class DetectionDiagnosticsTests: XCTestCase {
     // MARK: throttle
 
     func check(_ reason: DetectionReason = .noMicHolder, timer: Int? = nil, app: String? = nil) -> DetectionCheck {
-        DetectionCheck(micApp: app.map { LogToken($0) }, callAudio: false, result: .notMet, reason: reason, timerSeconds: timer)
+        DetectionCheck(micApp: app.map { LogToken.bundleId($0) }, callAudio: false, result: .notMet, reason: reason, timerSeconds: timer)
     }
 
     func testFirstCheckIsLogged() {

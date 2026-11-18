@@ -75,9 +75,9 @@ public final class MicCapture: MicSource {
         case let .opened(plan, applied, deviceID):
             let voiceProcessing = applied?.voiceProcessing ?? false
             let ducking = applied?.ducking
-            CoachLog.record(.micOpened(route: LogToken(plan.route.rawValue), source: LogToken(plan.micSource.rawValue),
+            CoachLog.record(.micOpened(route: LogToken.route(plan.route), source: LogToken.micSource(plan.micSource),
                                        voiceProcessing: voiceProcessing,
-                                       device: deviceID.flatMap { CoreAudioRoutes.string($0, kAudioObjectPropertyName) }.map { LogToken($0) }))
+                                       device: deviceID.flatMap { CoreAudioRoutes.string($0, kAudioObjectPropertyName) }.map { LogToken.device($0) }))
             Log.capture.info("mic open: route \(plan.route.rawValue, privacy: .public), micSource \(plan.micSource.rawValue, privacy: .public), voiceProcessing \(voiceProcessing, privacy: .public), advanced ducking \(ducking?.advanced ?? false, privacy: .public), ducking level \(ducking?.level.rawValue ?? -1, privacy: .public)")
         case .closed:
             CoachLog.record(.micClosed)
@@ -86,7 +86,7 @@ public final class MicCapture: MicSource {
             CoachLog.record(.micRouteRestart(count: count))
             Log.capture.info("mic route restart, count \(count, privacy: .public)")
         case let .openFailed(plan):
-            CoachLog.record(.micOpenFailed(route: LogToken(plan.route.rawValue), source: LogToken(plan.micSource.rawValue)))
+            CoachLog.record(.micOpenFailed(route: LogToken.route(plan.route), source: LogToken.micSource(plan.micSource)))
             Log.capture.error("mic open failed: route \(plan.route.rawValue, privacy: .public), micSource \(plan.micSource.rawValue, privacy: .public)")
         case .inputSilent:
             CoachLog.record(.micSilent)

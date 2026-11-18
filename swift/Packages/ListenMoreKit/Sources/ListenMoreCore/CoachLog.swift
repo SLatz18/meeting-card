@@ -1,61 +1,5 @@
 import Foundation
 
-/// A short label that is safe to write to the coach diagnostics file: a bundle ID, an audio device
-/// or route name, a model name, an error domain or a server error code. Whatever goes in comes out
-/// as at most `maxLength` characters of `A-Z a-z 0-9 . _ : / ( ) + -`: spaces and every other
-/// character become `_`, so a sentence cannot pass for a label. Anything shaped like a key
-/// (`sk-` anywhere, a long unbroken run of key characters, "Bearer") is replaced by `redacted`.
-public struct LogToken: Equatable, Sendable, CustomStringConvertible {
-    public static let maxLength = 64
-    public static let redacted = LogToken(verbatim: "redacted")
-    public static let none = LogToken(verbatim: "none")
-    /// A run of this many key characters is never a name worth keeping.
-    static let longestRun = 32
-
-    public let value: String
-    public var description: String { value }
-
-    public init(_ raw: String) {
-        value = Self.clean(raw)
-    }
-
-    public init?(_ raw: String?) {
-        guard let raw else { return nil }
-        self.init(raw)
-    }
-
-    private init(verbatim: String) { value = verbatim }
-
-    static func clean(_ raw: String) -> String {
-        let lower = raw.lowercased()
-        if lower.contains("sk-") || lower.contains("bearer") || lower.contains("authorization") { return "redacted" }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        var out = ""
-        var run = 0
-        for scalar in trimmed.unicodeScalars {
-            switch scalar {
-            case "A"..."Z", "a"..."z", "0"..."9", "_", "-": run += 1
-            default: run = 0
-            }
-            if run >= longestRun { return "redacted" }
-            if allowed(scalar) {
-                out.unicodeScalars.append(scalar)
-            } else if !out.hasSuffix("_") {
-                out.append("_")
-            }
-        }
-        if out.isEmpty { return "none" }
-        return String(out.prefix(maxLength))
-    }
-
-    private static func allowed(_ s: Unicode.Scalar) -> Bool {
-        switch s {
-        case "A"..."Z", "a"..."z", "0"..."9", ".", "_", ":", "/", "(", ")", "+", "-": return true
-        default: return false
-        }
-    }
-}
-
 public enum KeyCheckSource: String, Equatable, Sendable {
     /// The stored key, checked when the coach turns on or the app starts with it on.
     case stored
@@ -274,7 +218,7 @@ public enum CoachLogEvent: Equatable, Sendable {
             case .flag(let b): out += " \(key)=\(b)"
             case .number(let n): if let n { out += " \(key)=\(n)" }
             case .token(let t): if let t { out += " \(key)=\(t.value)" }
-            case .word(let w): out += " \(key)=\(LogToken(w).value)"
+            case .word(let w): out += " \(key)=\(LogToken.serverCode(w).value)"
             }
         }
         return out
@@ -346,16 +290,17 @@ public enum CoachLog {
     public static func describe(_ error: Error) -> (httpStatus: Int?, code: LogToken) {
         if let g = error as? GptError {
             switch g {
-            case .http(let status): return (status, LogToken("http"))
-            case .badResponse: return (nil, LogToken("badResponse"))
-            case .notConnected: return (nil, LogToken("notConnected"))
-            case .budgetExhausted: return (nil, LogToken("budgetExhausted"))
-            case .hostRejected: return (401, LogToken("hostRejected"))
+            case .http(let status): return (status, LogToken.constant("http"))
+            case .badResponse: return (nil, LogToken.constant("badResponse"))
+            case .notConnected: return (nil, LogToken.constant("notConnected"))
+            case .budgetExhausted: return (nil, LogToken.constant("budgetExhausted"))
+            // The 401 was the first host's; this error is about the retry on the regional host, so no status is claimed.
+            case .hostRejected: return (nil, LogToken.constant("hostRejected"))
             }
         }
-        if let u = error as? URLError { return (nil, LogToken("URLError\(u.code.rawValue)")) }
+        if let u = error as? URLError { return (nil, LogToken.serverCode("URLError\(u.code.rawValue)")) }
         let ns = error as NSError
-        return (nil, LogToken("\(ns.domain):\(ns.code)"))
+        return (nil, LogToken.serverCode("\(ns.domain):\(ns.code)"))
     }
 
     /// The OSStatus or code an error carries, without any message text: a `StatusCarryingError`'s status,
@@ -369,6 +314,6 @@ public enum CoachLog {
     /// The error's domain and code, for failures with no HTTP side (capture start).
     public static func domainAndCode(_ error: Error) -> (domain: LogToken, code: Int) {
         let ns = error as NSError
-        return (LogToken(ns.domain), ns.code)
+        return (LogToken.errorDomain(ns.domain), ns.code)
     }
 }

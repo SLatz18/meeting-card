@@ -147,7 +147,7 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
         } catch {
             if !Task.isCancelled {
                 let failure = CoachLog.describe(error)
-                CoachLog.record(.transcriberError(speaker: speaker, model: LogToken(gpt.transcribeModel),
+                CoachLog.record(.transcriberError(speaker: speaker, model: LogToken.model(gpt.transcribeModel),
                                                   httpStatus: failure.httpStatus, code: failure.code))
                 onEvent(.error("realtime read: \(GptError.safe(error))"))
             }
@@ -183,7 +183,7 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
         case "session.updated", "transcription_session.updated":
             // The server applied our session.update: the handshake is confirmed.
             if lock.withLock({ let first = !readyLogged; readyLogged = true; return first }) {
-                CoachLog.record(.transcriberReady(speaker: speaker, model: LogToken(gpt.transcribeModel)))
+                CoachLog.record(.transcriberReady(speaker: speaker, model: LogToken.model(gpt.transcribeModel)))
             }
         case "input_audio_buffer.cleared":
             lock.withLock { if !pendingClears.isEmpty { pendingClears.removeFirst() } }
@@ -195,8 +195,8 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
                 return
             }
             let type = err["type"] as? String ?? "", code = err["code"] as? String ?? ""
-            CoachLog.record(.transcriberError(speaker: speaker, model: LogToken(gpt.transcribeModel), httpStatus: nil,
-                                              code: LogToken("\(type)/\(code)")))
+            CoachLog.record(.transcriberError(speaker: speaker, model: LogToken.model(gpt.transcribeModel), httpStatus: nil,
+                                              code: LogToken.serverCode("\(type)/\(code)")))
             onEvent(.error("realtime error \(type)/\(code)"))
         default:
             break

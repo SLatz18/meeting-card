@@ -100,7 +100,7 @@ final class PrivacyGuardTests: XCTestCase {
                 calls += 1
                 let arg = (text as NSString).substring(with: m.range(at: 1))
                 XCTAssertTrue(arg.hasPrefix(".") || arg.hasPrefix("event"), "\(name): CoachLog.record(\(arg)")
-                XCTAssertFalse(arg.contains("\"") && !arg.contains("LogToken("), "\(name): a string literal outside a LogToken")
+                XCTAssertFalse(arg.contains("\"") && !arg.contains("LogToken."), "\(name): a string literal outside a LogToken")
             }
         }
         XCTAssertGreaterThanOrEqual(calls, 25)

@@ -88,9 +88,9 @@ public enum DetectionDiagnostics {
         // The app to talk about: an allowed app holding the mic if there is one, else the first holder.
         let mapped = holders.compactMap { p in settings.appKey(for: p).map { (p, $0) } }
         let lead = mapped.first
-        let leadName: LogToken? = lead.map { LogToken($0.1) }
-            ?? holders.first.flatMap { LogToken($0.owningBundleId ?? $0.bundleId) }
-            ?? (holders.isEmpty ? nil : LogToken("unidentified"))
+        let leadName: LogToken? = lead.map { LogToken.bundleId($0.1) }
+            ?? holders.first.flatMap { LogToken.bundleIdOrNil($0.owningBundleId ?? $0.bundleId) }
+            ?? (holders.isEmpty ? nil : LogToken.constant("unidentified"))
         let callAudio = lead.map { grouped[$0.1]?.output ?? false } ?? holders.contains { $0.isRunningOutput }
 
         guard enabled else { return check(leadName, callAudio, .notMet, .coachDisabled) }
@@ -104,13 +104,13 @@ public enum DetectionDiagnostics {
         if let key = live.first(where: { !suppressed.contains($0) }) {
             let elapsed = startTimers[key] ?? 0
             let met = elapsed >= settings.startAfterS - 1e-9
-            return check(LogToken(key), true, met ? .met : .notMet, .startTimer, timer: elapsed)
+            return check(LogToken.bundleId(key), true, met ? .met : .notMet, .startTimer, timer: elapsed)
         }
-        if let key = live.first { return check(LogToken(key), true, .notMet, .suppressed) }
+        if let key = live.first { return check(LogToken.bundleId(key), true, .notMet, .suppressed) }
         if lead != nil { return check(leadName, callAudio, .notMet, .noCallAudio) }
 
         if holders.contains(where: { ($0.bundleId ?? "").isEmpty && ($0.owningBundleId ?? "").isEmpty }) {
-            return check(LogToken("unidentified"), callAudio, .notMet, .unidentifiedProcess)
+            return check(LogToken.constant("unidentified"), callAudio, .notMet, .unidentifiedProcess)
         }
         let excluded = holders.allSatisfy { p in
             [p.bundleId, p.owningBundleId].compactMap { $0 }.contains { id in
