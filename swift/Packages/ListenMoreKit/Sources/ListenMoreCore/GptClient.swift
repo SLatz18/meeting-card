@@ -172,15 +172,19 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
     private let gpt: ListenMoreConfig.Gpt
     private let key: APIKey
     private let http: HTTPTransport
+    private let hosts: LearnedHosts
     private let lock = NSLock()
     private var url: String
     private var fallbackTried = false
 
-    public init(config: ListenMoreConfig, key: APIKey, http: HTTPTransport) {
+    /// `hosts`: where a regional Responses URL learned by an earlier judge is kept (each engine start
+    /// builds a new judge; sharing it means only the first call after launch pays for the fallback).
+    public init(config: ListenMoreConfig, key: APIKey, http: HTTPTransport, hosts: LearnedHosts = .shared) {
         gpt = config.gpt
         self.key = key
         self.http = http
-        url = config.gpt.responsesUrl
+        self.hosts = hosts
+        url = hosts.url(for: config.gpt.responsesUrl) ?? config.gpt.responsesUrl
     }
 
     /// The Responses URL in use (the regional one after a fallback).
@@ -201,24 +205,31 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
         return body
     }
 
+    /// One fallback per judge: to the regional host a `401 incorrect_hostname` names, or, when a learned
+    /// host stops working (another key), back to the configured host.
     public func judge(prompt: String) async throws -> (JudgeResult, JudgeUsage) {
         let body = try JSONSerialization.data(withJSONObject: Self.requestBody(gpt: gpt, prompt: prompt))
+        let configured = gpt.responsesUrl
         let (first, tried) = lock.withLock { (url, fallbackTried) }
         let (status, data) = try await post(first, body)
         if status == 200 { return try Self.parse(data) }
-        guard !tried, let host = Self.regionalHost(status: status, body: data) else { throw GptError.http(status) }
+        guard !tried else { throw GptError.http(status) }
+        let regional = Self.regionalHost(status: status, body: data)
+        guard let alt = regional.flatMap({ Self.withHost(first, $0) }) ?? (first != configured ? configured : nil) else {
+            throw GptError.http(status)
+        }
         lock.withLock { fallbackTried = true }
-        let firstHost = URLComponents(string: first)?.host ?? "?"
-        guard let alt = Self.withHost(first, host) else { throw GptError.http(status) }
         let result: (JudgeResult, JudgeUsage)
         do {
             let (s2, d2) = try await post(alt, body)
             guard s2 == 200 else { throw GptError.http(s2) }
             result = try Self.parse(d2)
         } catch {
-            throw GptError.hostRejected(first: firstHost, regional: host, inner: GptError.safe(error))
+            guard let regional else { throw error }
+            throw GptError.hostRejected(first: URLComponents(string: first)?.host ?? "?", regional: regional, inner: GptError.safe(error))
         }
         lock.withLock { url = alt }
+        if alt == configured { hosts.forget(configured) } else { hosts.learn(alt, for: configured) }
         return result
     }
 
@@ -267,4 +278,18 @@ public final class LiveJudge: CueJudge, @unchecked Sendable {
                                outputTokens: (u["output_tokens"] as? NSNumber)?.intValue ?? 0)
         return (result, usage)
     }
+}
+
+/// Regional Responses URLs judges learned from `401 incorrect_hostname`, by configured URL, for the
+/// life of the process. URLs only: no key, no content.
+public final class LearnedHosts: @unchecked Sendable {
+    public static let shared = LearnedHosts()
+    private let lock = NSLock()
+    private var urls: [String: String] = [:]
+
+    public init() {}
+
+    public func url(for configured: String) -> String? { lock.withLock { urls[configured] } }
+    func learn(_ url: String, for configured: String) { lock.withLock { urls[configured] = url } }
+    func forget(_ configured: String) { _ = lock.withLock { urls.removeValue(forKey: configured) } }
 }
