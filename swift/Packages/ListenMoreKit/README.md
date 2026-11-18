@@ -65,7 +65,7 @@ menu-bar shortcuts only, plus the ⇧⌘A audio toggle's label reduced to a Bool
 Chrome and Dia (AppleScript: the browser filters tabs to the Meet host and the script returns a
 count; Meet mute is not detected, so only Zoom reports `muted`). `CallControlsModel` (`isMuted`, `canMute`,
 `muteUnavailableReason`, `toggleMute()`, `onChange`) is a host's Mute control: one Accessibility press on Zoom's own ⇧⌘A item
-per call, read back right after; a no-op with a reason (`toggleOff`, `permissionDenied`, `noZoomCall`, `meet`) otherwise (`noZoomCall` also while Zoom's menu has no Mute item, e.g. the home window in front). MeetingCard's copy for each reason, and the tooltips and VoiceOver labels, are in `swift/Core/CoachMuteCopy.swift` (no Zoom call hides the control). Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
+per call, read back right after; a no-op with a reason (`toggleOff`, `permissionDenied`, `noZoomCall`, `meet`) otherwise (`noZoomCall` also while the reading is held: Zoom's menu shows no in-meeting shortcuts, neither ⇧⌘A nor ⇧⌘V, while the call's window is still open, e.g. the home window in front). MeetingCard's copy for each reason, and the tooltips and VoiceOver labels, are in `swift/Core/CoachMuteCopy.swift` (no Zoom call hides the control). Off until `isEnabled`; nothing in it prompts, reads windows or titles, or logs. A denied,
 revoked or unsupported backend reports nothing for its app. `CallControlsPermissions.request...`
 shows the system prompts and is for a host's opt-in toggle only.
 
@@ -78,10 +78,11 @@ first bind only. A re-resolve after the bound window closes takes the newest win
 watch, skipping windows opened while another one was bound. A bound window never holds a session: Core Audio's stop
 still applies.
 
-The window list is read each poll only while a native call app runs; a browser is read only once the Meet script's
-hint names a window (`CallWindowSelector.keysToRead`). `CallWindowTracker`'s window source is injectable. While the home
-window is in front, `ZoomControlsReader` holds the call on (`isHeld`) and `CallControlsModel` reports `noZoomCall`, since
-there is no Mute item to press.
+The window list (CGWindowList) is read each poll only while a watched native call app runs (or the app of a coach-any-app
+session); the running-apps list is still read every poll. A browser is listed only once the Meet script's hint names a
+window (`CallWindowSelector.keysToRead`). `CallWindowTracker`'s window source is injectable. When Zoom's menu shows no
+in-meeting shortcuts (neither ⇧⌘A nor ⇧⌘V) while the call's window is still open, `ZoomControlsReader` holds the call on
+(`isHeld`) and `CallControlsModel` reports `noZoomCall`, since there is no Mute item to press.
 
 ## Rule constants
 
