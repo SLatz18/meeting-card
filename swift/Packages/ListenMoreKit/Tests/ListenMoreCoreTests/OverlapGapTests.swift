@@ -382,6 +382,54 @@ final class OverlapGapTests: XCTestCase {
         }
     }
 
+    /// Them's "uh-huh" and a joined pair of them (0.10-0.14 s between the words, 0.90-0.94 s in all).
+    static let uhHuh: Spans = [(0, 0.14), (0.22, 0.40)]
+    static func joinedPair(at t: Double, gap: Double) -> Spans { at(t, uhHuh) + at(t + 0.40 + gap, uhHuh) }
+
+    /// A joined backchannel pair is the one shape the onset tolerance turns into a cut-in with nothing
+    /// else behind it, so it is pinned as a known limit. Them finish at 4.0 s; You start `d` later and
+    /// talk 5 s (well past the backchannel length); Them's pair starts `p` after You's onset, inside the
+    /// onset pause. At 01809d9 the pause before the pair is past 0.16 s and drops the cut-in; at 300 ms
+    /// the pair rides through it (it builds the 0.6 s opening overlap on its own) and You's cut-in fires
+    /// at 1.2 s from the onset. The same You over unbroken Them speech through the end of the pair cuts
+    /// in at 01809d9, at the same time: the tolerance makes the pause behave as if Them hadn't paused,
+    /// and adds no cut-in that continuous speech wouldn't already have had.
+    func testJoinedBackchannelPairInTheOnsetPauseIsAKnownLimit() throws {
+        let off = try config(gapMs: 0), on = try config()
+        func cuts(_ c: ListenMoreConfig, _ them: Spans, _ me: Spans) -> [LocalEvent] {
+            Synthetic.runLocal(c, mic: Synthetic.track(10, me, f0: Self.meF0), call: Synthetic.track(10, them, f0: Self.othersF0))
+                .filter { $0.kind == .interrupt }
+        }
+        for (d, p, g) in [(0.10, 0.12, 0.10), (0.10, 0.30, 0.14), (0.20, 0.24, 0.12), (0.28, 0.20, 0.10)] {
+            let pair = Self.joinedPair(at: 4.0 + d + p, gap: g)
+            let me: Spans = [(4.0 + d, 9.0)]
+            let label = "d \(Self.f(d)) pair +\(Self.f(p)) gap \(Self.f(g))"
+            XCTAssertEqual(cuts(off, [(1.0, 4.0)] + pair, me).count, 0, "\(label): no cut-in at 0")
+            let cut = try XCTUnwrap(cuts(on, [(1.0, 4.0)] + pair, me).first, "\(label): cut-in at 300")
+            XCTAssertEqual(cut.onset, 4.0 + d, accuracy: 0.03, label)
+            XCTAssertEqual(cut.t, 4.0 + d + 1.2, accuracy: 0.03, label)
+            let unbroken: Spans = [(1.0, pair.last!.1)]
+            for c in [off, on] {
+                let twin = try XCTUnwrap(cuts(c, unbroken, me).first, "\(label): unbroken Them speech cuts in at 01809d9 and at 300")
+                XCTAssertEqual(twin.t, cut.t, accuracy: 0.03, label)
+            }
+        }
+    }
+
+    /// The pair as You's own utterance (0.90-0.94 s, under the 1.2 s backchannel length) cuts in nowhere:
+    /// over unbroken Them speech, or starting in the pause their words leave, at 0 and at 300 ms.
+    func testJoinedBackchannelPairFromYouNeverCutsIn() throws {
+        for c in [try config(gapMs: 0), try config()] {
+            for (start, gap) in [(4.1, 0.10), (4.2, 0.12), (4.28, 0.14)] {
+                let me = Self.joinedPair(at: start, gap: gap)
+                for them: Spans in [[(1.0, 9.0)], [(1.0, 4.0), (start + 0.12, 9.0)], [(1.0, 4.0), (start + 0.26, 9.0)]] {
+                    let evs = Synthetic.runLocal(c, mic: Synthetic.track(10, me, f0: Self.meF0), call: Synthetic.track(10, them, f0: Self.othersF0))
+                    XCTAssertEqual(evs.filter { $0.kind == .interrupt }.count, 0, "pair at \(start) gap \(gap), Them \(them)")
+                }
+            }
+        }
+    }
+
     /// 06:29 run (01809d9), judge on, interruption and no-key, from the shadow trace: You's own comma
     /// pauses (0.56 s and 0.52 s, past `cut_in_utterance_gap_ms`) end the cut-ins from 10.68 s and 11.96 s
     /// before the backchannel length; Them's 0.22 s quiet is beside the point. Their pause tolerance
