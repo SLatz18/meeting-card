@@ -509,4 +509,34 @@ final class CallControlsTests: XCTestCase {
             }
         }
     }
+
+    /// A bound window only stops a false "ended" (the home window in front): it never keeps the
+    /// coach running. When the mic and call audio go quiet, Core Audio's stop still ends the
+    /// session while the window lingers (a "meeting ended" or post-call window).
+    func testBoundWindowNeverKeepsTheCoachRunning() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { true }                 // a post-call window stays bound
+        ax.inMeeting()
+        audio.live(Self.zoom)
+        run(0, 5)
+        ax.home()                                           // the in-meeting shortcuts are gone
+        audio.live()                                        // mic and call audio quiet
+        let stop = try XCTUnwrap(stops(run(5.5, 60)).first)
+        XCTAssertEqual(stop.1, .audioEnded)
+        XCTAssertEqual(stop.0, 35.5, accuracy: 1e-9, "Core Audio's 30 s stop, with the window still there")
+        XCTAssertFalse(monitor.trigger.isActive)
+        XCTAssertTrue(starts(run(60.5, 120)).isEmpty, "and it doesn't start again on the window alone")
+    }
+
+    func testBoundWindowWithMutedReadingStillStopsOnQuietAudio() throws {
+        let reader = try XCTUnwrap(provider.readers.first as? ZoomControlsReader)
+        reader.callWindowPresent = { true }
+        ax.inMeeting(muted: true)
+        audio.live(Self.zoom)
+        run(0, 5)
+        ax.home()
+        audio.live()
+        XCTAssertEqual(provider.callStates()[Self.zoom], .muted, "the held reading")
+        XCTAssertEqual(try XCTUnwrap(stops(run(5.5, 60)).first).0, 35.5, accuracy: 1e-9, "muted never holds a session")
+    }
 }

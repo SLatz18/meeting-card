@@ -73,13 +73,16 @@ shows the system prompts and is for a host's opt-in toggle only.
 Zoom's "meeting window still there": the window that appeared with the call (never the app's largest, first or
 frontmost), a floating mini window while it's minimized, or for Meet the browser window the Meet script names. It reads
 CGWindowList numbers, owners, layers, on-screen flags and bounds only (no titles); nothing identified means the host's
-fallback display. `trigger.call_window_lookback_s` (60 s) bounds how long before the session the window may have opened.
+fallback display. `trigger.call_window_lookback_s` (60 s) bounds how long before the session the window may have opened, for the
+first bind only. A re-resolve after the bound window closes takes the newest window still open that appeared during the
+watch, skipping windows opened while another one was bound. A bound window never holds a session: Core Audio's stop
+still applies.
 
 ## Rule constants
 
 Every tunable number and word list is in one place: [`DefaultConfig.swift`](Sources/ListenMoreCore/DefaultConfig.swift).
 They are generic defaults (for example cooldown 20 s, fade 3 s, GPT confidence 0.7, start after
-3 s, stop after 30 s, or 3 s after an ended call). Change them there, with a test, and nowhere else. No recordings, eval
+3 s, stop after 30 s, or 3 s after an ended call, call-window lookback 60 s for the first bind). Change them there, with a test, and nowhere else. No recordings, eval
 fixtures or example transcripts: tests generate their audio (`Synthetic.swift`) and use
 content-free text. Nothing is stored unless the user turns on saved transcripts: no history, no
 summaries.

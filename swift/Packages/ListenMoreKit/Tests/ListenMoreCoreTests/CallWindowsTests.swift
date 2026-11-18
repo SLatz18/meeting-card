@@ -135,6 +135,54 @@ final class CallWindowsTests: XCTestCase {
         XCTAssertNil(selector.target(appKey: Self.zoom))
     }
 
+    // MARK: re-resolve
+
+    let preview = CGRect(x: 1600, y: 200, width: 640, height: 480)
+    let settings = CGRect(x: 1700, y: 150, width: 800, height: 600)
+
+    func testWaitingRoomBindsFirstThenTheMeetingWindowTakesOver() {
+        observe([zoomWindow(1, home)], at: 0)
+        observe([zoomWindow(1, home), zoomWindow(5, preview)], session: 10, at: 8)    // preview / waiting room
+        XCTAssertEqual(selector.target(appKey: Self.zoom), preview)
+        observe([zoomWindow(1, home)], session: 10, at: 200)                           // admitted: it closes
+        XCTAssertNil(selector.target(appKey: Self.zoom), "between windows: the card's display, never home")
+        observe([zoomWindow(1, home), zoomWindow(6, meeting)], session: 10, at: 201)   // then the meeting window opens
+        XCTAssertEqual(selector.target(appKey: Self.zoom), meeting, "the binding moves to the meeting window")
+    }
+
+    func testReResolveFindsAMeetingWindowOlderThanTheLookback() {
+        observe([zoomWindow(1, home)], at: 0)
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], at: 10)                 // in the meeting, no audio yet
+        observe([zoomWindow(1, home), zoomWindow(2, meeting), zoomWindow(5, preview)], at: 195)   // a join-audio window
+        observe([zoomWindow(1, home), zoomWindow(2, meeting), zoomWindow(5, preview)], session: 200, at: 200)
+        XCTAssertEqual(selector.target(appKey: Self.zoom), preview, "first bind: only windows within the 60 s lookback")
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 200, at: 205)
+        XCTAssertEqual(selector.target(appKey: Self.zoom), meeting, "re-resolve: no lookback, so the 190 s old meeting window binds")
+    }
+
+    func testSettingsOrChatOpenedMidCallNeverTakesTheBinding() {
+        observe([zoomWindow(1, home)], at: 0)
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 5, at: 5)
+        observe([zoomWindow(1, home), zoomWindow(2, meeting), zoomWindow(8, settings)], session: 5, at: 20)
+        observe([zoomWindow(1, home), zoomWindow(2, meeting), zoomWindow(8, settings),
+                 zoomWindow(9, CGRect(x: 1700, y: 100, width: 400, height: 600))], session: 5, at: 25)   // Chat
+        XCTAssertEqual(selector.target(appKey: Self.zoom), meeting, "Settings and Chat don't take it while the meeting window is open")
+        observe([zoomWindow(1, home), zoomWindow(8, settings), zoomWindow(9, CGRect(x: 1700, y: 100, width: 400, height: 600))],
+                session: 5, at: 40)
+        XCTAssertNil(selector.target(appKey: Self.zoom), "only windows opened mid-call are left: the card's display (documented)")
+    }
+
+    func testANewSessionStartsWithTheLookbackAgain() {
+        observe([zoomWindow(1, home)], at: 0)
+        observe([zoomWindow(1, home), zoomWindow(2, meeting)], session: 5, at: 5)
+        observe([zoomWindow(1, home)], at: 100)                                        // call over
+        observe([zoomWindow(1, home), zoomWindow(3, meeting)], session: 400, at: 400)
+        XCTAssertEqual(selector.target(appKey: Self.zoom), meeting)
+        observe([zoomWindow(1, home), zoomWindow(3, meeting), zoomWindow(4, settings)], at: 500)   // between calls
+        observe([zoomWindow(1, home), zoomWindow(4, settings)], session: 900, at: 900)
+        XCTAssertNil(selector.target(appKey: Self.zoom), "a window from 400 s ago never binds a new call's first bind")
+    }
+
     // MARK: Meet in a browser
 
     func browserWindow(_ id: Int, _ bundle: String, _ r: CGRect, onScreen: Bool = true, layer: Int = 0) -> AppWindow {

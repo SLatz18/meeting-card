@@ -36,11 +36,14 @@ public struct CallWindowHint: Equatable, Sendable {
 
 /// The call's window, for the glow's display and for "is the meeting window still there". Never
 /// the app's largest, first or frontmost window:
-/// - Native call apps (Zoom, Teams, ...): the normal window that appeared with the call, i.e. the
-///   newest normal window first seen no earlier than `lookbackS` before the session started. It
-///   stays bound until it disappears, so the home window closing, Settings opening or a second
-///   window appearing mid-call don't move it; when it disappears the next qualifying window binds.
-///   Windows that were already open when observation began (unknown age) never bind.
+/// - Native call apps (Zoom, Teams, ...): the normal window that appeared with the call. The first
+///   bind of a session takes the newest normal window first seen no earlier than `lookbackS` before
+///   the session started. It stays bound until it disappears, so the home window closing or
+///   Settings or Chat opening mid-call don't move it. When it disappears (a preview or waiting-room
+///   window giving way to the meeting window), the newest normal window that appeared since
+///   observation began and is still open binds, with no lookback, except windows that opened while
+///   another one was bound (Settings, Chat): if only those are left, nothing binds. Windows that
+///   were already open when observation began (unknown age) never bind.
 /// - While the bound window is off screen (minimized), its floating window that appeared during the
 ///   call (Zoom's mini window, a share video panel) stands in; small bars (share toolbars) never.
 /// - Browsers: the window the Meet script names (`CallWindowHint`), matched by z-order rank among
@@ -56,6 +59,12 @@ public struct CallWindowSelector: Sendable {
         /// Present when this app was first observed: their age is unknown, so they never bind.
         var unknownAge: Set<Int> = []
         var bound: Int?
+        /// The session this state's binding belongs to (its start time).
+        var session: Double?
+        /// This session has bound a window before: later binds are re-resolves (no lookback).
+        var everBound = false
+        /// Opened while another window was bound this session: never take over at a re-resolve.
+        var openedWhileBound: Set<Int> = []
     }
 
     private var apps: [String: AppState] = [:]
@@ -85,20 +94,37 @@ public struct CallWindowSelector: Sendable {
             var s = apps[key] ?? AppState()
             let firstObservation = apps[key] == nil
             let ids = Set(own.map(\.id))
-            for id in ids where s.firstSeen[id] == nil {
+            let opened = ids.filter { s.firstSeen[$0] == nil }
+            for id in opened {
                 s.firstSeen[id] = now
                 if firstObservation { s.unknownAge.insert(id) }
             }
             s.firstSeen = s.firstSeen.filter { ids.contains($0.key) }
             s.unknownAge.formIntersection(ids)
+            if let b = s.bound, ids.contains(b) { s.openedWhileBound.formUnion(opened) }
+            s.openedWhileBound.formIntersection(ids)
             if let b = s.bound, !ids.contains(b) { s.bound = nil }
 
             if browserKeys.contains(key) {
                 s.bound = Self.browserWindow(own, hint: hints[key])
             } else if let start = session?.startedAt, session?.appKey == key {
-                if s.bound == nil { s.bound = Self.newestCallWindow(own, state: s, since: start - lookbackS) }
+                if s.session != start {
+                    s.session = start
+                    s.bound = nil
+                    s.everBound = false
+                    s.openedWhileBound = []
+                }
+                if s.bound == nil {
+                    s.bound = s.everBound
+                        ? Self.newestCallWindow(own, state: s, since: -.infinity, excluding: s.openedWhileBound)
+                        : Self.newestCallWindow(own, state: s, since: start - lookbackS)
+                    if s.bound != nil { s.everBound = true }
+                }
             } else {
                 s.bound = nil
+                s.session = nil
+                s.everBound = false
+                s.openedWhileBound = []
             }
             apps[key] = s
             windows[key] = own
@@ -113,9 +139,10 @@ public struct CallWindowSelector: Sendable {
         w.layer == 0 && w.bounds.width >= minSide && w.bounds.height >= minSide
     }
 
-    static func newestCallWindow(_ own: [AppWindow], state: AppState, since: Double) -> Int? {
+    static func newestCallWindow(_ own: [AppWindow], state: AppState, since: Double, excluding: Set<Int> = []) -> Int? {
         let candidates = own.filter { w in
-            isNormal(w) && !state.unknownAge.contains(w.id) && (state.firstSeen[w.id] ?? -.infinity) >= since - 1e-9
+            isNormal(w) && !state.unknownAge.contains(w.id) && !excluding.contains(w.id)
+                && (state.firstSeen[w.id] ?? -.infinity) >= since - 1e-9
         }
         guard let newest = candidates.map({ state.firstSeen[$0.id] ?? -.infinity }).max() else { return nil }
         let tied = candidates.filter { state.firstSeen[$0.id] == newest }
