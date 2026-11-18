@@ -133,6 +133,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var pivotSympathy: [String]
         /// A sentence or clause starting with one of these (after any lead-in word) asks a question.
         public var pivotQuestionOpeners: [String]
+        /// A sentence ending with one of these words ("…, right", "…, you know") asks a question.
+        public var pivotTagQuestions: [String]
         /// Words skipped at the start of a sentence or clause before an opener is matched ("oh nice,").
         public var pivotLeadIns: [String]
         /// The turn ends when they start talking or the user is quiet this long; the user's last

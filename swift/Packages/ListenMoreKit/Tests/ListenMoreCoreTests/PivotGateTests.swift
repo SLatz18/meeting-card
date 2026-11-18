@@ -19,6 +19,13 @@ enum PivotLines {
     static let commiseration = "Oh no, I am so sorry to hear that, I hope he gets better soon, I will be thinking of him and I am here if I can help."
     static let sympathyThenStory = "I am so sorry to hear that, I had the same thing with my knee last year and I was on crutches for a month."
     static let aboutThirdPerson = "My week was busy, I had my brother over and he and his kids stayed with us, they loved the park."
+    static let movedStory = "I had the same thing when I moved last year, the boxes took me a month to clear out."
+    static let lostMarkQuestions = [
+        "\(movedStory) Did your landlord help at all",
+        "\(movedStory) How's the new neighborhood",
+        "\(movedStory) Is it close to work",
+        "I had the same thing when I moved last year, the boxes took me a month to clear out, it is exhausting, right",
+    ]
     static let brief = "Me too, same here."
     static let release = "The release is scheduled for Thursday and the test plan is signed off."
     static let releaseReply = "Great, I will update the checklist and send the release notes to the team after lunch, then I will close my tickets."
@@ -231,6 +238,19 @@ final class PivotGateTests: XCTestCase {
 
     func testRelateThenAskWithoutAQuestionMarkIsNone() {
         assertNoCandidate(pivot(reply: PivotLines.relateThenAskNoMark, share: PivotLines.moved))
+    }
+
+    /// Questions whose "?" the transcriber dropped: a contraction, an auxiliary plus a pronoun, or a tag.
+    func testQuestionsWithoutAQuestionMarkAreNone() {
+        XCTAssertEqual(run(pivot(reply: PivotLines.movedStory + " It was a long month for all of my stuff and my old bed.",
+                                 share: PivotLines.moved), until: 30).counters.candidates, 1, "the same story with no question")
+        for reply in PivotLines.lostMarkQuestions {
+            XCTAssertEqual(run(pivot(reply: reply, share: PivotLines.moved), until: 30).counters.candidates, 0, reply)
+        }
+    }
+
+    func testATagQuestionEndingTheirTurnIsNone() {
+        assertNoCandidate(pivot(share: "I finally ran my first half marathon on Sunday and I was so nervous at the start, you know"))
     }
 
     func testBriefMeTooIsNone() {

@@ -14,7 +14,8 @@ import Foundation
 ///    `pivot_first_person_min_words` of them. A reply whose first sentence leads with sympathy
 ///    (`pivot_sympathy`: "sorry to hear", "i hope", "congratulations") is about them.
 /// 3. No question back anywhere in the reply: no "?", no sentence or clause that opens like a
-///    question, no invitation.
+///    question ("how's", "did your", "are they"), no sentence ending in a tag ("…, right"), no
+///    invitation.
 /// 4. The turn is over: they start talking (while the user is quiet), or the user is quiet for
 ///    `pivot_turn_end_gap_s`. The last transcripts of both turns get `pivot_transcript_wait_s` past
 ///    the turn end to arrive; a turn still missing one is dropped.
@@ -68,6 +69,7 @@ final class PivotGate {
     private let x: ListenMoreConfig.Text
     private let invites: [String]
     private let leadIns: [String]
+    private let tags: [[String]]
     private let firstPerson: Set<String>
     private let otherPerson: Set<String>
     private var them: [Line] = []
@@ -90,6 +92,7 @@ final class PivotGate {
         x = config.text
         invites = x.pivotInvites + x.questionOpenInvites
         leadIns = x.pivotLeadIns.filter { !$0.isEmpty }
+        tags = x.pivotTagQuestions.map(TextRules.tokens).filter { !$0.isEmpty }
         firstPerson = Set(x.pivotFirstPerson)
         otherPerson = Set(x.pivotOtherPerson)
     }
@@ -225,13 +228,17 @@ final class PivotGate {
               lines.contains(where: { has($0.text, x.pivotShareWords) || has($0.text, x.heatPersonal) }),
               !lines.contains(where: { has($0.text, invites) }) else { return false }
         let last = lines.last.map(\.text) ?? ""
-        return !(TextRules.sentences(last).last.map(asks) ?? false) && !(pieces(last).last.map(asks) ?? false)
+        let lastSentence = TextRules.sentences(last).last ?? ""
+        return !asks(lastSentence) && !endsWithTag(lastSentence) && !(pieces(last).last.map(asks) ?? false)
     }
 
     private func pivots(_ lines: [Line]) -> Bool {
         let words = lines.flatMap { TextRules.tokens($0.text) }
         guard words.count >= x.pivotReplyMinWords,
-              !lines.contains(where: { line in has(line.text, invites) || pieces(line.text).contains(where: asks) }),
+              !lines.contains(where: { line in
+                  has(line.text, invites) || pieces(line.text).contains(where: asks)
+                      || TextRules.sentences(line.text).contains(where: endsWithTag)
+              }),
               !has(lines.first.flatMap { TextRules.sentences($0.text).first } ?? "", x.pivotSympathy) else { return false }
         let first = words.filter(firstPerson.contains).count, other = words.filter(otherPerson.contains).count
         let aboutMe = first > 0 && Double(first) >= x.pivotFirstPersonShare * Double(first + other)
@@ -262,6 +269,12 @@ final class PivotGate {
         if piece.contains("?") { return true }
         let rest = strippingLeadIns(piece)
         return x.pivotQuestionOpeners.contains { TextRules.startsWith(rest, $0) }
+    }
+
+    /// "…, right" or "…, isn't it": a statement turned into a question at its end.
+    private func endsWithTag(_ sentence: String) -> Bool {
+        let words = TextRules.tokens(sentence)
+        return tags.contains { words.count >= $0.count && Array(words.suffix($0.count)) == $0 }
     }
 
     private func strippingLeadIns(_ piece: String) -> String {
