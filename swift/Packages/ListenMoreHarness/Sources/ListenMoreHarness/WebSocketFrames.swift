@@ -3,7 +3,7 @@ import Foundation
 /// RFC 6455 pieces for the live transport: client frames (always masked), server frame parsing,
 /// message reassembly and the opening handshake. Pure code, unit-tested offline.
 public enum WebSocketCodec {
-    public enum Opcode: UInt8 {
+    public enum Opcode: UInt8, Sendable {
         case continuation = 0x0, text = 0x1, binary = 0x2, close = 0x8, ping = 0x9, pong = 0xA
     }
 
