@@ -73,6 +73,12 @@ public enum Harness {
         }
     }
 
+    /// Text for stdout or stderr with the environment's key (if any) replaced.
+    public static func scrub(_ text: String, environment: [String: String]) -> String {
+        guard let key = environment[keyVariable], key.count >= 8 else { return text }
+        return text.replacingOccurrences(of: key, with: "[REDACTED]")
+    }
+
     @MainActor
     public static func run(_ o: HarnessOptions, log: (String) -> Void = { _ in }) async throws -> HarnessSummary {
         var liveKey: APIKey?

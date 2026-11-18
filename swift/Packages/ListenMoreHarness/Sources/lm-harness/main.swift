@@ -21,8 +21,9 @@ Exit status: 0 when every scenario passes, 1 when a check fails, 2 on a usage or
 
 let env = ProcessInfo.processInfo.environment
 
+/// Every line this tool prints goes through the key scrubber.
 func say(_ text: String) {
-    print(text)
+    print(Harness.scrub(text, environment: env))
 }
 
 @MainActor
@@ -31,7 +32,7 @@ func main() async -> Int32 {
     do {
         try Harness.checkArguments(args, environment: env)
     } catch {
-        FileHandle.standardError.write(Data("\(error)\n".utf8))
+        FileHandle.standardError.write(Data((Harness.scrub("\(error)", environment: env) + "\n").utf8))
         return 2
     }
     var mode = Mode.offline

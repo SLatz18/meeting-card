@@ -36,4 +36,11 @@ final class ReviewFollowUpTests: XCTestCase {
         let off = CueOracle.expected(t, config: config, facts: .init(keyless: false, gptStopT: nil, mode: .live, judgeOn: false))
         XCTAssertTrue(off.tolerated.isEmpty, "judge off: nothing tolerated")
     }
+
+    /// stdout and stderr lines go through the key scrubber.
+    func testStdoutScrubber() {
+        let env = [Harness.keyVariable: "sk-scrub-test-0123456789"]
+        XCTAssertEqual(Harness.scrub("bad arg sk-scrub-test-0123456789!", environment: env), "bad arg [REDACTED]!")
+        XCTAssertEqual(Harness.scrub("nothing here", environment: [:]), "nothing here")
+    }
 }
