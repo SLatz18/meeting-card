@@ -18,21 +18,31 @@ final class CueDisplaySnapshotTests: XCTestCase {
     /// After the hold, while the talk-over lingers (about 10 s after it showed).
     static let lingering: TimeInterval = 40
 
-    func write(_ img: CGImage, _ name: String) {
-        try? FileManager.default.createDirectory(at: Self.outDir, withIntermediateDirectories: true)
-        let url = Self.outDir.appendingPathComponent("\(name).png") as CFURL
-        guard let dest = CGImageDestinationCreateWithURL(url, "public.png" as CFString, 1, nil) else { return }
-        CGImageDestinationAddImage(dest, img, nil)
-        CGImageDestinationFinalize(dest)
+    struct SnapshotError: Error, CustomStringConvertible {
+        let description: String
     }
 
-    func pixels(_ img: CGImage, crop: CGRect? = nil) -> [UInt8] {
-        let src = crop.flatMap { img.cropping(to: $0) } ?? img
+    func write(_ img: CGImage, _ name: String) throws {
+        try FileManager.default.createDirectory(at: Self.outDir, withIntermediateDirectories: true)
+        let url = Self.outDir.appendingPathComponent("\(name).png")
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else {
+            throw SnapshotError(description: "can't create \(url.path)")
+        }
+        CGImageDestinationAddImage(dest, img, nil)
+        guard CGImageDestinationFinalize(dest) else { throw SnapshotError(description: "can't write \(url.path)") }
+    }
+
+    /// The image's (or the crop's) RGBA bytes; throws rather than return nothing, so two failed reads
+    /// can never compare equal.
+    func pixels(_ img: CGImage, crop: CGRect? = nil) throws -> [UInt8] {
+        let src = try crop.map { try XCTUnwrap(img.cropping(to: $0), "crop \($0) outside the image") } ?? img
+        XCTAssertGreaterThan(src.width * src.height, 0)
         var px = [UInt8](repeating: 0, count: src.width * src.height * 4)
-        guard let ctx = CGContext(data: &px, width: src.width, height: src.height, bitsPerComponent: 8, bytesPerRow: src.width * 4,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return [] }
+        let cs = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let ctx = try XCTUnwrap(CGContext(data: &px, width: src.width, height: src.height, bitsPerComponent: 8, bytesPerRow: src.width * 4,
+                                          space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue), "no bitmap context")
         ctx.draw(src, in: CGRect(x: 0, y: 0, width: src.width, height: src.height))
+        guard !px.isEmpty else { throw SnapshotError(description: "no pixels") }
         return px
     }
 
@@ -49,10 +59,10 @@ final class CueDisplaySnapshotTests: XCTestCase {
                 let img = try XCTUnwrap(CueDisplaySnapshot.image(option, Self.busy, at: Self.atCue, mode: .card, dark: dark, scale: Self.scale))
                 XCTAssertEqual(img.width, Int((Theme.CoachCard.width + 2 * padding) * Double(Self.scale)), "\(option)")
                 XCTAssertEqual(img.height, Int((Theme.CoachCard.height + 2 * padding) * Double(Self.scale)), "\(option)")
-                write(img, "card-\(option.rawValue)-\(tag(dark))")
+                try write(img, "card-\(option.rawValue)-\(tag(dark))")
                 shots[dark] = img
             }
-            XCTAssertNotEqual(pixels(try XCTUnwrap(shots[false])), pixels(try XCTUnwrap(shots[true])), "\(option) follows the appearance")
+            XCTAssertNotEqual(try pixels(try XCTUnwrap(shots[false])), try pixels(try XCTUnwrap(shots[true])), "\(option) follows the appearance")
         }
     }
 
@@ -64,7 +74,7 @@ final class CueDisplaySnapshotTests: XCTestCase {
             for dark in [false, true] {
                 let img = try XCTUnwrap(CueDisplaySnapshot.image(option, Self.busy, at: Self.atCue, mode: .pill, dark: dark, scale: Self.scale))
                 XCTAssertEqual(img.height, Int((Theme.CoachPill.height + 2 * padding) * Double(Self.scale)), "\(option)")
-                write(img, "pill-\(option.rawValue)-\(tag(dark))")
+                try write(img, "pill-\(option.rawValue)-\(tag(dark))")
                 widths[option] = img.width
             }
         }
@@ -82,13 +92,13 @@ final class CueDisplaySnapshotTests: XCTestCase {
             let card = try XCTUnwrap(CueDisplaySnapshot.image(.glyphState, Self.busy, at: Self.lingering, mode: .card, hover: true, dark: dark,
                                                               scale: Self.scale))
             let plain = try XCTUnwrap(CueDisplaySnapshot.image(.glyphState, Self.busy, at: Self.lingering, mode: .card, dark: dark, scale: Self.scale))
-            XCTAssertNotEqual(pixels(card), pixels(plain), "hover shows the detail")
-            write(card, "card-glyph-state-hover-\(tag(dark))")
-            write(plain, "card-glyph-state-lingering-\(tag(dark))")
+            XCTAssertNotEqual(try pixels(card), try pixels(plain), "hover shows the detail")
+            try write(card, "card-glyph-state-hover-\(tag(dark))")
+            try write(plain, "card-glyph-state-lingering-\(tag(dark))")
             let pill = try XCTUnwrap(CueDisplaySnapshot.image(.glyphState, Self.busy, at: Self.lingering, mode: .pill, hover: true, dark: dark,
                                                               scale: Self.scale))
             XCTAssertGreaterThan(pill.height, Int((Theme.CoachPill.height + 2 * padding) * Double(Self.scale)), "the tooltip under the pill")
-            write(pill, "pill-glyph-state-hover-\(tag(dark))")
+            try write(pill, "pill-glyph-state-hover-\(tag(dark))")
         }
     }
 
@@ -105,13 +115,13 @@ final class CueDisplaySnapshotTests: XCTestCase {
         for t in [8.5, Self.atCue] {
             let line = try XCTUnwrap(CueDisplaySnapshot.image(.rotatingLine, Self.busy, at: t, mode: .card, dark: false, scale: Self.scale))
             let anchored = try XCTUnwrap(CueDisplaySnapshot.image(.captionAnchored, Self.busy, at: t, mode: .card, dark: false, scale: Self.scale))
-            XCTAssertNotEqual(pixels(line, crop: captions), pixels(anchored, crop: captions), "t=\(t): the mark")
-            XCTAssertEqual(pixels(line, crop: status), pixels(anchored, crop: status), "t=\(t): the same status line")
+            XCTAssertNotEqual(try pixels(line, crop: captions), try pixels(anchored, crop: captions), "t=\(t): the mark")
+            XCTAssertEqual(try pixels(line, crop: status), try pixels(anchored, crop: status), "t=\(t): the same status line")
         }
         // No cue lingering: the same rows as the plain feed.
         let line = try XCTUnwrap(CueDisplaySnapshot.image(.rotatingLine, Self.busy, at: 5, mode: .card, dark: false, scale: Self.scale))
         let anchored = try XCTUnwrap(CueDisplaySnapshot.image(.captionAnchored, Self.busy, at: 5, mode: .card, dark: false, scale: Self.scale))
-        XCTAssertEqual(pixels(line), pixels(anchored))
+        XCTAssertEqual(try pixels(line), try pixels(anchored))
     }
 
     /// A burst (five cues in 6 s) as a strip over time, for each option on the card and the pill,
@@ -123,11 +133,11 @@ final class CueDisplaySnapshotTests: XCTestCase {
             for dark in [false, true] {
                 let card = try XCTUnwrap(CueDisplaySnapshot.strip(option, burst, moments: burst.moments, mode: .card, dark: dark, scale: Self.scale))
                 XCTAssertGreaterThan(card.width, Int(Double(burst.moments.count) * Theme.CoachCard.width * Double(Self.scale)))
-                write(card, "burst-card-\(option.rawValue)-\(tag(dark))")
+                try write(card, "burst-card-\(option.rawValue)-\(tag(dark))")
                 let pill = try XCTUnwrap(CueDisplaySnapshot.strip(option, burst, moments: burst.moments, mode: .pill, dark: dark, scale: Self.scale))
-                write(pill, "burst-pill-\(option.rawValue)-\(tag(dark))")
+                try write(pill, "burst-pill-\(option.rawValue)-\(tag(dark))")
                 let before = try XCTUnwrap(CueDisplaySnapshot.strip(option, raw, moments: raw.moments, mode: .card, dark: dark, scale: Self.scale))
-                write(before, "before-pacing-card-\(option.rawValue)-\(tag(dark))")
+                try write(before, "before-pacing-card-\(option.rawValue)-\(tag(dark))")
             }
         }
         // Mid-burst nothing new shows: the card at 16 s looks the same on the rotating line as at rest.
@@ -136,7 +146,7 @@ final class CueDisplaySnapshotTests: XCTestCase {
         let status = CGRect(x: (padding + k.statusRow.x) * s, y: (padding + k.height - k.statusRow.maxY) * s,
                             width: k.statusRow.width * s, height: k.statusRow.height * s)
         let rest = try XCTUnwrap(CueDisplaySnapshot.image(.rotatingLine, burst, at: 1, mode: .card, dark: false, scale: Self.scale))
-        XCTAssertEqual(pixels(mid, crop: status), pixels(rest, crop: status), "the status line rests while cues wait")
+        XCTAssertEqual(try pixels(mid, crop: status), try pixels(rest, crop: status), "the status line rests while cues wait")
     }
 
     /// The glyph-state vocabulary, light and dark; every glyph is a real SF Symbol on this macOS.
@@ -145,7 +155,7 @@ final class CueDisplaySnapshotTests: XCTestCase {
             XCTAssertNotNil(NSImage(systemSymbolName: Theme.CueDisplay.glyph(kind), accessibilityDescription: nil), kind.rawValue)
         }
         for dark in [false, true] {
-            write(try XCTUnwrap(CueDisplaySnapshot.glyphs(dark: dark, scale: Self.scale)), "glyphs-\(tag(dark))")
+            try write(try XCTUnwrap(CueDisplaySnapshot.glyphs(dark: dark, scale: Self.scale)), "glyphs-\(tag(dark))")
         }
     }
 
