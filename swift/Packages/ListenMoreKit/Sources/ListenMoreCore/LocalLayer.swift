@@ -82,7 +82,8 @@ public final class LocalLayer {
     /// Frame times are multiples of the frame length, and their differences round (3.56 - 3.50 is a hair
     /// over 0.06, 4.40 - 3.20 a hair under 1.2). Every window comparison reads its elapsed time through
     /// `span`, which rounds it to the microsecond, so a window holds the same number of frames anywhere on
-    /// the clock.
+    /// the clock. The cut-in's overlap gap is a sum of frame lengths from zero, which is exact at 20 ms
+    /// frames: rounding it is defensive and changes nothing there.
     static let spanStepsPerS = 1e6
 
     /// An elapsed time (a difference of frame times or a sum of frame lengths), rounded to the
