@@ -304,13 +304,27 @@ final class CueDisplayTests: XCTestCase {
         XCTAssertTrue(release.contains("EXCLUDED_SOURCE_FILE_NAMES: \"$(MEETINGCARD_TEST_ONLY_SOURCES)\""))
         let line = try XCTUnwrap(release.components(separatedBy: "\n").first { $0.contains("MEETINGCARD_TEST_ONLY_SOURCES: ") })
         let listed = try XCTUnwrap(line.components(separatedBy: "\"").dropFirst().first).split(separator: " ").map(String.init)
-        let testOnly = ["App/CoachDebugReadout.swift", "App/CoachCueDisplayLab.swift", "Core/CueDisplay.swift", "Core/CueDisplayLab.swift",
-                        "Core/CueDisplayViews.swift", "Core/CueTimelines.swift"]
-        XCTAssertEqual(Set(listed), Set(testOnly.map { URL(fileURLWithPath: $0).lastPathComponent }), "every test-only file, nothing else")
-        // Excluded by file name: no shipping source may share one.
+        // The test-only files, found in the tree: their first #if mentions MEETINGCARD_TEST_ID and they end in #endif.
+        var found: [String] = []
+        for dir in ["App", "Core"] {
+            let root = Self.swiftDir.appendingPathComponent(dir)
+            let files = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+            for case let url as URL in files where url.pathExtension == "swift" {
+                let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                guard let firstIf = lines.first(where: { $0.hasPrefix("#if") }), firstIf.contains("MEETINGCARD_TEST_ID"),
+                      lines.last == "#endif" else { continue }
+                found.append(url.lastPathComponent)
+            }
+        }
+        XCTAssertFalse(found.isEmpty)
+        XCTAssertEqual(Set(listed), Set(found), "project.yml lists exactly the test-only files in App/ and Core/")
+        XCTAssertEqual(listed.count, Set(listed).count, "no name listed twice")
+        // Excluded by file name: no other source may share one.
         var names: [String: Int] = [:]
         for dir in ["App", "Core"] {
-            for f in try FileManager.default.contentsOfDirectory(atPath: Self.swiftDir.appendingPathComponent(dir).path) { names[f, default: 0] += 1 }
+            let files = try XCTUnwrap(FileManager.default.enumerator(at: Self.swiftDir.appendingPathComponent(dir), includingPropertiesForKeys: nil))
+            for case let url as URL in files where url.pathExtension == "swift" { names[url.lastPathComponent, default: 0] += 1 }
         }
         for name in listed { XCTAssertEqual(names[name], 1, "\(name): exactly one file by that name") }
         let script = try read("scripts/build.sh")
