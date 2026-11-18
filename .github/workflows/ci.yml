@@ -66,8 +66,8 @@ jobs:
         working-directory: swift
         run: |
           set -euo pipefail
-          shopt -s inherit_errexit
-          # Every binary must give a symbol table: an nm failure or empty output fails the step.
+          # Every binary must give a symbol table: an nm failure or empty output fails the step. (The runner's
+          # bash is 3.2, without inherit_errexit, so scan returns its own failures explicitly.)
           scan() {
             strings -a "$@" || return 1
             local b syms
@@ -98,8 +98,8 @@ jobs:
         working-directory: swift
         run: |
           set -euo pipefail
-          shopt -s inherit_errexit
-          # Every binary must give a symbol table: an nm failure or empty output fails the step.
+          # Every binary must give a symbol table: an nm failure or empty output fails the step. (The runner's
+          # bash is 3.2, without inherit_errexit, so scan returns its own failures explicitly.)
           scan() {
             strings -a "$@" || return 1
             local b syms
