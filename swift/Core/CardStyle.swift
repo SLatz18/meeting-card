@@ -223,7 +223,7 @@ public struct KeyGate: Sendable {
     /// A surface call decided by `step` (applied by `KeyGate.apply`).
     public enum SurfaceCall: Equatable, Sendable { case cancelGiveBack, makeKey, releaseKey }
 
-    /// codex #12 P2: the ONE place a gate effect is turned into surface calls (the App's Card is
+    /// The ONE place a gate effect is turned into surface calls (the App's Card is
     /// the surface), so the click / hover / place / resign wiring is unit-testable.
     /// Arming always cancels a pending focus give-back first (renewed focus wins).
     /// #4 review P1: `step` ONLY mutates and returns the calls; `apply` runs them after the

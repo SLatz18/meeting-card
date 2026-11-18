@@ -69,5 +69,5 @@ All synthetic. No real-person audio goes in the repo; tests generate their audio
 
 If V1 passes on speakers, V3 stays a note.
 
-## 6. Model tier
-If this is built, the DSP and the engine-queue code are Opus work: the delay tracking, the adaptive filter, the double-talk freeze and the thread boundaries. The synthetic tests and the docs can be done at a lower tier.
+## 6. Review effort
+If this is built, the DSP and the engine-queue code need focused review: the delay tracking, the adaptive filter, the double-talk freeze and the thread boundaries. The synthetic tests and the docs need lighter review.

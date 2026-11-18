@@ -17,9 +17,9 @@ struct Args {
         var it = argv.dropFirst().makeIterator()
         while let s = it.next() {
             switch s {
-            // Once --fixture is seen, this is a fixture run even if its value is missing (codex P2 on
-            // 208d53a: a bare trailing --fixture left fixture=nil, so the run counted as live and could
-            // register the login item / poll). "" = fixture mode with an unloadable file.
+            // Once --fixture is seen, this is a fixture run even if its value is missing (a bare trailing
+            // --fixture left fixture=nil, so the run counted as live and could register the login
+            // item / poll). "" = fixture mode with an unloadable file.
             case "--fixture": a.fixture = it.next().map { URL(fileURLWithPath: $0).standardizedFileURL.path } ?? (a.fixture ?? "")
             case "--no-poll": a.noPoll = true
             case "--no-recheck": a.noRecheck = true
@@ -29,7 +29,7 @@ struct Args {
             default: break
             }
         }
-        // A fixture run never polls the real calendar (codex P2 on c87a2ef): otherwise real meetings would
+        // A fixture run never polls the real calendar: otherwise real meetings would
         // render as "DEMO ·" cards bottom-left AND double-fire alongside the live app.
         if a.fixture != nil { a.noPoll = true }
         return a

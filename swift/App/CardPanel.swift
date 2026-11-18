@@ -78,7 +78,7 @@ final class CardRootView: NSView {
         super.viewDidChangeEffectiveAppearance()
         onAppearance?()
     }
-    /// codex P2: a card moved 1x <-> Retina must re-raster its border at the new scale.
+    /// A card moved 1x <-> Retina must re-raster its border at the new scale.
     var onBackingChange: (() -> Void)?
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
@@ -104,7 +104,7 @@ final class BorderLayer: CALayer {
 
     override func draw(in ctx: CGContext) {
         guard let colors, !colors.isEmpty else { return }
-        // codex P2: match the parent's cornerCurve = .continuous clip. Stroke the FULL-bounds
+        // Match the parent's cornerCurve = .continuous clip. Stroke the FULL-bounds
         // continuous path at 2x width; the card's continuous clip trims the outer half, so the
         // visible outer edge IS the card edge (public SwiftUI Shape path, no private API).
         ctx.addPath(RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: bounds).cgPath)
