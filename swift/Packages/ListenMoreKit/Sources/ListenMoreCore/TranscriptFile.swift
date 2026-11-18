@@ -1,9 +1,17 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
-/// The coach's only disk writer: the opt-in saved transcript, text only, one Markdown file per call
-/// in the folder the user chose. Writes go straight to that file (no atomic temp copy elsewhere)
-/// and the file is readable by the user only. Audio has no path here. PrivacyGuardTests checks that
-/// no other coach source writes to disk.
+/// The coach's only disk writer: the opt-in saved transcript, text only, in the folder the user chose
+/// (the call's note, the call's hidden spool file beside it while the call runs, and with that
+/// option on, one line appended to the day's note). Replacing a file writes a hidden temporary sibling in the
+/// same folder, syncs it and renames it over the target, so a reader sees the old text or the new,
+/// never a mix, and nothing is staged in another folder. Appends are synced before they return.
+/// Files are readable by the user only and a symlink at the target is never followed. Audio has no
+/// path here. PrivacyGuardTests checks that no other coach source writes to disk.
 public final class FileTranscriptStore: TranscriptStore {
     /// The host picks the folder (MeetingCard: per app identity, or the user's choice).
     public init() {}
@@ -17,13 +25,124 @@ public final class FileTranscriptStore: TranscriptStore {
         FileManager.default.fileExists(atPath: url.path)
     }
 
+    public func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    /// Replaces the file's contents with `text`, atomically.
     public func write(_ text: String, to url: URL) throws {
+        let temp = Self.tempSibling(of: url)
+        let fd = try posixOpen(temp.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC)
+        do {
+            try posixWriteAll(fd, Data(text.utf8))
+            try posixSync(fd)
+        } catch {
+            _ = posixClose(fd)
+            _ = posixUnlink(temp.path)
+            throw error
+        }
+        guard posixClose(fd) == 0, posixRename(temp.path, url.path) == 0 else {
+            let e = posixError()
+            _ = posixUnlink(temp.path)
+            throw e
+        }
+        posixSyncDirectory(url.deletingLastPathComponent().path)
+    }
+
+    /// Adds `text` at the end of the file (created if missing) and syncs it.
+    public func append(_ text: String, to url: URL) throws {
         let isNew = !exists(url)
-        try Data(text.utf8).write(to: url)
-        if isNew { try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
+        let fd = try posixOpen(url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC)
+        do {
+            try posixWriteAll(fd, Data(text.utf8))
+            try posixSync(fd)
+        } catch {
+            _ = posixClose(fd)
+            throw error
+        }
+        guard posixClose(fd) == 0 else { throw posixError() }
+        if isNew { posixSyncDirectory(url.deletingLastPathComponent().path) }
+    }
+
+    public func read(_ url: URL) -> String? {
+        guard let data = FileManager.default.contents(atPath: url.path) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    public func contents(of folder: URL) -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+    }
+
+    public func modified(_ url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
     public func remove(_ url: URL) throws {
         try FileManager.default.removeItem(at: url)
     }
+
+    /// A hidden name next to `url` (Obsidian and Finder skip dot files); a crash can leave one behind,
+    /// which recovery removes.
+    static func tempSibling(of url: URL) -> URL {
+        url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)\(tempSuffix)")
+    }
+
+    static let tempSuffix = ".mc-tmp"
+}
+
+// File-scope wrappers: inside the store, `write`, `append` and `remove` name its own methods.
+
+private func posixError() -> NSError {
+    NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+}
+
+private func posixOpen(_ path: String, _ flags: Int32) throws -> Int32 {
+    let fd = open(path, flags, mode_t(0o600))
+    guard fd >= 0 else { throw posixError() }
+    return fd
+}
+
+private func posixClose(_ fd: Int32) -> Int32 {
+    close(fd)
+}
+
+private func posixUnlink(_ path: String) -> Int32 {
+    unlink(path)
+}
+
+private func posixRename(_ from: String, _ to: String) -> Int32 {
+    renameat(AT_FDCWD, from, AT_FDCWD, to)
+}
+
+private func posixWriteAll(_ fd: Int32, _ data: Data) throws {
+    try data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+        guard let base = buf.baseAddress else { return }
+        var done = 0
+        while done < buf.count {
+            let n = write(fd, base + done, buf.count - done)
+            if n < 0 {
+                if errno == EINTR { continue }
+                throw posixError()
+            }
+            done += n
+        }
+    }
+}
+
+/// To stable storage: F_FULLFSYNC on Apple platforms (plain fsync may leave data in the drive's
+/// cache there), fsync elsewhere.
+private func posixSync(_ fd: Int32) throws {
+    #if canImport(Darwin)
+    if fcntl(fd, F_FULLFSYNC) == 0 { return }
+    #endif
+    guard fsync(fd) == 0 else { throw posixError() }
+}
+
+/// Makes a new or renamed entry durable. Best effort: some file systems refuse fsync on a directory.
+private func posixSyncDirectory(_ path: String) {
+    let fd = open(path, O_RDONLY | O_CLOEXEC)
+    guard fd >= 0 else { return }
+    _ = fsync(fd)
+    _ = close(fd)
 }
