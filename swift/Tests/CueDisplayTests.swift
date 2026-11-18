@@ -339,6 +339,13 @@ final class CueDisplayTests: XCTestCase {
             let code = try read(file)
             XCTAssertFalse(code.contains(".selfPivot") || code.contains("self_pivot"), "\(file) raises or shows the self-pivot cue")
         }
+        // The controller may name it only to disable it: its comment and the one configOverrides line, nothing else.
+        let naming = controller.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.contains(".selfPivot") || $0.contains("self_pivot") }
+        XCTAssertEqual(naming.filter { !$0.hasPrefix("///") }.count, 1, "one non-comment line names the cue in CoachController.swift")
+        XCTAssertTrue(naming.allSatisfy { $0.hasPrefix("///") || $0.hasPrefix("static let configOverrides: [String: Any] = ") },
+                      "CoachController.swift names the cue only in configOverrides: \(naming)")
+        XCTAssertEqual(controller.components(separatedBy: ".selfPivot").count - 1, 1, "exactly one .selfPivot in CoachController.swift")
     }
 
     /// Words for the hold, then the linger (glyph, row mark) fading to nothing.
