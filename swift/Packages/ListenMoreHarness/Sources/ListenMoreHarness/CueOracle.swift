@@ -9,6 +9,13 @@ public struct ExpectedCue: Sendable {
     /// Borderline (within the tolerance of a threshold): firing or not both pass.
     public var optional: Bool
     public var reason: String
+    /// Another cue the rules allow instead, in its own window.
+    public var alternative: (type: CueType, window: ClosedRange<Double>)?
+
+    public func accepts(_ c: CueRecord) -> Bool {
+        if c.type == type && (level == nil || c.level == level) && window.contains(c.t) { return true }
+        return alternative.map { c.type == $0.type && $0.window.contains(c.t) } ?? false
+    }
 }
 
 /// A cue the oracle can't time but a rule may raise around one line (a judge verdict on a reply, a
@@ -53,8 +60,14 @@ public enum CueOracle {
         /// The audio has pauses inside lines (live TTS, espeak), so a line can be transcribed in pieces.
         /// The synthetic signal doesn't: one line, one segment.
         public var segmentedSpeech: Bool
+        /// Them's audio per frame (voiced by clip energy), when known.
+        public var callVoiced: [Bool]
+        public var frameS: Double
 
-        public init(keyless: Bool, gptStopT: Double?, mode: Mode, judgeOn: Bool = true, segmentedSpeech: Bool? = nil) {
+        public init(keyless: Bool, gptStopT: Double?, mode: Mode, judgeOn: Bool = true, segmentedSpeech: Bool? = nil,
+                    callVoiced: [Bool] = [], frameS: Double = 0.02) {
+            self.callVoiced = callVoiced
+            self.frameS = frameS
             self.keyless = keyless
             self.gptStopT = gptStopT
             self.mode = mode
@@ -116,8 +129,19 @@ public enum CueOracle {
                 }
                 if questionNear || inside(pauses, fire) || inside(mutes, fire) || fire >= captureEnd { continue }
                 let window = live ? (u.start + 0.6)...(fire + 2.0) : (fire - 0.25)...(fire + 0.5)
-                cands.append(ExpectedCue(type: .interrupt, level: nil, window: window, optional: false,
-                                         reason: "\(u.line.id) cuts in on \(th.line.id): overlap \(fmt(overlap)) s, they continue \(fmt(othersAfter)) s"))
+                var e = ExpectedCue(type: .interrupt, level: nil, window: window, optional: false,
+                                    reason: "\(u.line.id) cuts in on \(th.line.id): overlap \(fmt(overlap)) s, they continue \(fmt(othersAfter)) s")
+                // The cut-in needs Them to keep talking through its opening overlap: LocalLayer drops it when
+                // Them are silent for more than its 60 ms speaking tail plus 100 ms gap. Where Them's own
+                // audio pauses longer (word gaps in real speech), their restarts are speaker switches and
+                // the talk-over rule may raise the red cue instead, once You hold the floor after they stop.
+                let gap = longestGap(facts, from: u.start, to: min(th.end, u.start + cutBackchannel))
+                if gap > 0.16 {
+                    let toHold = l.talkOverHoldFloorMs / 1000
+                    e.alternative = (.talkOver, (u.start + 0.6)...max(window.upperBound, th.end + toHold + allowance))
+                    e.reason += "; Them pause \(String(format: "%.2f", gap)) s in the opening overlap, so talk_over also fits"
+                }
+                cands.append(e)
             } else if overlap >= l.cutInTrailingMinOverlapMs / 1000 && abs(th.end - u.start) <= l.cutInTrailingWindowS {
                 let latest = u.start + max(cutBackchannel, l.cutInTrailingYieldS) + l.cutInTextWaitMs / 1000 + allowance
                 tolerated.append(Tolerance(type: .interrupt, window: u.start...max(u.start, min(latest, u.end + hang + allowance)),
@@ -235,14 +259,24 @@ public enum CueOracle {
         return (accepted, tolerated)
     }
 
-    /// Each expected cue takes the first unused actual cue of its type (and level) inside its window.
+    /// Longest run of unvoiced frames in Them's audio between two scenario times (0 when unknown).
+    static func longestGap(_ f: Facts, from a: Double, to b: Double) -> Double {
+        guard !f.callVoiced.isEmpty, b > a else { return 0 }
+        let lo = max(0, Int(a / f.frameS)), hi = min(f.callVoiced.count, Int(b / f.frameS) + 1)
+        var run = 0, longest = 0
+        for i in lo..<max(lo, hi) {
+            run = f.callVoiced[i] ? 0 : run + 1
+            longest = max(longest, run)
+        }
+        return Double(longest) * f.frameS
+    }
+
+    /// Each expected cue takes the first unused actual cue it accepts (its type and window, or its alternative).
     public static func match(expected: [ExpectedCue], tolerated: [Tolerance], actual: [CueRecord]) -> CueMatch {
         var used = Set<Int>()
         var outcomes: [CueMatch.Outcome] = []
         for e in expected {
-            let i = actual.indices.first { i in
-                !used.contains(i) && actual[i].type == e.type && (e.level == nil || actual[i].level == e.level) && e.window.contains(actual[i].t)
-            }
+            let i = actual.indices.first { i in !used.contains(i) && e.accepts(actual[i]) }
             if let i { used.insert(i) }
             outcomes.append(.init(expected: e, actual: i.map { actual[$0] }))
         }

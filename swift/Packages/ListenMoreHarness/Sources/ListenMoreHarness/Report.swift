@@ -130,6 +130,7 @@ public enum Report {
                 "scenario": r.scenario, "passed": r.passed,
                 "transcription": tx,
                 "speaker_id": ["correct": r.speakers.correct, "total": r.speakers.total, "unmatched": r.speakers.unmatched,
+                               "uncaptioned": r.speakers.uncaptioned, "mismatches": r.speakers.mismatches,
                                "accuracy": r.speakers.accuracy as Any, "multi_them": r.speakers.multiThem.rawValue],
                 "coaching": [
                     "expected": r.cues.outcomes.map { o -> [String: Any] in

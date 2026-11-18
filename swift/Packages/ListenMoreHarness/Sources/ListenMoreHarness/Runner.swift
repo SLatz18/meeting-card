@@ -184,6 +184,11 @@ public struct RunRecord: @unchecked Sendable {
     public var problems: [String] = []
     /// The same audio replayed through `LocalLayer` afterwards (diagnostics for local cues).
     public var shadow: ShadowTrace?
+    /// Them's audio per 20 ms frame from scenario time 0: voiced (RMS above -45 dBFS) or not. Clip
+    /// energy, independent of the engine's VAD.
+    public var callVoiced: [Bool] = []
+    /// Run-clock time of scenario time 0.
+    public var origin = 0.0
     /// Filled in by the harness after teardown.
     public var diskViolations: [String] = []
     public var workDirWiped = false
@@ -357,6 +362,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         }
         observeTranscripts("after-teardown")
 
+        record.origin = origin
         record.engineIngests = engine.ingests.map { MeteredEngine.Ingest(t: $0.t - origin, stream: $0.stream, samples: $0.samples) }
         record.engineStarts = engine.starts.map { $0 - origin }
         record.engineStops = engine.stops.map { $0 - origin }
@@ -373,6 +379,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.segmentedSpeech = services.segmentedSpeech
         record.captionStates.append((now, live.captionState))
         record.shadow = ShadowTrace.record(config: config, tracks: tracks, applied: record.applied)
+        record.callVoiced = (0..<(tracks.call.count / hop)).map { tracks.voiced(.call, at: Double($0) * frameS) }
         return record
     }
 

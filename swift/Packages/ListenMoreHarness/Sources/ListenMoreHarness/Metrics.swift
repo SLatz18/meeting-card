@@ -86,6 +86,8 @@ public struct SpeakerScore: Sendable, Codable {
     /// Segments whose transcript never became a caption (the GPT layer drops You text while muted and
     /// everything after the cost cap): only their stream could be checked.
     public var uncaptioned = 0
+    /// Each segment attributed wrongly: when, which socket, its first words and the line it holds.
+    public var mismatches: [String] = []
     public var multiThem: MultiThem
     public var accuracy: Double? { total == 0 ? nil : Double(correct) / Double(total) }
 }
@@ -139,6 +141,17 @@ public enum Scoring {
 
     static func hangover(_ r: RunRecord) -> Double { Double(r.config.vad.hangoverMs) / 1000 }
 
+    /// Lines whose audio could reach a transcriber at all: not spoken wholly inside a Pause, and for
+    /// You not wholly inside a Mute. A segment can only hold one of these, whatever its socket.
+    static func reachableLines(_ r: RunRecord) -> [PlacedLine] {
+        let mutes = r.appliedWindows(.mute, .unmute)
+        let pauses = r.appliedWindows(.pause, .resume)
+        let inside = { (p: PlacedLine, w: ClosedRange<Double>) in p.start >= w.lowerBound && p.end <= w.upperBound }
+        return r.timeline.lines.filter { p in
+            !pauses.contains { inside(p, $0) } && !(p.line.voice == .you && mutes.contains { inside(p, $0) })
+        }
+    }
+
     public static func transcription(_ r: RunRecord, keyless: Bool) -> [Speaker: StreamTranscription] {
         let expected = transcribedLines(r, keyless: keyless)
         let finals = r.captions.filter { $0.isFinal && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -177,8 +190,10 @@ public enum Scoring {
         let finals = r.captions.filter { $0.isFinal && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
         var used = Set<Int>()
         func norm(_ s: String) -> String { ScriptText.tokens(s).joined(separator: " ") }
+        var mismatches: [String] = []
+        let reachable = reachableLines(r)
         for seg in r.sockets.segments where !seg.text.trimmingCharacters(in: .whitespaces).isEmpty {
-            guard let p = line(for: seg, lines: r.timeline.lines, hangover: hang) else {
+            guard let p = line(for: seg, lines: reachable, hangover: hang) else {
                 unmatched += 1
                 continue
             }
@@ -201,7 +216,13 @@ public enum Scoring {
                 uncaptioned += 1
                 if p.line.voice == .themB { themBSpeakers.append(stream) }
             }
-            if ok { correct += 1 }
+            if ok {
+                correct += 1
+            } else {
+                let words = ScriptText.tokens(seg.text).prefix(6).joined(separator: " ")
+                mismatches.append(String(format: "%@ segment ending %.1f s (\"%@…\") holds %@ (%@)", seg.stream == .mic ? "mic" : "call",
+                                         seg.committedAt - hang, words, p.line.id, p.line.voice.rawValue))
+            }
         }
         let multi: MultiThem
         if !r.timeline.lines.contains(where: { $0.line.voice == .themB }) || themBSpeakers.isEmpty {
@@ -212,6 +233,7 @@ public enum Scoring {
             // Speaker has two cases, so both remote voices share Them's label.
             multi = .mergedAsThem
         }
-        return SpeakerScore(correct: correct, total: total, unmatched: unmatched, uncaptioned: uncaptioned, multiThem: multi)
+        return SpeakerScore(correct: correct, total: total, unmatched: unmatched, uncaptioned: uncaptioned, mismatches: mismatches,
+                            multiThem: multi)
     }
 }

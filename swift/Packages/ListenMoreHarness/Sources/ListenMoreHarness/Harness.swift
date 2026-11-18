@@ -213,7 +213,7 @@ public enum Harness {
             shapes[line.id] = ClipMeasure.shape(samples, sampleRate: sr)
         }
         let clock = HarnessClock(.wall)
-        let http = MeteredHTTP(inner: backend.http)
+        let http = MeteredHTTP(inner: backend.http, clock: clock)
         let ws = MeteredConnector(inner: backend.webSocket, clock: clock)
         let services = RunServices(mode: .live, config: config, engineConfig: config, key: scenario.keyless ? nil : key,
                                    transports: GptTransports(http: http, webSocket: ws, scheduler: backend.scheduler),
@@ -262,6 +262,12 @@ public enum Harness {
             judge["input_tokens"] = Double(http.tokens.input)
             judge["output_tokens"] = Double(http.tokens.output)
             judge["failed_calls"] = Double(http.failures.count)
+            // A judge call cancelled within a second of an engine stop is the GPT layer closing on Pause
+            // (or the call app's mute, or the call's end), as designed.
+            let cancels = http.cancelled.map { $0 - record.origin }
+            let atStop = cancels.filter { c in record.engineStops.contains { abs($0 - c) <= 1.0 } }
+            judge["cancelled_at_engine_stop"] = Double(atStop.count)
+            judge["cancelled_otherwise"] = Double(cancels.count - atStop.count)
             if !http.failures.isEmpty {
                 labels["failures"] = Dictionary(grouping: http.failures, by: { $0 }).map { "\($0.key) x\($0.value.count)" }.sorted().joined(separator: ", ")
             }

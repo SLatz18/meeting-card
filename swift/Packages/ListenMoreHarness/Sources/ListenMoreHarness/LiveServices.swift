@@ -91,14 +91,25 @@ public struct OpenAITTS: Sendable {
 /// Wraps the judge's HTTP transport to log token usage from each reply (numbers only).
 public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
     let inner: HTTPTransport
+    let clock: HarnessClock?
     private let lock = NSLock()
     private var _calls = 0
     private var _inputTokens = 0
     private var _outputTokens = 0
     private var _failures: [String] = []
+    private var _cancelled: [Double] = []
 
-    public init(inner: HTTPTransport) {
+    public init(inner: HTTPTransport, clock: HarnessClock? = nil) {
         self.inner = inner
+        self.clock = clock
+    }
+
+    /// Run-clock times of calls cancelled in flight (the GPT layer cancels its judge task when the engine
+    /// stops: Pause, the call app's mute, the end of the call). Not failures.
+    public var cancelled: [Double] { lock.withLock { _cancelled } }
+
+    static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     public var calls: Int { lock.withLock { _calls } }
@@ -112,9 +123,10 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
         do {
             reply = try await inner.post(url: url, headers: headers, body: body, timeout: timeout)
         } catch {
+            let t = clock?.now() ?? 0
             lock.withLock {
                 _calls += 1
-                _failures.append(GptError.safe(error))
+                if Self.isCancellation(error) { _cancelled.append(t) } else { _failures.append(GptError.safe(error)) }
             }
             throw error
         }

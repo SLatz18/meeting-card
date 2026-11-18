@@ -47,7 +47,7 @@ public enum Checks {
         // Coaching.
         let oracle = CueOracle.expected(r.timeline, config: r.config,
                                         facts: .init(keyless: s.keyless, gptStopT: r.gptStop?.t, mode: r.mode, judgeOn: r.judgeOn,
-                                                     segmentedSpeech: r.segmentedSpeech))
+                                                     segmentedSpeech: r.segmentedSpeech, callVoiced: r.callVoiced, frameS: r.config.frameS))
         let match = CueOracle.match(expected: oracle.cues, tolerated: oracle.tolerated, actual: r.cues)
         check("coaching", match.passed,
               "expected \(oracle.cues.filter { !$0.optional }.count), matched \(match.outcomes.filter { $0.actual != nil }.count), missed \(match.missed.count), false \(match.falseCues.count)"
@@ -71,7 +71,8 @@ public enum Checks {
         // Speaker identification.
         let sp = Scoring.speakers(r)
         check("speaker-id", sp.correct == sp.total && (live || sp.unmatched == 0),
-              "\(sp.correct)/\(sp.total) attributed correctly (stream, caption speaker and label), \(sp.unmatched) unmatched, \(sp.uncaptioned) never captioned, multi-Them: \(sp.multiThem.rawValue)")
+              "\(sp.correct)/\(sp.total) attributed correctly (stream, caption speaker and label), \(sp.unmatched) unmatched, \(sp.uncaptioned) never captioned, multi-Them: \(sp.multiThem.rawValue)"
+                + (sp.mismatches.isEmpty ? "" : "; wrong: " + sp.mismatches.joined(separator: "; ")))
         if let m = r.sockets.routingMismatches {
             check("stream-routing", m == 0, "\(m) loud appends on the wrong stream's transcriber")
         }
