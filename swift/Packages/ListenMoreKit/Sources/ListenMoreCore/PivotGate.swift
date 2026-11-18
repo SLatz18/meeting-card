@@ -59,10 +59,17 @@ final class PivotGate {
         let timely: Bool
     }
 
+    private struct TheirTurn {
+        let shared: Bool
+        let invited: Bool
+    }
+
     private struct Ended {
         let reply: Reply
         let replyEnd: TimeInterval
         let at: TimeInterval
+        /// Read once their last transcript is in; the user's may still be on its way.
+        var theirs: TheirTurn?
     }
 
     /// Lines older than this are dropped, like `TextRules`' segments.
@@ -195,28 +202,32 @@ final class PivotGate {
     }
 
     private func decide(now: TimeInterval) -> Candidate? {
-        guard let e = ended else { return nil }
-        let theirs = them.filter { Elapsed.span($0.end - boundary) > 0 && Elapsed.span($0.end - e.reply.themEnd) <= 0 }
-        let haveTheirs = theirs.last.map { Elapsed.span($0.end - e.reply.themEnd) >= 0 } ?? false
-        let invited = invitePending || theirs.contains(where: { has($0.text, invites) })
-        if haveTheirs && !invited && !shared(theirs) {
+        guard var e = ended else { return nil }
+        if e.theirs == nil {
+            let theirs = them.filter { Elapsed.span($0.end - boundary) > 0 && Elapsed.span($0.end - e.reply.themEnd) <= 0 }
+            if theirs.last.map({ Elapsed.span($0.end - e.reply.themEnd) >= 0 }) ?? false {
+                e.theirs = TheirTurn(shared: shared(theirs), invited: invitePending || theirs.contains(where: { has($0.text, invites) }))
+                ended = e
+            }
+        }
+        if let t = e.theirs, !t.invited, !t.shared {
             invitePending = false
             finish(e)
             return nil
         }
         let mine = me.filter { Elapsed.span($0.end - e.reply.start) >= 0 && Elapsed.span($0.end - e.replyEnd) <= 0 }
         let haveMine = mine.last.map { Elapsed.span($0.end - e.replyEnd) >= 0 } ?? false
-        guard haveTheirs && haveMine else {
+        guard let t = e.theirs, haveMine else {
             if Elapsed.span(now - e.at) > x.pivotTranscriptWaitS {
                 counters.lateTranscripts += 1
-                if haveTheirs { invitePending = invited }
+                if let t = e.theirs { invitePending = t.invited }
                 finish(e)
             }
             return nil
         }
-        invitePending = invited && mine.reduce(0, { $0 + TextRules.tokens($1.text).count }) < x.pivotReplyMinWords
+        invitePending = t.invited && mine.reduce(0, { $0 + TextRules.tokens($1.text).count }) < x.pivotReplyMinWords
         finish(e)
-        guard !invited, shared(theirs), pivots(mine) else { return nil }
+        guard !t.invited, t.shared, pivots(mine) else { return nil }
         let rearmed = lastCandidateTurnEnd.map { Elapsed.span(e.at - $0) >= x.pivotRearmS } ?? true
         guard rearmed && counters.candidates < x.pivotMaxPerCall else {
             counters.rateLimited += 1
