@@ -484,6 +484,8 @@ public final class GptLayer: @unchecked Sendable {
     private var stopReported = false
     private var judgeStopReported = false
     private var transcribersClosed = false
+    private let transcribeModel: LogToken
+    private var segmentCounts: [Speaker: Int] = [:]
 
     /// `transcriberFactory` builds one session per speaker and must route its events to the given callback.
     /// `onStopped` is called once, from the event loop, when the layer turns itself off; `onJudgeStopped`
@@ -497,6 +499,7 @@ public final class GptLayer: @unchecked Sendable {
                 provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
+        transcribeModel = LogToken(config.gpt.transcribeModel)
         if provider == nil { core.stopJudging() }
         self.now = now
         self.offer = offer
@@ -582,8 +585,14 @@ public final class GptLayer: @unchecked Sendable {
         switch cmd {
         case .start:
             do {
-                for speaker in Speaker.allCases { try await transcribers[speaker]?.start() }
+                for speaker in Speaker.allCases {
+                    try await transcribers[speaker]?.start()
+                    CoachLog.record(.transcriberConnected(speaker: speaker, model: transcribeModel))
+                }
             } catch {
+                let failure = CoachLog.describe(error)
+                CoachLog.record(.transcriberError(speaker: nil, model: transcribeModel,
+                                                  httpStatus: failure.httpStatus, code: failure.code))
                 core.fail("realtime connect: \(GptError.safe(error))")
             }
         case let .frame(me, meVad, others, othersVad, meRunS):
@@ -598,6 +607,7 @@ public final class GptLayer: @unchecked Sendable {
             guard !(speaker == .me && core.meMuted) else { break }
             let t = now()
             let r = core.onText(speaker, text: text, refT: refT, now: t)
+            countSegment(speaker)
             onSegment?(speaker, text, r.refT, t)
             if core.enabled { onCaption?(.final(speaker, text: text)) }
             if let req = r.start { schedule(req) }
@@ -634,11 +644,13 @@ public final class GptLayer: @unchecked Sendable {
         }
         if let reason = core.stopReason, !stopReported {
             stopReported = true
+            CoachLog.record(.gptStopped(reason: reason))
             onMeter?(core.cost.reading)
             onStopped?(reason)
         }
         if let failure = core.judgeStopReason, !judgeStopReported {
             judgeStopReported = true
+            CoachLog.record(.judgeStopped(kind: failure.kind, httpStatus: { if case .http(let code) = failure { return code } else { return nil } }()))
             onJudgeStopped?(failure)
         }
         return false
@@ -661,6 +673,9 @@ public final class GptLayer: @unchecked Sendable {
                     break
                 }
             } catch {
+                let failure = CoachLog.describe(error)
+                CoachLog.record(.transcriberError(speaker: speaker(of: action), model: transcribeModel,
+                                                  httpStatus: failure.httpStatus, code: failure.code))
                 core.fail("realtime send: \(GptError.safe(error))")
             }
         }
@@ -675,7 +690,30 @@ public final class GptLayer: @unchecked Sendable {
     private func closeTranscribers() async {
         guard !transcribersClosed else { return }
         transcribersClosed = true
-        for t in transcribers.values { await t.close() }
+        logSegments()
+        for (speaker, t) in transcribers {
+            await t.close()
+            CoachLog.record(.transcriberDisconnected(speaker: speaker))
+        }
+    }
+
+    /// Counts a finished caption segment (never its text): the file hears of the first one, then every twentieth.
+    private func countSegment(_ speaker: Speaker) {
+        segmentCounts[speaker, default: 0] += 1
+        let total = segmentCounts.values.reduce(0, +)
+        if total == 1 || total % 20 == 0 { logSegments() }
+    }
+
+    private func logSegments() {
+        CoachLog.record(.captionSegments(me: segmentCounts[.me] ?? 0, others: segmentCounts[.others] ?? 0))
+    }
+
+    private func speaker(of action: GptCore.TxAction) -> Speaker {
+        switch action {
+        case .send(let speaker, _): return speaker
+        case .commit(let speaker, _): return speaker
+        case .clear(let speaker): return speaker
+        }
     }
 
     private func spawn(_ op: @escaping @Sendable () async -> Void) {

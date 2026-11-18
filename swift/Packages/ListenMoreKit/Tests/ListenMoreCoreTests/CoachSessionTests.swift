@@ -396,6 +396,51 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertTrue(started, "the engine runs without a key (no GPT layer)")
     }
 
+    /// A call from detection to its end leaves event names, the app's bundle ID and the key's presence in the coach log:
+    /// never the key.
+    func testCoachLogFollowsACallAndNeverHoldsTheKey() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let s = makeSession(keys: FakeKeys(key: APIKey("sk-test-not-real")))
+        meetInDia()
+        s.tick()
+        let started = await eventually { self.engine.startedWithKey == [true] }
+        XCTAssertTrue(started)
+        s.setMicMuted(true)
+        s.setPaused(true)
+        s.setPaused(false)
+        endMeeting()
+        s.tick()
+        clock.advance(9)
+        s.tick()
+        XCTAssertNil(s.session)
+        let lines = sink.lines
+        XCTAssertEqual(lines.first, "call.detected app=company.thebrowser.dia")
+        XCTAssertTrue(lines.contains("session.started reason=audio app=company.thebrowser.dia"))
+        XCTAssertTrue(lines.contains("key.read state=present"))
+        XCTAssertTrue(lines.contains("mic.muted on=true"))
+        XCTAssertTrue(lines.contains("session.paused on=true"))
+        XCTAssertTrue(lines.contains("call.ended app=company.thebrowser.dia reason=audioEnded"))
+        XCTAssertTrue(lines.contains("session.stopped reason=audioEnded"))
+        XCTAssertFalse(lines.contains { $0.contains("sk-") || $0.contains("test-not-real") })
+    }
+
+    /// A failed call-audio start is logged with its error domain and code.
+    func testCoachLogRecordsACallCaptureFailureCode() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        call.failStages = [.parentApps]
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        let logged = await eventually { sink.lines.contains { $0.hasPrefix("callAudio.failed") } }
+        XCTAssertTrue(logged)
+        XCTAssertTrue(sink.lines.contains("callAudio.failed stage=parentApps domain=FakeCall code=2"), "\(sink.lines)")
+        XCTAssertTrue(sink.lines.contains("key.read state=absent"))
+    }
+
     func testIndicatorOnWhilePrewarmedThenListening() async {
         let (s, provider) = audioSession()
         provider.zoomCall()

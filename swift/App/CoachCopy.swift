@@ -33,6 +33,8 @@ enum CoachCopy {
         guard !parts.isEmpty else { return nil }
         return "Allow MeetingCard under \(parts.joined(separator: " and ")) in System Settings > Privacy & Security. Until then the coach goes by audio activity."
     }
+    static let menuShowCoachLog = "Show Coach Log"
+    static let menuShowCoachLogHelp = "Shows the coach's local diagnostics file in Finder. It lists event names, times, device and app names, error codes and counts. Never transcript text, audio or your key. Old entries are removed after a few days."
     static let menuOff = "Call coach: off"
     static let menuWaiting = "Coach on, waiting for a call"
     static let menuGptOffNoKey = "GPT cues off: no API key"

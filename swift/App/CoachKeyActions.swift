@@ -13,12 +13,14 @@ extension CoachController {
             keyStored = hasKey
             keyGate.rejected = false
             keyProblem = nil
+            CoachLog.record(.keyCheck(.empty, source: .save))
             refresh()
             completion(.empty)
             return
         }
         Task { @MainActor in
             let check = await KeyValidator.check(key.value)
+            CoachLog.record(.keyCheck(check, source: .save))
             if check != .rejected {
                 try? self.keychain.save(key)
                 self.keyStored = self.hasKey

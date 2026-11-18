@@ -34,6 +34,8 @@ final class CoachController: NSObject {
     static let keychainService = AppIdentity.current.keychainService
 
     let defaults: UserDefaults
+    /// Local diagnostics: event names, times, device and app names, codes and counts (`CoachLog`).
+    let coachLogFile: CoachLogFile
     let config: ListenMoreConfig
     let keychain: KeychainStore
     /// The TypeSafe key: whatever service the OpenAI key uses, in its own account.
@@ -87,8 +89,11 @@ final class CoachController: NSObject {
     private(set) var minimized = false
 
     init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
-         showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore()) throws {
+         showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore(),
+         coachLogFile: CoachLogFile = CoachLogFile(url: AppPaths.coachLog(for: .current))) throws {
         self.defaults = defaults
+        self.coachLogFile = coachLogFile
+        CoachLog.install(coachLogFile)
         self.keychain = keychain
         typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
@@ -101,6 +106,7 @@ final class CoachController: NSObject {
         callControlsModel.onChange = { [weak self] in self?.refresh() }
         keyStored = keychain.hasKey
         typeSafeKeyStored = typeSafeKeychain.hasKey
+        CoachLog.record(.coachEnabled(enabled))
         if enabled {
             makeService()
             checkStoredKey()
@@ -153,6 +159,7 @@ final class CoachController: NSObject {
     /// coach runs local cues only. A stored key is checked in the background.
     func setEnabled(_ on: Bool, completion: @escaping (KeyCheck?) -> Void) {
         defaults.set(on, forKey: Keys.enabled)
+        CoachLog.record(.coachEnabled(on))
         guard on else {
             service?.setEnabled(false)
             keyProblem = nil
@@ -171,11 +178,13 @@ final class CoachController: NSObject {
         keyStored = hasKey
         guard let key = try? keychain.readKey() else {
             keyGate.rejected = false
+            CoachLog.record(.keyCheck(.empty, source: .stored))
             completion(nil)
             return
         }
         Task { @MainActor in
             let check = await KeyValidator.check(key.value)
+            CoachLog.record(.keyCheck(check, source: .stored))
             self.keyGate.rejected = check == .rejected
             self.keyProblem = check == .ok ? nil : check
             self.refresh()
@@ -491,6 +500,7 @@ final class CoachController: NSObject {
         }
         addTranscriptItems(to: menu)
         menu.addItem(feedbackMenuItem())
+        menu.addItem(coachLogMenuItem())
         return menu
     }
 
@@ -522,6 +532,20 @@ final class CoachController: NSObject {
         m.image = Theme.symbol(Theme.Coach.menuSymbols.feedback, Theme.FontSpec(Theme.Coach.menuSymbolSize), label: title)
         m.target = self
         return m
+    }
+
+    private func coachLogMenuItem() -> NSMenuItem {
+        let m = NSMenuItem(title: CoachCopy.menuShowCoachLog, action: #selector(showCoachLogClicked(_:)), keyEquivalent: "")
+        m.toolTip = CoachCopy.menuShowCoachLogHelp
+        m.target = self
+        return m
+    }
+
+    /// Reveals the diagnostics file in Finder (its folder before anything has been written).
+    @objc func showCoachLogClicked(_ sender: Any?) {
+        let file = coachLogFile.url
+        let target = CoachLogFile.revealTarget(fileExists: FileManager.default.fileExists(atPath: file.path), file: file)
+        NSWorkspace.shared.activateFileViewerSelecting([target])
     }
 
     @objc func deleteTranscriptClicked(_ sender: Any?) {

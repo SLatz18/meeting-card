@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import CoreGraphics
 import ListenMoreCore
 
 /// The coach for a host app, wired with the real parts: Core Audio running-state drives the trigger
@@ -152,9 +154,27 @@ public final class CoachService: CoachSessionDelegate {
         if start != seenSessionStart {
             if seenSessionStart != nil { onCallEnd?() }
             seenSessionStart = start
-            if start != nil { onCallStart?() }
+            if start != nil {
+                Self.logPermissions()
+                onCallStart?()
+            }
         }
         onChange?()
+    }
+
+    /// What the OS says about the two permissions a call needs, when a session starts. There is no public
+    /// check for System Audio Recording; a refusal shows up as a call-audio failure code instead.
+    static func logPermissions() {
+        let mic: PermissionState
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: mic = .granted
+        case .denied: mic = .denied
+        case .restricted: mic = .restricted
+        case .notDetermined: mic = .notDetermined
+        @unknown default: mic = .notDetermined
+        }
+        CoachLog.record(.permission(.microphone, mic))
+        CoachLog.record(.permission(.screenRecording, CGPreflightScreenCaptureAccess() ? .granted : .denied))
     }
 
     public func coachSession(_ session: CoachSession, didShow cue: Cue) { onCue?(cue) }

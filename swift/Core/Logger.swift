@@ -21,6 +21,12 @@ public struct AppPaths: Sendable, Equatable {
             .appendingPathComponent("Library/Application Support/\(id.transcriptsDirName)/Transcripts", isDirectory: true)
     }
 
+    /// The coach diagnostics file, beside the app log: `~/Library/Logs/MeetingCardSwift-Coach.log` for the
+    /// shipping app. A separate file, so its size cap and age limit never touch the app log.
+    public static func coachLog(for id: AppIdentity) -> URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Logs/\(id.fileStem)-Coach.log")
+    }
+
     public static func forRun(fixture: Bool, identity: AppIdentity) -> AppPaths {
         fixture ? AppPaths.fixture(for: identity) : AppPaths.production(for: identity)
     }

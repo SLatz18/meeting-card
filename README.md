@@ -64,6 +64,7 @@ Ad-hoc is fine for trying it out. A stable self-signed identity is nicer for dai
 - Quit: `pkill -f MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift`.
 - Stop launching at login: System Settings > General > Login Items, switch MeetingCardSwift off. The app never re-enables itself.
 - Log: `~/Library/Logs/MeetingCardSwift.log`. It records event ids, start times, counts and skip reasons, never titles, descriptions or attendees. It **does** record the meeting link a card offers and the link opened on Join, which can include a Zoom passcode, so redact links before sharing log lines.
+- Coach log: `~/Library/Logs/MeetingCardSwift-Coach.log` (the coach menu's **Show Coach Log** reveals it). Local only, for diagnosing a call with no captions. It lists event names, times, device and app names (bundle IDs), error codes and counts, such as key check results, call detected or ended, mic and call-audio start or failure, permission states, transcriber connect or error codes and caption segment counts. Never transcript text, audio, your key, headers or request or response bodies. It holds at most about 1 MB plus one older file, and entries older than three days are removed.
 
 ## Try it without a calendar
 

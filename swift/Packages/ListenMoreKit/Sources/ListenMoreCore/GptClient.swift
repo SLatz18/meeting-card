@@ -119,7 +119,12 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
                 handle(msg)
             }
         } catch {
-            if !Task.isCancelled { onEvent(.error("realtime read: \(GptError.safe(error))")) }
+            if !Task.isCancelled {
+                let failure = CoachLog.describe(error)
+                CoachLog.record(.transcriberError(speaker: speaker, model: LogToken(gpt.transcribeModel),
+                                                  httpStatus: failure.httpStatus, code: failure.code))
+                onEvent(.error("realtime read: \(GptError.safe(error))"))
+            }
         }
     }
 
@@ -152,7 +157,10 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
                 onEvent(.clearRejected(speaker))
                 return
             }
-            onEvent(.error("realtime error \(err["type"] as? String ?? "")/\(err["code"] as? String ?? "")"))
+            let type = err["type"] as? String ?? "", code = err["code"] as? String ?? ""
+            CoachLog.record(.transcriberError(speaker: speaker, model: LogToken(gpt.transcribeModel), httpStatus: nil,
+                                              code: LogToken("\(type)/\(code)")))
+            onEvent(.error("realtime error \(type)/\(code)"))
         default:
             break
         }

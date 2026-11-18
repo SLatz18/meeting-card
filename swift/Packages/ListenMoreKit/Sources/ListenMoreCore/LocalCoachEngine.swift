@@ -147,6 +147,9 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
             layer.start()
             gpt = layer
             bridge = box
+            CoachLog.record(.gptLayer(enabled: true, reason: .keyPresent))
+        } else {
+            CoachLog.record(.gptLayer(enabled: false, reason: apiKey == nil ? .noKey : .noTransports))
         }
         pipeline = CoachPipeline(config: config, gpt: bridge, participants: participants)
         isRunning = true

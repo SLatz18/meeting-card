@@ -544,6 +544,47 @@ final class GptLayerTests: XCTestCase {
         await layer.close()
     }
 
+    /// The coach log hears of segment counts and the layer stop: never the words.
+    func testCoachLogGetsCountsAndReasonsNeverText() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let judge = FakeJudge()
+        judge.fail = true
+        let layer = makeLayer(me: ["a private sentence about salaries"], others: ["what do you all think about the budget"], judge: judge)
+        utterance(layer, .others, onset: 1, offset: 2)
+        utterance(layer, .me, onset: 3, offset: 4)
+        let stopped = await eventually { await !layer.snapshot().enabled }
+        XCTAssertTrue(stopped)
+        await layer.close()
+        XCTAssertTrue(sink.lines.contains("transcriber.connected speaker=me model=gpt-live-transcribe"), "\(sink.lines)")
+        XCTAssertTrue(sink.lines.contains("captions.segments me=0 others=1"), "the first segment is logged as a count")
+        XCTAssertTrue(sink.lines.contains("gpt.stopped reason=error"))
+        XCTAssertTrue(sink.lines.contains { $0.hasPrefix("captions.segments") && $0.contains("others=1") }, "counted again on close")
+        XCTAssertTrue(sink.lines.contains("transcriber.disconnected speaker=me"))
+        for line in sink.lines {
+            for word in ["salaries", "budget", "sentence", "think"] { XCTAssertFalse(line.contains(word), line) }
+        }
+    }
+
+    /// A transcriber's error event is logged by its type and code, never its message.
+    func testTranscriberErrorEventLogsTypeAndCodeOnly() async throws {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let connector = FakeConnector()
+        let tx = LiveTranscriber(config: try TestConfig.load(), key: APIKey("sk-test-rt")!, speaker: .others, connector: connector) { _ in }
+        try await tx.start()
+        let conn = try XCTUnwrap(connector.connections.first)
+        conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"invalid_api_key","message":"Incorrect API key provided: sk-live-secret-value"}}"#)
+        let logged = await eventually { sink.lines.contains { $0.hasPrefix("transcriber.error") } }
+        XCTAssertTrue(logged)
+        XCTAssertEqual(sink.lines.first { $0.hasPrefix("transcriber.error") },
+                       "transcriber.error speaker=others model=gpt-live-transcribe code=invalid_request_error/invalid_api_key")
+        for line in sink.lines { XCTAssertFalse(line.contains("secret") || line.contains("sk-"), line) }
+        await tx.close()
+    }
+
     func testJudgeErrorStopsWithStatusOnly() async {
         let judge = FakeJudge()
         judge.fail = true

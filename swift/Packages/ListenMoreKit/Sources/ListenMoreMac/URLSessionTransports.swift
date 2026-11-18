@@ -1,5 +1,6 @@
 import Foundation
 import ListenMoreCore
+import os
 
 /// Ephemeral URLSession configuration for OpenAI calls: no URL cache, no cookie or credential storage,
 /// so nothing about a request or reply is written to disk.
@@ -61,24 +62,45 @@ public final class URLSessionWebSocketConnector: WebSocketConnector, @unchecked 
 
 final class URLSessionWebSocketConnection: WebSocketConnection, @unchecked Sendable {
     private let task: URLSessionWebSocketTask
+    /// One line per socket: a failed send and the failed read after it are the same failure.
+    private let failureLogged = OSAllocatedUnfairLock(initialState: false)
 
     init(task: URLSessionWebSocketTask) {
         self.task = task
     }
 
     func send(_ text: String) async throws {
-        try await task.send(.string(text))
+        do {
+            try await task.send(.string(text))
+        } catch {
+            logTransport(error)
+            throw error
+        }
     }
 
     func receive() async throws -> String {
-        switch try await task.receive() {
-        case .string(let s):
-            return s
-        case .data(let d):
-            return String(decoding: d, as: UTF8.self)
-        @unknown default:
-            throw GptError.badResponse
+        do {
+            switch try await task.receive() {
+            case .string(let s):
+                return s
+            case .data(let d):
+                return String(decoding: d, as: UTF8.self)
+            @unknown default:
+                throw GptError.badResponse
+            }
+        } catch {
+            logTransport(error)
+            throw error
         }
+    }
+
+    /// A failed socket: the handshake's HTTP status when the server answered, the URL error code and the
+    /// close code. Numbers only; the server's reason text is never read.
+    private func logTransport(_ error: Error) {
+        guard !failureLogged.withLock({ logged in defer { logged = true }; return logged }) else { return }
+        CoachLog.record(.transcriberTransport(httpStatus: (task.response as? HTTPURLResponse)?.statusCode,
+                                              urlErrorCode: (error as? URLError)?.code.rawValue,
+                                              closeCode: task.closeCode == .invalid ? -1 : task.closeCode.rawValue))
     }
 
     func close() {

@@ -1,5 +1,6 @@
 import AVFoundation
 import AudioToolbox
+import CoreAudio
 import ListenMoreCore
 
 /// The user's microphone, routed by `MicPlan`: no voice processing on headphones (nothing is
@@ -71,17 +72,24 @@ public final class MicCapture: MicSource {
 
     static func log(_ event: RoutedMic.Event) {
         switch event {
-        case let .opened(plan, applied, _):
+        case let .opened(plan, applied, deviceID):
             let voiceProcessing = applied?.voiceProcessing ?? false
             let ducking = applied?.ducking
+            CoachLog.record(.micOpened(route: LogToken(plan.route.rawValue), source: LogToken(plan.micSource.rawValue),
+                                       voiceProcessing: voiceProcessing,
+                                       device: deviceID.flatMap { CoreAudioRoutes.string($0, kAudioObjectPropertyName) }.map { LogToken($0) }))
             Log.capture.info("mic open: route \(plan.route.rawValue, privacy: .public), micSource \(plan.micSource.rawValue, privacy: .public), voiceProcessing \(voiceProcessing, privacy: .public), advanced ducking \(ducking?.advanced ?? false, privacy: .public), ducking level \(ducking?.level.rawValue ?? -1, privacy: .public)")
         case .closed:
+            CoachLog.record(.micClosed)
             Log.capture.info("mic closed")
         case let .restarted(count):
+            CoachLog.record(.micRouteRestart(count: count))
             Log.capture.info("mic route restart, count \(count, privacy: .public)")
         case let .openFailed(plan):
+            CoachLog.record(.micOpenFailed(route: LogToken(plan.route.rawValue), source: LogToken(plan.micSource.rawValue)))
             Log.capture.error("mic open failed: route \(plan.route.rawValue, privacy: .public), micSource \(plan.micSource.rawValue, privacy: .public)")
         case .inputSilent:
+            CoachLog.record(.micSilent)
             Log.capture.info("mic delivered no sound: built-in mic set aside, call audio only")
         }
     }

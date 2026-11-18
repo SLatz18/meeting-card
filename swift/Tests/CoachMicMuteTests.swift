@@ -88,7 +88,8 @@ final class CoachMicMuteTests: XCTestCase {
 
         let menu = try body("func menu(for items: [CoachMenuItem]) -> NSMenu {", in: src)
         let adds = menu.components(separatedBy: "\n").filter { $0.contains("menu.addItem(") }
-        XCTAssertEqual(adds.last?.trimmingCharacters(in: .whitespaces), "menu.addItem(feedbackMenuItem())", "Send Feedback stays last")
+        XCTAssertEqual(adds.last?.trimmingCharacters(in: .whitespaces), "menu.addItem(coachLogMenuItem())", "Show Coach Log follows Send Feedback")
+        XCTAssertEqual(adds.dropLast().last?.trimmingCharacters(in: .whitespaces), "menu.addItem(feedbackMenuItem())", "Send Feedback keeps its place")
     }
 
     /// Mute asks for nothing new: still the three usage strings, and no entitlements file.

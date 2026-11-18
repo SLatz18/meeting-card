@@ -117,6 +117,8 @@ public final class CoachSession {
     /// The mic device is closed (`MicSource.setMuted(true)`) while capture runs: the session's app
     /// reported its call ended (see `syncMic`).
     public private(set) var micDeviceOff = false
+    /// The session's app, as the diagnostics file names it (the app that started it, or the first one captured).
+    private var loggedApp: LogToken?
 
     public init(config: ListenMoreConfig, engine: CoachEngine, mic: MicSource, call: CallSource, signal: CallSignal,
                 keys: APIKeyProvider, renderer: CueRenderer, settings: TriggerSettings, enabled: Bool = true,
@@ -202,6 +204,7 @@ public final class CoachSession {
     public func setMicMuted(_ muted: Bool) {
         guard trigger.session != nil, muted != micMuted else { return }
         micMuted = muted
+        CoachLog.record(.micMuted(muted))
         if isCapturing {
             if muted {
                 syncMic()
@@ -301,7 +304,11 @@ public final class CoachSession {
         guard !actions.isEmpty else { return }
         for a in actions {
             switch a {
-            case .start:
+            case .start(let started):
+                let app = LogToken(started.appKey)
+                loggedApp = app
+                if started.reason == .audio { CoachLog.record(.callDetected(bundleId: app)) }
+                CoachLog.record(.sessionStarted(reason: started.reason, bundleId: app))
                 // A new session never inherits the previous one's engine (or OpenAI sessions).
                 stopCapture()
                 cuePolicy.reset()
@@ -311,10 +318,14 @@ public final class CoachSession {
                 cuesShown = 0
                 captureProblem = false
                 micMuted = false
-            case .stop:
+            case .stop(let reason):
+                CoachLog.record(.callEnded(bundleId: loggedApp, reason: reason))
+                CoachLog.record(.sessionStopped(reason: reason))
+                loggedApp = nil
                 renderer.clear()
                 micMuted = false
             case .pause(let paused):
+                CoachLog.record(.sessionPaused(paused))
                 cuePolicy.paused = paused
                 if paused { renderer.clear() }
             }
@@ -344,6 +355,7 @@ public final class CoachSession {
 
     private func startCapture(bundleIds: [String], stage: CaptureStage) {
         let isNewSession = capturingBundleIds.isEmpty
+        if loggedApp == nil, bundleIds.count == 1 { loggedApp = LogToken(bundleIds[0]) }
         capturingBundleIds = bundleIds
         captureStage = stage
         let engine = engine
@@ -354,8 +366,10 @@ public final class CoachSession {
             let key: APIKey?
             do {
                 key = try keys.readKey()
+                CoachLog.record(.keyRead(key == nil ? .absent : .present))
             } catch {
                 key = nil
+                CoachLog.record(.keyRead(.unreadable))
                 delegate?.coachSession(self, didReport: .keyUnreadable)
             }
             gateGeneration = gate.openNew()
@@ -388,6 +402,8 @@ public final class CoachSession {
             } catch {
                 guard let self, gate.admits(gen) else { return }
                 self.captureProblem = true
+                let failure = CoachLog.domainAndCode(error)
+                CoachLog.record(.callAudioFailed(stage: stage, domain: failure.domain, code: failure.code))
                 self.delegate?.coachSession(self, didReport: .callCaptureFailed(stage: stage))
                 self.changed()
             }
