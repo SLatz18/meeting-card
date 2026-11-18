@@ -743,6 +743,63 @@ final class LocalLayerMicMuteTests: XCTestCase {
                        "after a 0.8 s pause the next words are a new utterance")
     }
 
+    /// `n` stretches of 3 s of speech from 3.2 s (right after a 2.9 s unmute), 0.4 s apart.
+    func talkingOn(_ n: Int) -> [(Double, Double)] {
+        var out: [(Double, Double)] = []
+        for i in 0..<n {
+            let start = 3.2 + 3.4 * Double(i)
+            out.append((start, start + 3.0))
+        }
+        return out
+    }
+
+    /// The user talks on in 3 s chunks with 0.4 s pauses; the other side, quiet since before unmute, comes
+    /// back at 20 s during a pause and the user talks over them: a cut-in, like any other.
+    func testOtherSideComingBackAfterUnmuteIsCutInAsUsual() {
+        let chunks = talkingOn(7)
+        let others: [(Double, Double)] = [(1.0, 2.5), (20.0, 25.0)]
+        let evs = run(28, me: chunks, others: others, mutes: [(0, true), (2.9, false)])
+        let cuts = evs.filter { $0.kind == .interrupt }
+        XCTAssertFalse(cuts.isEmpty)
+        XCTAssertEqual(cuts.first?.onset ?? 0, 20.2, accuracy: 0.1, "the onset right after they came back")
+        XCTAssertEqual(cuts.first?.t ?? 0, 21.4, accuracy: 0.1)
+        XCTAssertTrue(cuts.allSatisfy { $0.onset >= 20 }, "nothing while they were quiet")
+    }
+
+    /// The other side starting a new utterance ends the first words back's exemption even before the cap.
+    func testOtherSideStartingANewUtteranceEndsTheExemption() {
+        let me: [(Double, Double)] = [(3.2, 4.0), (4.4, 8.0)]
+        let others: [(Double, Double)] = [(1.0, 2.5), (4.2, 7.5)]
+        let cuts = run(10, me: me, others: others, mutes: [(0, true), (2.9, false)]).filter { $0.kind == .interrupt }
+        XCTAssertEqual(cuts.count, 1, "the user's onset at 4.4 s, past the grace, cuts in on words they began at 4.2 s")
+        XCTAssertEqual(cuts.first?.onset ?? 0, 4.4, accuracy: 0.1)
+    }
+
+    /// A back-and-forth after unmute, the user's pauses under `cut_in_utterance_gap_ms`, for 22 s: the
+    /// other side's turns are new utterances, so the user's onsets are speaker switches and talk-over fires.
+    func testBackAndForthAfterUnmuteStillTalksOver() {
+        var me: [(Double, Double)] = []
+        var others: [(Double, Double)] = []
+        for c in stride(from: 2.8, through: 22.8, by: 5.0) {
+            others += [(c, c + 0.9), (c + 1.3, c + 2.1)]
+            me += [(c + 0.5, c + 1.5), (c + 1.9, c + 5.1)]
+        }
+        let unmuted = run(28, me: me, others: others, mutes: [(0, true), (2.9, false)])
+        let talkOvers = unmuted.filter { $0.kind == .talkOver }
+        XCTAssertGreaterThanOrEqual(talkOvers.count, 3, "\(cues(unmuted))")
+        XCTAssertTrue(talkOvers.allSatisfy { $0.t > 7 }, "the first exchange is the user's first words back")
+    }
+
+    /// The exemption is capped: talking on over the other side in 3 s chunks with 0.4 s pauses for 60 s,
+    /// the cut-ins come back `firstWordsBackMaxS` after the grace.
+    func testFirstWordsBackExemptionIsCapped() {
+        let chunks = talkingOn(18)
+        let cuts = run(64, me: chunks, others: [(1.0, 63.0)], mutes: [(0, true), (2.9, false)]).filter { $0.kind == .interrupt }
+        XCTAssertGreaterThanOrEqual(cuts.count, 10)
+        let graceEnd = 2.9 + config.frameS + config.local.unmuteGraceS
+        XCTAssertGreaterThanOrEqual(cuts.first?.onset ?? 0, graceEnd + LocalLayer.firstWordsBackMaxS - 1e-9)
+    }
+
     /// The grace is the rules' `local.unmute_grace_s` (1 s by default), not a constant in the layer.
     func testUnmuteGraceComesFromTheRules() {
         XCTAssertEqual(config.local.unmuteGraceS, 1.0)

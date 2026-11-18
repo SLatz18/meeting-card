@@ -75,6 +75,10 @@ public final class LocalLayer {
     static let speakingTailS = 0.06
     /// The other side must keep talking through a cut-in's opening overlap, bar VAD flicker this short.
     static let overlapGapS = 0.1
+    /// The longest the user's first words back stay settled past the grace. A first reply after unmute
+    /// ("Sorry, I was on mute, give me one second") runs about three seconds, so its comma onsets fall
+    /// inside this; anything the user says after it is graded as usual, whatever their pauses.
+    static let firstWordsBackMaxS = 3.0
 
     struct CutIn {
         var onset: TimeInterval
@@ -124,8 +128,11 @@ public final class LocalLayer {
     private var unmutePending = false
     private var unmuteGraceUntil: TimeInterval?
     /// The user's first words back began inside the grace: later onsets of that same utterance (after a
-    /// pause shorter than `cut_in_utterance_gap_ms`, like a comma) settle too.
+    /// pause shorter than `cut_in_utterance_gap_ms`, like a comma) settle too, until the other side
+    /// starts a new utterance or `firstWordsBackMaxS` past the grace.
     private var settlingRun = false
+    /// When the other side's last utterance ended (their VAD offset).
+    private var othersLastEnd = -Double.infinity
 
     /// `participants`: people on the call (2 = a 1:1), for the talk-share limit.
     public init(config: ListenMoreConfig, participants: Int = 2, context: LocalTextContext? = nil) {
@@ -179,7 +186,9 @@ public final class LocalLayer {
     /// the gap can fire. While off, the user's VAD isn't run: they read as silent, which is what the
     /// call heard, so talk share keeps counting the other side and the gap can only lower the user's
     /// share. Back on, an utterance that starts in the first `local.unmute_grace_s` seconds opens no
-    /// cut-in and logs no switch, through any pause shorter than `cut_in_utterance_gap_ms`.
+    /// cut-in and logs no switch, through pauses shorter than `cut_in_utterance_gap_ms`, until the
+    /// other side starts a new utterance (after at least that long quiet) or `firstWordsBackMaxS` past
+    /// the grace, whichever comes first.
     public func setMicMuted(_ muted: Bool) {
         guard muted != micMuted else { return }
         micMuted = muted
@@ -215,14 +224,22 @@ public final class LocalLayer {
             ev.append(LocalEvent(kind: .othersOnset, t: t, onset: on))
             onset(on, .others)
         }
-        if let off = o.offset { ev.append(LocalEvent(kind: .othersOffset, t: t, onset: off)) }
+        if let off = o.offset {
+            ev.append(LocalEvent(kind: .othersOffset, t: t, onset: off))
+            othersLastEnd = off
+        }
         if let off = s.offset {
             ev.append(LocalEvent(kind: .meOffset, t: t, onset: off))
             if prosodyEnabled, let p = prosody.onUtteranceEnd(t: off) {
                 ev.append(LocalEvent(kind: .prosody, t: t, onset: off, prosody: p))
             }
         }
-        if settlingRun && !s.active && t - me.lastSpeechT > cutPause { settlingRun = false }
+        if settlingRun {
+            let userPaused = !s.active && t - me.lastSpeechT > cutPause
+            let othersNewUtterance = o.onset.map { $0 - othersLastEnd >= cutPause } ?? false
+            let capped = unmuteGraceUntil.map { t >= $0 + Self.firstWordsBackMaxS } ?? true
+            if userPaused || othersNewUtterance || capped { settlingRun = false }
+        }
         if let on = s.onset {
             ev.append(LocalEvent(kind: .meOnset, t: t, onset: on))
             let settling = settlingRun || unmuteGraceUntil.map { on < $0 } ?? false
