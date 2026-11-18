@@ -75,6 +75,8 @@ public final class CoachSession {
         case fallbackEngaged(stage: CaptureStage)
         /// The transcriber refused `input_audio_buffer.clear` after Mute; nothing stopped.
         case transcriberClearRejected
+        /// The server refused one commit of transcription audio; nothing stopped.
+        case transcriberCommitRejected
     }
 
     public let config: ListenMoreConfig
@@ -491,6 +493,11 @@ public final class CoachSession {
         delegate?.coachSession(self, didReport: .transcriberClearRejected)
     }
 
+    fileprivate func commitRejected() {
+        guard isCapturing else { return }
+        delegate?.coachSession(self, didReport: .transcriberCommitRejected)
+    }
+
     fileprivate func meter(_ reading: CostReading) {
         guard isCapturing else { return }
         delegate?.coachSession(self, didMeter: reading)
@@ -595,6 +602,12 @@ final class EngineDelegateBridge: CoachEngineDelegate, @unchecked Sendable {
     func engine(_ engine: CoachEngine, clearRejected speaker: Speaker) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated { self.session?.clearRejected() }
+        }
+    }
+
+    func engine(_ engine: CoachEngine, commitRejected speaker: Speaker) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self.session?.commitRejected() }
         }
     }
 }

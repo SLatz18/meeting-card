@@ -203,8 +203,42 @@ final class GptClientTests: XCTestCase {
         await tx.close()
     }
 
-    /// Other server errors stay fatal.
-    func testOtherErrorsDuringACommitStayFatal() async throws {
+    /// An error that names a commit we never sent says nothing about ours: no pending commit is dropped.
+    func testACommitEmptyErrorNamingAnUnknownEventIdDropsNoPendingCommit() async throws {
+        let connector = FakeConnector()
+        let events = EventBox()
+        let tx = LiveTranscriber(config: config, key: APIKey("sk-test-rt")!, speaker: .me, connector: connector) { events.append($0) }
+        try await tx.start()
+        let conn = try XCTUnwrap(connector.connections.first)
+        try await tx.commit(refT: 1)
+        try await tx.commit(refT: 2)
+        conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty","event_id":"lm_commit_99"}}"#)
+        let rejected = await eventually { events.commitRejections == [.me] }
+        XCTAssertTrue(rejected, "commit-empty is never fatal")
+        XCTAssertTrue(events.errors.isEmpty)
+        conn.socket.push(#"{"type":"input_audio_buffer.committed","item_id":"i1"}"#)
+        conn.socket.push(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"i1","transcript":"first"}"#)
+        let gotText = await eventually { events.texts.count == 1 }
+        XCTAssertTrue(gotText)
+        XCTAssertEqual(events.texts.first?.2, 1, "the first commit is still pending, so it keeps its own time")
+        await tx.close()
+    }
+
+    func testACommitEmptyErrorWithNothingPendingIsNotFatal() async throws {
+        let connector = FakeConnector()
+        let events = EventBox()
+        let tx = LiveTranscriber(config: config, key: APIKey("sk-test-rt")!, speaker: .others, connector: connector) { events.append($0) }
+        try await tx.start()
+        let conn = try XCTUnwrap(connector.connections.first)
+        conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"input_audio_buffer_commit_empty"}}"#)
+        let rejected = await eventually { events.commitRejections == [.others] }
+        XCTAssertTrue(rejected)
+        XCTAssertTrue(events.errors.isEmpty)
+        await tx.close()
+    }
+
+    /// Other server errors stay fatal, with or without an event_id that names no commit.
+    func testAnErrorThatIsNotCommitEmptyStaysFatal() async throws {
         let connector = FakeConnector()
         let events = EventBox()
         let tx = LiveTranscriber(config: config, key: APIKey("sk-test-rt")!, speaker: .me, connector: connector) { events.append($0) }
@@ -214,6 +248,9 @@ final class GptClientTests: XCTestCase {
         conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"bad_key"}}"#)
         let failed = await eventually { !events.errors.isEmpty }
         XCTAssertTrue(failed)
+        conn.socket.push(#"{"type":"error","error":{"type":"invalid_request_error","code":"bad_key","event_id":"lm_commit_99"}}"#)
+        let failedWithId = await eventually { events.errors.count == 2 }
+        XCTAssertTrue(failedWithId)
         XCTAssertTrue(events.commitRejections.isEmpty)
         await tx.close()
     }
@@ -353,12 +390,16 @@ final class GptCoreTests: XCTestCase {
         actions += core.feed(.others, frame: z, vad: GptFrames.vad(raw: false, offset: 0.2), now: 0.22)
         XCTAssertEqual(sent(actions), 480, "one 20 ms frame with no pre-roll")
         XCTAssertEqual(commits(actions), [], "20 ms is too short to commit")
+        XCTAssertFalse(actions.contains(.clear(.others)), "the skipped audio is kept, not cleared")
+        XCTAssertEqual(try XCTUnwrap(core.cost.openS[.others]), 0.02, accuracy: 1e-9, "still counted as open")
         XCTAssertEqual(core.cost.segments, 0)
 
         actions = core.feed(.others, frame: v, vad: GptFrames.vad(raw: true, onset: 1.0), now: 1.02)
         for i in 0..<14 { actions += core.feed(.others, frame: v, vad: GptFrames.vad(raw: true), now: 1.04 + Double(i) * frameS) }
+        XCTAssertEqual(try XCTUnwrap(core.cost.openS[.others]), 0.32, accuracy: 1e-9, "the next utterance adds to it")
         actions += core.feed(.others, frame: z, vad: GptFrames.vad(raw: false, offset: 1.3), now: 1.4)
         XCTAssertEqual(commits(actions), [1.3], "the next utterance commits what has accumulated")
+        XCTAssertNil(core.cost.openS[.others], "the commit closes the open segment")
         XCTAssertEqual(core.cost.segments, 1)
         XCTAssertEqual(GptCore.minCommitS, 0.1)
     }
@@ -528,6 +569,13 @@ final class GptCoreTests: XCTestCase {
     }
 }
 
+final class RejectionBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _speakers: [Speaker] = []
+    var speakers: [Speaker] { lock.withLock { _speakers } }
+    func add(_ s: Speaker) { lock.withLock { _speakers.append(s) } }
+}
+
 final class StopBox: @unchecked Sendable {
     private let lock = NSLock()
     private var _reasons: [GptStopReason] = []
@@ -623,9 +671,11 @@ final class GptLayerTests: XCTestCase {
     func testACommitEmptyErrorFromTheServerKeepsTheLayerRunning() async {
         let connector = FakeConnector()
         let segments = segments
+        let rejections = RejectionBox()
         let layer = GptLayer(config: config, key: APIKey("sk-test-prod")!,
                              transports: GptTransports(http: FakeHTTP(), webSocket: connector, scheduler: InstantScheduler()),
-                             now: { 0 }, offer: { _, _, _, _ in }, onSegment: { s, t, r, _ in segments.add(s, t, r) })
+                             now: { 0 }, offer: { _, _, _, _ in }, onSegment: { s, t, r, _ in segments.add(s, t, r) },
+                             onCommitRejected: { rejections.add($0) })
         layer.start()
         let connected = await eventually { connector.connections.count == 2 }
         XCTAssertTrue(connected)
@@ -654,6 +704,8 @@ final class GptLayerTests: XCTestCase {
         XCTAssertTrue(snap.enabled)
         XCTAssertTrue(snap.errors.isEmpty)
         XCTAssertTrue(stops.reasons.isEmpty)
+        XCTAssertEqual(snap.rejectedCommits, 1, "counted once")
+        XCTAssertEqual(rejections.speakers, [.others], "and reported once, for the speaker it was")
         await layer.close()
     }
 

@@ -348,6 +348,20 @@ final class CoachSessionTests: XCTestCase {
         s.shutdown()
     }
 
+    /// A refused commit is reported to the host (which logs the event type only) and stops nothing.
+    func testARejectedCommitIsReportedOnceAndStopsNothing() async {
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        s.drainEngineForTesting()
+        engine.emitCommitRejected(.me)
+        let reported = await eventually { self.delegate.problems.contains(.transcriberCommitRejected) }
+        XCTAssertTrue(reported)
+        XCTAssertEqual(delegate.problems.filter { $0 == .transcriberCommitRejected }.count, 1)
+        XCTAssertNil(s.gptStopped)
+        XCTAssertTrue(s.isCapturing)
+    }
+
     func testFaceTimeViaAvconferencedAudio() async {
         let s = makeSession()
         probe.windowList = [WindowInfo(bundleId: "com.apple.FaceTime", title: "FaceTime")]

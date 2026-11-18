@@ -195,6 +195,10 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
     func emitMeter(_ r: CostReading) {
         delegate?.engine(self, meter: r)
     }
+
+    func emitCommitRejected(_ speaker: Speaker) {
+        delegate?.engine(self, commitRejected: speaker)
+    }
 }
 
 /// Settable wall clock.

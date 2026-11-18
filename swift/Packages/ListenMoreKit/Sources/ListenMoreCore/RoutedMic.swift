@@ -120,6 +120,7 @@ public final class RoutedMic: MicSource {
         handler = nil
         unavailableInputs = []
         unavailableSince = nil
+        policy = MicRestartPolicy()
     }
 
     /// Muted closes the input completely and keeps the session's handler; unmuting reopens it on the
@@ -192,7 +193,8 @@ public final class RoutedMic: MicSource {
     }
 
     /// The session keeps the mic, its handler and the route observer: the open is tried again on the
-    /// restart policy's schedule (at most `maxBurst` per `window`), and a route change tries it sooner.
+    /// restart policy's schedule, at most `maxBurst` per `window`. A route change schedules through the
+    /// same policy, so it is not sooner once that budget is spent.
     private func reportOpenFailure() {
         events?(.openFailed(currentPlan()))
         guard isStarted, !isMuted, plan == nil else { return }

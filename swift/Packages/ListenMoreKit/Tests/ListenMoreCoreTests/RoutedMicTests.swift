@@ -332,6 +332,21 @@ final class RoutedMicTests: XCTestCase {
         XCTAssertTrue(mic.isRunning, "unmute opens at once")
     }
 
+    func testANewSessionWithinThirtySecondsOfAFailedOneStillGetsItsFirstRetry() throws {
+        let mic = make(speakers)
+        opener.failAll = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        clock.advance(5)
+        XCTAssertGreaterThanOrEqual(opener.attempts, 4, "the first session used up its retry budget")
+        mic.stop()
+        opener.failAll = false
+
+        opener.failNext = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        clock.advance(1)
+        XCTAssertTrue(mic.isRunning, "the next session's retry isn't held back by the last one's")
+    }
+
     func testStopClearsMuteSetWhileStopped() throws {
         let mic = make(speakers)
         mic.setMuted(true)

@@ -169,16 +169,17 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
             }
             let id = err["event_id"] as? String
             let emptyCommit = err["code"] as? String == "input_audio_buffer_commit_empty"
+            // An error naming a pending commit drops that one. Without an event_id, commit-empty is
+            // matched to the oldest. An event_id that names no pending commit drops nothing.
             let rejected = lock.withLock { () -> Bool in
-                if let id, let i = pendingCommits.firstIndex(where: { $0.id == id }) {
+                if let id {
+                    guard let i = pendingCommits.firstIndex(where: { $0.id == id }) else { return emptyCommit }
                     pendingCommits.remove(at: i)
                     return true
                 }
-                if emptyCommit, !pendingCommits.isEmpty {
-                    pendingCommits.removeFirst()
-                    return true
-                }
-                return false
+                guard emptyCommit else { return false }
+                if !pendingCommits.isEmpty { pendingCommits.removeFirst() }
+                return true
             }
             if rejected {
                 onEvent(.commitRejected(speaker))

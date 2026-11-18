@@ -142,6 +142,10 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
                                  onClearRejected: { [weak self] speaker in
                                      guard let self else { return }
                                      self.delegate?.engine(self, clearRejected: speaker)
+                                 },
+                                 onCommitRejected: { [weak self] speaker in
+                                     guard let self else { return }
+                                     self.delegate?.engine(self, commitRejected: speaker)
                                  })
             box.layer = layer
             layer.start()

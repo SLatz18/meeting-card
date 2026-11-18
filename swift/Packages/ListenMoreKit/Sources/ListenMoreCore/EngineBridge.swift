@@ -65,6 +65,8 @@ public protocol CoachEngineDelegate: AnyObject {
     func engine(_ engine: CoachEngine, meter: CostReading)
     /// A transcriber refused to clear a speaker's uncommitted audio (non-fatal; transcription goes on).
     func engine(_ engine: CoachEngine, clearRejected speaker: Speaker)
+    /// The server refused a commit of a speaker's audio (non-fatal; transcription goes on).
+    func engine(_ engine: CoachEngine, commitRejected speaker: Speaker)
 }
 
 public extension CoachEngineDelegate {
@@ -73,6 +75,7 @@ public extension CoachEngineDelegate {
     func engine(_ engine: CoachEngine, caption: CaptionEvent) {}
     func engine(_ engine: CoachEngine, meter: CostReading) {}
     func engine(_ engine: CoachEngine, clearRejected speaker: Speaker) {}
+    func engine(_ engine: CoachEngine, commitRejected speaker: Speaker) {}
 }
 
 /// Boundary between the host and the coaching engine (`LocalCoachEngine`; the Python core in
