@@ -534,7 +534,8 @@ final class CueDisplayTests: XCTestCase {
         // Excluded by file name: no other source may share one.
         var names: [String: Int] = [:]
         for dir in ["App", "Core"] {
-            let files = try XCTUnwrap(FileManager.default.enumerator(at: Self.swiftDir.appendingPathComponent(dir), includingPropertiesForKeys: nil))
+            let root = Self.swiftDir.appendingPathComponent(dir).resolvingSymlinksInPath()
+            let files = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
             for case let url as URL in files where url.pathExtension == "swift" { names[url.lastPathComponent, default: 0] += 1 }
         }
         for name in listed { XCTAssertEqual(names[name], 1, "\(name): exactly one file by that name") }
