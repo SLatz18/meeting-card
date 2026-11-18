@@ -71,8 +71,9 @@ Properties (YAML front matter):
 | `transcriber` | `"gpt-live-transcribe"` | The transcription model |
 | `coach-cues` | `2` | Coaching cues shown during the call |
 | `transcript-status` | `complete` | `in-progress` during the call, `recovered` after a crash |
-| `recovered` | `2026-01-31T10:12:00` | Only on a note recovery wrote: when it did. Retention reads it as MeetingCard's last write |
+| `recovered` | `2026-01-31T10:12:00` | Only on a note recovery wrote: when it did (local time) |
 | `meetingcard-call` | `"c0123…"` | A random ID. Retention and the daily-note line use it to recognise MeetingCard's own notes |
+| `meetingcard-saved` | `1769850468` | On a finished note: MeetingCard's last write (the call's end, or when recovery wrote it) in seconds since 1970, the same instant in every time zone. Retention reads only this |
 
 Then the body:
 
@@ -116,6 +117,7 @@ transcriber: "gpt-live-transcribe"
 coach-cues: 2
 transcript-status: complete
 meetingcard-call: "c0123456789abcdef"
+meetingcard-saved: 1769850468
 ---
 
 ## Summary
@@ -191,7 +193,7 @@ from the path pattern, under the vault (or under the chosen folder when it isn't
 ## If the app quits mid-call
 
 If MeetingCard crashes, is force-quit or loses power during a call, the spool is still there. At the next
-launch, MeetingCard rebuilds the note from the spool, including lines that hadn't reached the note yet,
+launch, and after every call, MeetingCard rebuilds the note from the spool, including lines that hadn't reached the note yet,
 ends it at the last thing recorded with the app-quit line, sets `transcript-status: recovered`, and removes
 the spool. A torn last line in the spool (from a crash mid-write) is skipped. If you edited the note after the
 crash, the recovered note goes beside it instead. Recovery also clears temporary files more than an hour old.
@@ -201,9 +203,15 @@ Recovery trusts nothing in a spool, which may have come from another Mac through
 - it uses a note name only if it is a single plain `.md` file name (no folders, no `..`, not hidden), so it
   writes only in the chosen folder;
 - it finds the daily note again from its path relative to the vault, with the same escape checks;
-- it leaves a spool that another running MeetingCard on this Mac is writing, and one from another Mac unless
-  it has been untouched for six hours (each spool names its device by a hash, never the Mac's name);
+- it leaves a spool that MeetingCard is still writing: on this Mac, only if the same process (the same boot,
+  PID and process start time) is still running, so a crash before a reboot or a reused PID is recovered; on
+  another Mac sharing the folder, until the spool has been untouched for six hours. Each spool names its
+  machine by a hash of the hardware UUID (`/etc/machine-id` on Linux), never the Mac's name or the UUID itself;
 - it never writes over a file it didn't write: a note changed after the crash gets the recovered note beside it.
+
+So a note can stay `in-progress` for a while: another Mac's call still under six hours old, or one another
+MeetingCard on this Mac is writing. Settings then says how many transcripts are unfinished, under the folder,
+and upkeep tries again after the next call and at the next launch.
 
 ## Delete and retention
 
@@ -215,14 +223,19 @@ Recovery trusts nothing in a spool, which may have come from another Mac through
   and when the setting changes. It only removes notes that:
   - carry `meetingcard-call`;
   - sit directly in the chosen folder (not in subfolders);
-  - are from a call that started more than that many days ago;
   - have a name the File name pattern could make;
-  - haven't changed since MeetingCard's last write: the call's `end` (or `recovered`) plus 10 seconds;
-  - aren't still `in-progress`.
+  - have `meetingcard-saved` (so they aren't still `in-progress`) more than that many days ago;
+  - haven't changed since that write, by more than 10 seconds.
 
-  It reads only the first 4 KB of a note (its properties). Your own notes, and notes you edited after the
-  call (a summary added the same day, for example), are never removed. Notes made under an older File name
-  pattern are kept too.
+  It reads only the first 4 KB of a note (its properties). `meetingcard-saved` is a time-zone-free instant,
+  so travelling, or two Macs in different zones sharing a vault, doesn't change the answer. Your own notes,
+  and notes you edited after the call (a summary added the same day, for example), are never removed. Notes
+  made under an older File name pattern are kept too.
+
+  Retention trusts the file's modified time. A sync tool that sets it to when it downloaded the file makes
+  that copy look edited, so it's kept (safe). A network volume whose clock runs behind this Mac's can make
+  an edit look up to that much older: an edit made within that skew of MeetingCard's last write can then be
+  taken for no edit and the note removed. A clock that runs ahead is safe.
 
 ## Privacy
 
@@ -243,6 +256,9 @@ Recovery trusts nothing in a spool, which may have come from another Mac through
   doesn't report call audio reconnecting either (the capture fallback restarts at once). The note format has
   both gap kinds, ready for when it does.
 - **Renaming the note during a call** counts as deleting it: saving stops for that call.
+- **Renaming or moving the folder during a call** stops saving for the rest of that call: the call keeps
+  writing to the old path, finds its note gone, and stops. The spool goes with the folder and is recovered
+  later, but lines after the rename are lost. The next call follows the folder to its new place.
 - **Participants** are left out because MeetingCard doesn't read attendee names.
 
 ## Tests
