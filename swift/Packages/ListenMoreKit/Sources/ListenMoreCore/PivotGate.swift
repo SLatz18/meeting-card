@@ -59,6 +59,8 @@ final class PivotGate {
         let at: TimeInterval
     }
 
+    /// Lines older than this are dropped, like `TextRules`' segments.
+    private static let keepS = 120.0
     private let x: ListenMoreConfig.Text
     private let invites: [String]
     private let leadIns: [String]
@@ -126,8 +128,8 @@ final class PivotGate {
         case .me: me.append(line)
         case .others: them.append(line)
         }
-        me.removeAll { now - $0.end > 120 }
-        them.removeAll { now - $0.end > 120 }
+        me.removeAll { Elapsed.span(now - $0.end) > Self.keepS }
+        them.removeAll { Elapsed.span(now - $0.end) > Self.keepS }
         return decide(now: now)
     }
 
