@@ -36,8 +36,9 @@ The call trigger reads Core Audio "is running" flags only (the default input dev
 app's output); it never reads window titles. `PrivacyGuardTests` checks this, along with no
 printing, the key only through `KeychainStore`, public log arguments limited to counters and
 enums, and disk writes: audio never, and text only through `TranscriptFile.swift` (the opt-in saved
-transcript, one file per call in the user's folder). Its runtime tests show that with saving off
-nothing reaches disk and with saving on the one transcript file is the only write.
+transcript: one note per call in the user's folder, its hidden spool beside it while the call runs,
+and an optional daily-note line). Its runtime tests show that with saving off nothing reaches disk
+and with saving on the call's note is the only file left.
 
 Captions and transcripts (opt-in, host-driven): the realtime sessions' partial and final text reach
 the host as `CaptionEvent`s (with a `CostReading` after each billed segment). `LiveTranscript` keeps
@@ -45,6 +46,19 @@ a three-line `CaptionBuffer` in memory, labels the streams You and Them (`Speake
 tags), and hands finished lines to `TranscriptRecorder`, which writes nothing unless saving is on.
 When the GPT layer stops (cost cap or error) captions stop; local cues continue. The Kit draws no
 caption UI: the host renders the lines (MeetingCard: `CaptionFeedView` in its card).
+
+Saved transcripts are Obsidian-ready notes (`CallNote`): YAML properties, a summary placeholder,
+the coaching cues linked to their transcript lines by block ID, then the transcript with its gaps
+(the coach's Mute, Pause, the call app's mute and the transcriber stopping; `CallConditions` also
+has transcriber retries and capture reconnects for a host that reports them, which MeetingCard
+doesn't yet). Every line, gap and cue is appended to the call's spool and synced before the note is
+replaced atomically, all on the recorder's I/O queue, so `TranscriptMaintenance.recover` can finish a
+call the app quit during. Recovery takes only plain note names from a spool, finds the daily note
+again through `DailyNote.url`, and leaves a spool another process or device is still writing. The
+recorder never writes over a note edited (or unreadable) since its last write, and a note's first
+write never replaces a file. File names come from a
+pattern (`NoteFileName`), the daily-note line is append-only and idempotent (`DailyNote`), and
+`TranscriptMaintenance.prune` is the opt-in retention. All of it is plain files and runs on Linux.
 
 A host can pass an optional `CallStateProvider` (to `CoachService`, `CoachSession` or `CoachMonitor`)
 reporting each call app's state as started, ended or muted. An ended call stops the session after

@@ -3,8 +3,9 @@ import ListenMoreCore
 
 /// Static guard over the coach sources: the package's library targets plus MeetingCard's
 /// `App/Coach*.swift`. Audio stays in memory in every mode; text stays in memory unless the user
-/// turns on saved transcripts, and then only `TranscriptFile.swift` writes, one file per call in the
-/// chosen folder (the runtime tests below check what reaches disk with saving off and on). Nothing
+/// turns on saved transcripts, and then only `TranscriptFile.swift` writes, inside the chosen folder:
+/// the call's note, its spool while the call runs, and (opt-in) one line in the daily note (the
+/// runtime tests below check what reaches disk with saving off and on). Nothing
 /// content-like is printed or logged, the key is only touched through KeychainStore, public log
 /// arguments are counters, enums and booleans, and nothing reads window titles.
 final class PrivacyGuardTests: XCTestCase {
@@ -52,8 +53,10 @@ final class PrivacyGuardTests: XCTestCase {
         // Audio and screen content are never written, by any source.
         let neverAnywhere = ["AVAudioFile(forWriting", "AVAssetWriter", "SCRecordingOutput", "SCScreenshotManager",
                              "NSKeyedArchiver", "fopen(", "createFile(", "FileHandle(forWriting"]
-        // Disk writes: only the transcript writer.
-        let writerOnly = ["write(to:", "createDirectory(", "removeItem(", "moveItem(", "copyItem(", "setAttributes("]
+        // Disk writes: only the transcript writer (Foundation and POSIX alike).
+        let writerOnly = ["write(to:", "createDirectory(", "removeItem(", "moveItem(", "copyItem(", "setAttributes(",
+                          "replaceItem", "O_WRONLY", "O_RDWR", "O_APPEND", "O_CREAT", "renameat(", "unlink(", "ftruncate(",
+                          "fsync(", "F_FULLFSYNC", "FileHandle(forUpdating", "renamex_np", "linkat("]
         for (name, text) in try allSources() {
             for f in neverAnywhere { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
             guard name != Self.transcriptWriter else { continue }
@@ -63,23 +66,47 @@ final class PrivacyGuardTests: XCTestCase {
         for (name, text) in try librarySources() { XCTAssertFalse(text.contains("UserDefaults"), name) }
     }
 
-    /// The writer takes text only (no audio type can reach it) and writes the file in place: no
-    /// atomic temp copy in another folder.
-    func testTranscriptWriterTakesTextAndWritesInPlace() throws {
+    /// The writer takes text only (no audio type can reach it). Replacing a file goes through a hidden
+    /// temporary sibling of the target, renamed over it in the same folder: nothing is staged in a
+    /// temporary or other folder, and every open for writing refuses to follow a symlink.
+    func testTranscriptWriterTakesTextAndStaysInTheFolder() throws {
         let writer = try XCTUnwrap(try librarySources().first { $0.0 == Self.transcriptWriter }).1
         XCTAssertTrue(writer.contains("func write(_ text: String, to url: URL)"))
-        for f in ["[Float]", "AVAudio", "pcm", ".atomic", "temporaryDirectory", "NSTemporaryDirectory"] {
+        XCTAssertTrue(writer.contains("func append(_ text: String, to url: URL)"))
+        for f in ["[Float]", "AVAudio", "pcm", ".atomic", "temporaryDirectory", "NSTemporaryDirectory", "write(to:"] {
             XCTAssertFalse(writer.contains(f), "\(Self.transcriptWriter) contains \(f)")
         }
-        XCTAssertEqual(writer.components(separatedBy: "write(to:").count - 1, 1, "one write call")
+        XCTAssertTrue(writer.contains("url.deletingLastPathComponent().appendingPathComponent(\".\\(url.lastPathComponent)."),
+                      "the temporary file is a hidden sibling of the target")
+        XCTAssertEqual(code(writer).components(separatedBy: "renameat(").count - 1, 1, "one rename")
+        let opens = code(writer).components(separatedBy: "\n").filter { $0.contains("posixOpen(") && !$0.contains("func ") }
+        XCTAssertEqual(opens.count, 2)
+        for o in opens { XCTAssertTrue(o.contains("O_NOFOLLOW") && o.contains("O_WRONLY"), o) }
+    }
+
+    /// The opt-in note's own parts: a summary placeholder section and the daily-note line are what
+    /// the user asked for when they turned on saving. These files may say "summary" and "daily";
+    /// every other word of the history rule below still holds in them.
+    static let noteFiles: Set<String> = ["CallNote.swift", "CallRecord.swift", "DailyNote.swift", "Transcript.swift"]
+
+    /// The summary section is a fixed placeholder: the note never gets a generated summary.
+    func testTheSummarySectionIsOnlyAPlaceholder() {
+        var r = CallRecord(callId: "c", start: Date(timeIntervalSince1970: 0))
+        r.lines = [TranscriptLine(speaker: .others, offset: 1, text: "alpha")]
+        let wording = NoteWording()
+        let md = CallNote.render(r, labels: SpeakerLabels(), status: .complete, wording: wording)
+        let section = md.components(separatedBy: "## \(wording.summaryHeading)\n\n").dropFirst().first?
+            .components(separatedBy: "\n## ").first
+        XCTAssertEqual(section, wording.summaryPlaceholder + "\n")
     }
 
     /// Caption and transcript code never logs: transcript text and keys stay out of every log.
     func testCaptionAndTranscriptSourcesNeverLog() throws {
         let names: Set<String> = ["Captions.swift", "Transcript.swift", Self.transcriptWriter, "LiveTranscript.swift",
+                                  "CallRecord.swift", "CallNote.swift", "DailyNote.swift",
                                   "CoachTranscript.swift", "CoachNotice.swift"]
         let sources = try allSources().filter { names.contains($0.0) }
-        XCTAssertGreaterThanOrEqual(sources.count, 4)
+        XCTAssertGreaterThanOrEqual(sources.count, 7)
         for (name, text) in sources {
             for f in ["Log.", "Logger(", "os_log", "NSLog"] { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
         }
@@ -127,10 +154,10 @@ final class PrivacyGuardTests: XCTestCase {
                                   store: FileTranscriptStore())
         runCall(live)
         let files = try everything(under: root)
-        XCTAssertEqual(files.count, 2, "the folder and one file: \(files)")
+        XCTAssertEqual(files.count, 2, "the folder and one note; the spool is gone after the call: \(files)")
         XCTAssertEqual(files.first, "Transcripts")
         let name = try XCTUnwrap(files.last)
-        XCTAssertTrue(name.hasPrefix("Transcripts/Call ") && name.hasSuffix(".md"), name)
+        XCTAssertTrue(name.hasPrefix("Transcripts/") && name.hasSuffix(" Call.md"), name)
         let url = root.appendingPathComponent(name)
         let text = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(text.contains("] Guest:** Alpha bravo."))
@@ -190,10 +217,13 @@ final class PrivacyGuardTests: XCTestCase {
         }
     }
 
-    /// The coach keeps nothing: no daily summary, history, recap or stats, in memory or on disk.
+    /// The coach keeps nothing: no daily summary, history, recap or stats, in memory or on disk. The
+    /// opt-in note files (`noteFiles`) may name the note's summary placeholder and daily-note line.
     func testNoSummaryOrHistory() throws {
-        let re = #"(?i)\b(summary|summaries|history|recap|recaps|daily|stats|statistics|journal|archive)\b"#
+        let all = #"(?i)\b(summary|summaries|history|recap|recaps|daily|stats|statistics|journal|archive)\b"#
+        let notes = #"(?i)\b(summaries|history|recap|recaps|stats|statistics|journal|archive)\b"#
         for (name, text) in try allSources() {
+            let re = Self.noteFiles.contains(name) ? notes : all
             // Code and comments only: user-facing copy may promise "no stats, no recaps".
             let code = text.replacingOccurrences(of: #""(?:[^"\\\n]|\\.)*""#, with: "\"\"", options: .regularExpression)
             XCTAssertNil(code.range(of: re, options: .regularExpression), "\(name) mentions a stored-history concept")

@@ -92,9 +92,9 @@ final class SpeakerLabelsTests: XCTestCase {
         live.callStarted()
         live.receive(.final(.others, text: "Hello."))
         live.callEnded()
-        let file = (live.recorder.store as? SpyStore)?.files.values.first ?? ""
+        let file = (live.recorder.store as? SpyStore)?.note ?? ""
         XCTAssertTrue(file.contains("] Guests:** Hello."))
-        XCTAssertTrue(file.contains("Speakers: Me (microphone), Guests (call audio)"))
+        XCTAssertTrue(file.contains("speakers:\n  - \"Guests\"\n"))
         XCTAssertEqual(live.labels.label(.others), "Guests")
     }
 
