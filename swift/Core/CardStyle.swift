@@ -306,7 +306,7 @@ public enum Brand {
 /// card's CURRENT link. Meet / Webex = loop-closed conic stops, Zoom / Teams = one solid color.
 /// Multi-link and no-link cards ("calendar"), a forced fixture with no link, and unknown providers: nil.
 /// Readability: every stop is composited over cardFill at the per-appearance alpha and must clear
-/// `floor` (CardBorderTests), except Meet yellow on light (brand-faithful, CTO ruling; >= 1.5).
+/// `floor` (CardBorderTests), except Meet yellow on light (kept brand-faithful, so below `floor` but >= 1.5).
 public enum CardBorder {
     public static let enabled = true
     public static let width: Double = 1.3

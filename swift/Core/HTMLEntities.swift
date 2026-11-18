@@ -1,6 +1,6 @@
 import Foundation
 
-/// Minimal port of Python `html.unescape` (CTO ruling Q3): named amp/lt/gt/quot/apos/nbsp
+/// Minimal port of Python `html.unescape`: named amp/lt/gt/quot/apos/nbsp
 /// (with `;`, and the HTML legacy no-semicolon forms of amp/lt/gt/quot/nbsp, longest prefix,
 /// as Python does) plus every numeric `&#NN;` / `&#xHH;` (semicolon optional).
 /// Anything else is left untouched, exactly as Python leaves unknown entities.

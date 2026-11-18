@@ -601,7 +601,7 @@ final class Card: CardHandle {
         panel.close()
     }
 
-    /// Render the layer tree to PNG via CALayer.render(in:) (CTO ruling 7). The PNG is card-sized
+    /// Render the layer tree to PNG via CALayer.render(in:). The PNG is card-sized
     /// (panel frame == card rect).
     func snapshot(to path: String) -> Bool {
         guard let img = snapshotImage() else { return false }
