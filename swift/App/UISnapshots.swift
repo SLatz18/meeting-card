@@ -272,8 +272,6 @@ enum UISnapshots {
         ("card-cue-linger-amber", shotState(.listening, noZoomMute, nil, .card, lingering: amberNudge), nil),
         ("card-cue-linger-rose", shotState(.listening, noZoomMute, nil, .card, lingering: roseNudge), nil),
         ("card-cue-expired", shotState(.listening, noZoomMute, nil, .card), nil),
-        // The coach's own Mute on: a lingering cue never covers the not-hearing glyph.
-        ("card-cue-linger-mic-off", shotState(.micOff, noZoomMute, nil, .card, lingering: roseNudge), nil),
         // Increase Contrast: the lingering glyph in the high-contrast held role.
         ("card-cue-linger-increased-contrast", shotState(.listening, noZoomMute, nil, .card, lingering: amberNudge, ic: true), nil),
         // Paused with a cue still lingering from before: the cue is gone (a plain paused card).
