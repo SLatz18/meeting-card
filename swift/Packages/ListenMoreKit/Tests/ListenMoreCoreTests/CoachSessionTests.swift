@@ -118,6 +118,28 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertEqual(s.capturingBundleIds, ["company.thebrowser.dia"])
     }
 
+    /// Pause (like the call app's mute) restarts the engine, whose clock starts again at 0. The session's
+    /// cooldowns keep counting from the cue before the pause instead of holding every later cue.
+    func testCooldownsCarryAcrossAnEngineRestart() async {
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        clock.advance(10)
+        s.deliverForTesting(CueSuggestion(type: .interrupt, t: 10, onset: 9.7, source: .local))
+        XCTAssertEqual(renderer.rendered.count, 1)
+        clock.advance(2)
+        s.setPaused(true)
+        clock.advance(3)
+        s.setPaused(false)
+        s.deliverForTesting(CueSuggestion(type: .missedQuestion, t: 1, onset: 0.5, source: .text, level: .soft))
+        XCTAssertEqual(renderer.rendered.count, 1, "6 s after the last cue: still inside the cooldown")
+        clock.advance(25)
+        s.deliverForTesting(CueSuggestion(type: .interrupt, t: 26, onset: 25.7, source: .local))
+        XCTAssertEqual(renderer.rendered.map(\.type), [.interrupt, .interrupt], "past the cooldown after Resume, the cue shows")
+        XCTAssertEqual(renderer.rendered.last?.t, 26, "hosts still get engine time")
+        XCTAssertEqual(renderer.rendered.last?.latencyMs, 300)
+    }
+
     func testPausedGateDropsLateBuffers() async {
         let s = makeSession()
         meetInDia()

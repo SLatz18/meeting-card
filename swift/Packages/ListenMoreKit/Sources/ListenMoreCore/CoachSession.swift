@@ -111,6 +111,11 @@ public final class CoachSession {
     private var fallback = CaptureFallbackPolicy()
     private let callLevel = CallLevelMeter()
     private var shownAt: [CueType: TimeInterval] = [:]
+    /// Wall-clock time this session's capture first started, and how long after it the running engine
+    /// started. Each engine counts from 0 (Pause and the call app's mute restart it), so the session's
+    /// cue policy compares engine times shifted by `engineOffset`: cooldowns carry across a restart.
+    private var sessionCaptureStart: TimeInterval?
+    private var engineOffset: TimeInterval = 0
     private var timer: Timer?
     private var callTask: Task<Void, Never>?
     private var bridge: EngineDelegateBridge?
@@ -306,6 +311,8 @@ public final class CoachSession {
                 stopCapture()
                 cuePolicy.reset()
                 shownAt.removeAll()
+                sessionCaptureStart = nil
+                engineOffset = 0
                 gptStopped = nil
                 judgeStopped = nil
                 cuesShown = 0
@@ -359,6 +366,10 @@ public final class CoachSession {
                 delegate?.coachSession(self, didReport: .keyUnreadable)
             }
             gateGeneration = gate.openNew()
+            let now = wallClock()
+            let start = sessionCaptureStart ?? now
+            sessionCaptureStart = start
+            engineOffset = now - start
             engine.start(config: config, apiKey: key)
             // Muted before it starts (the user's Mute or a pending call end), so the device never
             // opens even briefly; the gate stays closed until `setMicDevice(on: true)` reopens it.
@@ -462,8 +473,12 @@ public final class CoachSession {
     }
 
     fileprivate func show(_ s: CueSuggestion) {
+        let offset = engineOffset
         guard isCapturing,
-              let cue = cuePolicy.offer(s.type, t: s.t, onset: s.onset, source: s.source, confidence: s.confidence, level: s.level) else { return }
+              var cue = cuePolicy.offer(s.type, t: s.t + offset, onset: s.onset + offset, source: s.source,
+                                        confidence: s.confidence, level: s.level) else { return }
+        cue.t -= offset
+        cue.onset -= offset
         shownAt[cue.type] = wallClock()
         cuesShown += 1
         renderer.render(cue)
