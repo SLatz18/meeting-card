@@ -402,7 +402,7 @@ final class JudgeProviderCoreTests: XCTestCase {
         direct.reply = ("not_listening", 0.91)
         wrapped.reply = ("not_listening", 0.91)
         let prompt = "TRANSCRIPT (oldest first):\n[- 2.0s] OTHERS: one two three\nTRIGGER: me_reply"
-        let r1 = try await LiveJudge(config: config, key: APIKey("openai-test")!, http: direct).judge(prompt: prompt)
+        let r1 = try await LiveJudge(config: config, key: APIKey("openai-test")!, http: direct, hosts: LearnedHosts()).judge(prompt: prompt)
         let provider = try XCTUnwrap(JudgeProviders.make(config: config, openAIKey: APIKey("openai-test")!, judgeKey: APIKey("ts-test")!,
                                                          http: wrapped, scheduler: InstantScheduler()))
         let reply = try await provider.judge(JudgeInput(prompt: prompt, window: [JudgeLine(speaker: .me, secondsAgo: 1, text: "ignored")]))

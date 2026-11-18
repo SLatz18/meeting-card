@@ -118,6 +118,72 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertEqual(s.capturingBundleIds, ["company.thebrowser.dia"])
     }
 
+    /// Pause and the call app's mute each restart the engine, whose clock starts again at 0. The session's
+    /// cooldowns keep counting in session time across two Pause/Resume cycles and a call-app mute: a cue
+    /// inside 20 s of the last one is held, one past it shows, hosts get the suggestion's own times, and
+    /// a cue from an engine that has since been replaced is dropped.
+    func testCooldownsCarryAcrossEngineRestarts() async {
+        let provider = FakeAudioStateProvider()
+        let calls = FakeCallState()
+        let settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+        let clock = clock
+        let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: AudioActivitySignal(provider: provider),
+                             keys: FakeKeys(key: nil), renderer: renderer, settings: settings, callState: calls,
+                             wallClock: { clock.now() })
+        provider.zoomCall()
+        s.tick()
+        poll(s, seconds: 3)
+        XCTAssertEqual(s.indicator, .listening)
+        func cue(_ type: CueType, _ t: Double) { s.deliverForTesting(CueSuggestion(type: type, t: t, onset: t - 0.3, source: .local)) }
+
+        clock.advance(5)
+        cue(.interrupt, 5)
+        XCTAssertEqual(renderer.rendered.count, 1)
+
+        // Pause/Resume 1: the new engine starts 10 s into the session.
+        clock.advance(2)
+        s.setPaused(true)
+        clock.advance(3)
+        s.setPaused(false)
+        cue(.missedQuestion, 1)
+        XCTAssertEqual(renderer.rendered.count, 1, "6 s after the last cue in session time: held")
+        clock.advance(18)
+        cue(.interrupt, 18)
+        XCTAssertEqual(renderer.rendered.count, 2, "23 s after it: shown, though the engine's clock reads 18")
+
+        // Pause/Resume 2.
+        clock.advance(2)
+        s.setPaused(true)
+        clock.advance(4)
+        s.setPaused(false)
+        cue(.interrupt, 5)
+        XCTAssertEqual(renderer.rendered.count, 2, "11 s after the last cue: held")
+        clock.advance(15)
+        cue(.talkOver, 15)
+        XCTAssertEqual(renderer.rendered.count, 3)
+
+        // The call app's mute holds capture, then releases it: another engine.
+        calls.states = ["us.zoom.xos": .muted]
+        poll(s, seconds: 1)
+        XCTAssertEqual(s.indicator, .muted)
+        let mutedGeneration = s.engineGenerationForTesting
+        calls.states = ["us.zoom.xos": .started]
+        poll(s, seconds: 1)
+        XCTAssertEqual(s.indicator, .listening)
+        XCTAssertEqual(s.engineGenerationForTesting, mutedGeneration + 1)
+        cue(.interrupt, 1)
+        XCTAssertEqual(renderer.rendered.count, 3, "3 s after the last cue: held")
+        clock.advance(20)
+        s.deliverForTesting(CueSuggestion(type: .monologue, t: 40, onset: 39, source: .local), generation: mutedGeneration)
+        XCTAssertEqual(renderer.rendered.count, 3, "a cue from the replaced engine is dropped, not shifted onto this one")
+        cue(.interrupt, 21)
+
+        XCTAssertEqual(renderer.rendered.map(\.type), [.interrupt, .interrupt, .talkOver, .interrupt])
+        XCTAssertEqual(renderer.rendered.map(\.t), [5, 18, 15, 21], "hosts get each engine's own time")
+        XCTAssertEqual(renderer.rendered.map(\.onset), [4.7, 17.7, 14.7, 20.7])
+        XCTAssertEqual(renderer.rendered.map(\.latencyMs), [300, 300, 300, 300])
+    }
+
     func testPausedGateDropsLateBuffers() async {
         let s = makeSession()
         meetInDia()

@@ -1,3 +1,6 @@
 .DS_Store
 swift/build/
 swift/MeetingCardSwift.xcodeproj/
+# Voice harness output in CI (results tables and cost logs; never committed)
+harness-out/
+harness-live/

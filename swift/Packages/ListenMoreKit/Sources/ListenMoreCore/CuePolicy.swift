@@ -144,11 +144,11 @@ public final class CuePolicy {
             hold(type, t, .closing)
             return nil
         }
-        if let lastAny, t - lastAny < globalCooldown {
+        if let lastAny, Elapsed.span(t - lastAny) < globalCooldown {
             hold(type, t, .global)
             return nil
         }
-        if let prev = last[type], t - prev < cooldown {
+        if let prev = last[type], Elapsed.span(t - prev) < cooldown {
             hold(type, t, .type)
             return nil
         }

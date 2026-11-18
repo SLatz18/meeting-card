@@ -27,6 +27,11 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var cutInBackchannelMaxMs: Double
         public var cutInUtteranceGapMs: Double
         public var cutInOthersPauseMs: Double
+        /// How long the other side's pause that the user's onset lands in (a breath, a comma) may run,
+        /// from the onset to their next word, before the cut-in is dropped. Only that pause: once they
+        /// speak again, later pauses get `LocalLayer.cutInMaxOthersGapS`. 0 is the rule before this
+        /// setting existed (the onset's pause gets `cutInMaxOthersGapS` too).
+        public var cutInOnsetGapMs: Double
         /// How long a cut-in waits for the other side's last words to be transcribed.
         public var cutInTextWaitMs: Double
         /// A question from the other side this recently makes the user's start an answer, not a cut-in.

@@ -10,6 +10,8 @@ comments and below (`#4`, `#8`, `#12`, ...) refer to the pre-public tracker, not
 - `App/` - AppKit shell: NSPanel card, drawn icons, timers, test seams.
 - `Tests/` - hostless XCTest bundle on Core.
 - `Packages/ListenMoreKit/` - the call coach engine (local Swift package; Core tests run on Linux too).
+- `Packages/ListenMoreHarness/` - a Linux voice harness for the coach: synthetic You/Them streams through the real
+  pipeline, scored for transcription, speaker identification and coaching (offline in CI; live with OpenAI on demand).
 - `project.yml` - xcodegen spec; the `.xcodeproj` is generated, not committed.
 
 Build: `scripts/build.sh` (xcodegen + test + Release build + sign + install to `~/Applications/MeetingCardSwift.app`,

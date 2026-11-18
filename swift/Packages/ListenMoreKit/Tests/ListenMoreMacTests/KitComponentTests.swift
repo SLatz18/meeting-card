@@ -91,7 +91,7 @@ final class URLSessionTransportTests: XCTestCase {
         StubURLProtocol.reply = try JSONSerialization.data(withJSONObject: reply)
         StubURLProtocol.status = 200
         let config = try ListenMoreConfig.builtIn()
-        let judge = LiveJudge(config: config, key: APIKey("sk-test-urlsession")!, http: URLSessionHTTPTransport(configuration: stubbedConfiguration()))
+        let judge = LiveJudge(config: config, key: APIKey("sk-test-urlsession")!, http: URLSessionHTTPTransport(configuration: stubbedConfiguration()), hosts: LearnedHosts())
         let (res, usage) = try await judge.judge(prompt: "p")
         XCTAssertEqual(res.cue, "not_listening")
         XCTAssertEqual(usage.inputTokens, 10)
@@ -109,7 +109,7 @@ final class URLSessionTransportTests: XCTestCase {
         StubURLProtocol.status = 429
         StubURLProtocol.reply = Data("rate limited for key sk-test".utf8)
         let config = try ListenMoreConfig.builtIn()
-        let judge = LiveJudge(config: config, key: APIKey("sk-test")!, http: URLSessionHTTPTransport(configuration: stubbedConfiguration()))
+        let judge = LiveJudge(config: config, key: APIKey("sk-test")!, http: URLSessionHTTPTransport(configuration: stubbedConfiguration()), hosts: LearnedHosts())
         do {
             _ = try await judge.judge(prompt: "p")
             XCTFail("expected failure")

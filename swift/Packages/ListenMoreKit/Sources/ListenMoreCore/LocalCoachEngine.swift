@@ -107,6 +107,10 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
 
     public var hasGptLayer: Bool { gpt != nil }
 
+    /// What this session's cue policy held back so far (type, engine time, reason), for diagnostics.
+    /// Read it from the caller's serial queue, like every other call.
+    public var cueHolds: [CuePolicy.Hold] { pipeline?.policy.held ?? [] }
+
     public func start(config: ListenMoreConfig, apiKey: APIKey?) {
         stop()
         let config = sessionConfig(config)
