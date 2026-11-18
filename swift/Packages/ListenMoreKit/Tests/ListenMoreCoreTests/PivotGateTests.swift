@@ -189,6 +189,17 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(pivot(reply: "Oh nice, me too, that sounds like such a great day, the weather on Sunday was perfect for a long race."))
     }
 
+    /// An opener with a single first-person word ("same thing happened to me") isn't enough.
+    func testAnOpenerWithOneFirstPersonWordIsNone() {
+        assertNoCandidate(pivot(reply: "Same thing happened to me last spring, it took weeks and weeks before the whole place finally felt settled again."))
+    }
+
+    /// After sympathy, reactions to their news count as about them too.
+    func testSympathyThenReactionsToTheirNewsIsNone() {
+        assertNoCandidate(pivot(reply: "So sorry to hear that. I know the drill, I bet that sounds like a lot at the moment, I love that the doctors are quick.",
+                                share: PivotLines.worried))
+    }
+
     /// "Me too" plus reactions to their day ("i love that", "that sounds like"): about them.
     func testMeTooAndReactingToTheirDayIsNone() {
         assertNoCandidate(pivot(reply: "Me too, I love that, that sounds like such a great day out, the weather on Sunday was perfect for a long race."))
@@ -434,6 +445,29 @@ final class PivotGateTests: XCTestCase {
         XCTAssertEqual(run(inside, until: 80).counters.candidates, 0, "57 s after: still invited")
     }
 
+    /// Exactly `pivot_invite_hold_s` after the invitation's turn, it still holds.
+    func testAPendingInvitationHoldsAtExactlyTheHold() {
+        var s = PivotScript()
+        s.them("Have you ever run a race? I always wanted to try one.", 0.5, 3.5)
+        s.you("Yeah.", 4.0, 4.4)
+        s.them(PivotLines.share, 56.0, 61.0)
+        s.you(PivotLines.pivot, 61.5, 64.4)
+        let gate = run(s, until: 80)
+        XCTAssertEqual(gate.counters.candidates, 0, "their turn ends at 66.4 s, exactly 60 s after the invitation's at 6.4 s")
+    }
+
+    /// Another backchannel doesn't restart the hold: it counts from when the invitation was heard.
+    func testABackchannelDoesNotRestartTheHold() {
+        var s = PivotScript()
+        s.them("Have you ever run a race? I always wanted to try one.", 0.5, 3.5)
+        s.you("Yeah.", 4.0, 4.4)
+        s.them(PivotLines.release, 35.0, 38.0)
+        s.you("Yeah.", 38.5, 38.9)
+        s.them(PivotLines.share, 66.0, 71.0)
+        s.you(PivotLines.pivot, 71.5, 77.5)
+        XCTAssertEqual(run(s, until: 90).counters.candidates, 1, "79.5 s is 73 s after the invitation, though 39 s after the second yeah")
+    }
+
     /// An invitation the user answered at length is spent: a later share and pivot still count.
     func testAnInvitationAnsweredAtLengthIsSpent() {
         var s = PivotScript()
@@ -590,6 +624,22 @@ final class PivotGateTests: XCTestCase {
         assertNoCandidate(shortMoveOn)
     }
 
+    /// A round-robin handoff (`update_handoff_phrases`) after the share moves on too.
+    func testAHandoffAfterTheShareEndsIt() {
+        for handoff in ["Okay Sam, you're up.", "You're next."] {
+            var s = PivotScript()
+            s.them(PivotLines.share, 0.5, 5.5)
+            s.them(handoff, 6.0, 7.0)
+            s.you(PivotLines.pivot, 7.5, 13.5)
+            XCTAssertEqual(run(s, until: 30).counters.candidates, 0, handoff)
+        }
+    }
+
+    /// Moving on inside the share's own sentence ends it too.
+    func testMovingOnInsideTheShareSentenceEndsIt() {
+        assertNoCandidate(pivot(share: "I just got back from a week at the lake with the kids and I was so relaxed, so let's get started."))
+    }
+
     /// In the share's own line, a short sentence after it keeps the share; a longer one moves on.
     func testOnlyAShortSentenceMayFollowTheShare() {
         XCTAssertEqual(run(pivot(share: "\(PivotLines.share) It was amazing."), until: 30).counters.candidates, 1)
@@ -670,8 +720,15 @@ final class PivotGateTests: XCTestCase {
 
     /// After the sympathy, the user's story starts at a later sentence with an opener.
     func testSympathyThenAnOpenerInALaterSentenceCounts() {
-        XCTAssertEqual(run(pivot(reply: "I'm so sorry, that sounds really scary. That reminds me of my dad last spring, it took weeks to sort out.",
+        XCTAssertEqual(run(pivot(reply: "I'm so sorry, the week must have been so long. That reminds me of my dad last spring, it took weeks to sort out.",
                                  share: PivotLines.worried), until: 30).counters.candidates, 1)
+    }
+
+    /// After sympathy, an opener counts only at a start: in a middle clause it doesn't, and two
+    /// first-person words aren't enough without it.
+    func testSympathyThenAnOpenerInAMiddleClauseIsNone() {
+        assertNoCandidate(pivot(reply: "I'm so sorry, that sounds scary. The week was long, that reminds me of my dad last spring, it took ages to sort out.",
+                                share: PivotLines.worried))
     }
 
     /// A bare "oh no" before the sympathy doesn't hide it: still pure commiseration.
