@@ -89,6 +89,43 @@ final class GuardTests: XCTestCase {
         XCTAssertEqual(checked.sorted(), ["cost-cap/y2", "interruption/y3", "mute-unmute/y5", "no-key/y3", "pause/y1", "pause/y3"])
     }
 
+    /// The cue policy shows one cue at a time and holds every cue for `global_cooldown_s` after the
+    /// last. The judge may say not_listening on any You line after a Them turn (live, judge on), so no
+    /// expected cue may start within that cooldown of a verdict on an earlier You line: it could be held
+    /// by design, and the scenario would test the judge instead of its rule. From 2.6 to a fast 3.4
+    /// words/s.
+    func testExpectedCuesAreClearOfEarlierJudgeVerdictsCooldown() throws {
+        let config = try ListenMoreConfig.builtIn()
+        var bad: [String] = []
+        for wordsPerS in [2.6, 3.0, 3.4] {
+            for s in Scenarios.all {
+                let shapes = Dictionary(uniqueKeysWithValues: s.lines.map { line -> (String, ClipShape) in
+                    let voiced = line.seconds ?? Double(line.words.count) / wordsPerS
+                    return (line.id, ClipShape(lead: 0, voiced: voiced, total: voiced))
+                })
+                let t = try Timeline.realize(s, shapes: shapes)
+                let (expected, tolerated) = CueOracle.expected(t, config: config,
+                                                               facts: .init(keyless: s.keyless, gptStopT: nil, mode: .live, judgeOn: true))
+                for e in expected where !e.optional {
+                    guard let line = e.line.flatMap({ t.line($0) }) else {
+                        bad.append("\(s.name): an expected \(e.type.rawValue) without its You line")
+                        continue
+                    }
+                    for v in tolerated where v.type == .notListening {
+                        guard let earlier = v.line.flatMap({ t.line($0) }), earlier.start < line.start else { continue }
+                        let clear = v.window.upperBound + config.cues.globalCooldownS
+                        if e.window.lowerBound < clear {
+                            bad.append(String(format: "%@ at %.1f words/s: %@ on %@ from %.1f s, a verdict on %@ until %.1f s holds cues to %.1f s",
+                                              s.name, wordsPerS, e.type.rawValue, line.line.id, e.window.lowerBound, earlier.line.id,
+                                              v.window.upperBound, clear))
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(bad, [])
+    }
+
     func testKeyIsRefusedInArguments() {
         let env = [Harness.keyVariable: "sk-test-0123456789abcdef"]
         XCTAssertThrowsError(try Harness.checkArguments(["--live", "sk-proj-abcdefghijklmnop"], environment: [:]))
