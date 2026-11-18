@@ -115,18 +115,20 @@ final class GuardTests: XCTestCase {
         let triggers = Self.topLevelBlock("on", in: live).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
         let keys = triggers.filter { $0.hasPrefix("  ") && !$0.hasPrefix("   ") }.map { $0.trimmingCharacters(in: .whitespaces) }
         XCTAssertEqual(keys, ["workflow_dispatch:"], "the live workflow triggers on manual dispatch only")
-        XCTAssertTrue(live.contains("if: github.actor == github.repository_owner"))
+        XCTAssertTrue(live.contains("if: github.actor == github.repository_owner && github.triggering_actor == github.repository_owner"))
         XCTAssertTrue(live.contains("environment: openai-live"))
         XCTAssertTrue(live.contains("--live"))
         for f in try FileManager.default.contentsOfDirectory(atPath: wf.path) where f.hasSuffix(".yml") {
             let text = try String(contentsOf: wf.appendingPathComponent(f), encoding: .utf8)
             XCTAssertFalse(text.contains("pull_request_target"), "\(f) uses pull_request_target")
+            if f != "harness-live.yml" { XCTAssertFalse(text.contains("lm-harness --live") || text.contains("--live\""), "\(f) runs live mode") }
+            if !["harness-live.yml", "live-openai.yml"].contains(f) {
+                XCTAssertFalse(text.contains("OPENAI_API_KEY"), "\(f) touches the key")
+            }
         }
         let ci = try String(contentsOf: wf.appendingPathComponent("ci.yml"), encoding: .utf8)
-        let job = try XCTUnwrap(ci.components(separatedBy: "\n  linux-harness:").dropFirst().first)
-        let jobBody = job.components(separatedBy: "\n  snapshots:").first ?? job
-        XCTAssertFalse(jobBody.contains("secrets."), "the offline harness job uses no secrets")
-        XCTAssertFalse(jobBody.contains("--live"))
+        XCTAssertTrue(ci.contains("\n  linux-harness:"))
+        XCTAssertFalse(ci.contains("secrets."), "CI on pushes and pull requests uses no secrets")
     }
 
     /// The lines of a top-level YAML key's block (`key:` up to the next top-level key).
