@@ -22,6 +22,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let permissionNote = CoachSettingsWindow.text(CoachCopy.permissionDenied, font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let keyField = NSSecureTextField()
     private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
+    private let keyNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    /// The placeholder the key field shows now (never the key), so it is redrawn only when the Keychain differs.
+    private var shownKeyPlaceholder: KeyPlaceholder?
     private let anyAppBox = NSButton(checkboxWithTitle: CoachCopy.anyApp, target: nil, action: nil)
     private let callControlsSwitch = NSSwitch()
     private let callControlsNote = CoachSettingsWindow.text("", font: Theme.CallControls.explainerFont,
@@ -138,6 +141,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     func present() {
         window.center()
+        keyNote.stringValue = ""
         update()
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
@@ -407,7 +411,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let gControls = Self.group([callControlsRow, callControlsHelp, callControlsNote, requestAccessButton])
         for v in [callControlsRow, callControlsHelp, callControlsNote] { pin(v, in: gControls) }
 
-        keyField.placeholderString = coach.hasKey ? CoachCopy.keySavedPlaceholder : CoachCopy.keyPlaceholder
+        refreshKeyField()
         keyField.font = Theme.font(Theme.Settings.itemFont)
         keyField.target = self
         keyField.action = #selector(keyEntered(_:))
@@ -417,8 +421,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let keyRow = NSStackView(views: [keyField, lock])
         keyRow.orientation = .horizontal
         let keyHelp = Self.text(CoachCopy.keyHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
-        let g2 = Self.group([Self.text(CoachCopy.keyLabel, font: Theme.Settings.rowFont), keyRow, keyHelp, keyStatus])
-        for v in [keyRow, keyHelp, keyStatus] { pin(v, in: g2) }
+        let g2 = Self.group([Self.text(CoachCopy.keyLabel, font: Theme.Settings.rowFont), keyRow, keyHelp, keyNote, keyStatus])
+        for v in [keyRow, keyHelp, keyNote, keyStatus] { pin(v, in: g2) }
 
         let gJudge = judgeGroup()
 
@@ -593,6 +597,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     func update() {
         defer { fitWindow() }
+        refreshKeyField()
         guard !showingOnboarding else { return }
         toggle.state = coach.enabled ? .on : .off
         startButton.isHidden = !(coach.enabled && (coach.indicator == .hidden || coach.indicator == .on))
@@ -603,9 +608,30 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         toggleError.stringValue = coach.enabled ? toggleMessage(coach) ?? "" : ""
         toggleError.isHidden = toggleError.stringValue.isEmpty
         keyStatus.isHidden = keyStatus.stringValue.isEmpty
+        keyNote.isHidden = keyNote.stringValue.isEmpty
         updateCallControls()
         updateJudge()
         updateTranscript()
+    }
+
+    /// Sets the key field's placeholder from the Keychain when it differs from what is shown: after a save,
+    /// after a delete, and whenever the window is shown or refreshed. Only whether a key is stored is read.
+    private func refreshKeyField() {
+        guard let next = KeyPlaceholder.refresh(shown: shownKeyPlaceholder, hasKey: coach.hasKey) else { return }
+        shownKeyPlaceholder = next
+        switch next {
+        case .saved: keyField.placeholderString = CoachCopy.keySavedPlaceholder
+        case .empty: keyField.placeholderString = CoachCopy.keyPlaceholder
+        }
+    }
+
+    private static func noteText(_ notice: KeyNotice) -> String {
+        switch notice {
+        case .saved: CoachCopy.keySavedNote
+        case .savedForNextCall: CoachCopy.keySavedNextCallNote
+        case .removed: CoachCopy.keyRemovedNote
+        case .removedAfterThisCall: CoachCopy.keyRemovedThisCallNote
+        }
     }
 
     /// The toggle, and while it's on, what it still needs (checked, never asked; the Request access
@@ -692,7 +718,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         coach.saveKey(text) { [weak self] check in
             guard let self else { return }
             self.keyStatus.stringValue = self.message(check) ?? ""
-            self.keyField.placeholderString = self.coach.hasKey ? CoachCopy.keySavedPlaceholder : CoachCopy.keyPlaceholder
+            self.keyNote.stringValue = KeyNotice.after(check, callCapturing: self.coach.service?.isCapturing ?? false).map(Self.noteText) ?? ""
             self.update()
         }
     }
