@@ -128,6 +128,8 @@ public enum GptLayerReason: String, Equatable, Sendable {
 /// transcript text, audio, the key, headers and request or response bodies cannot reach the file.
 public enum CoachLogEvent: Equatable, Sendable {
     case coachEnabled(Bool)
+    /// "Show Coach in Screenshots" turned on or off.
+    case screenshotSharing(Bool)
     /// The result of asking OpenAI about the key, with the HTTP status when it answered (a number only).
     case keyCheck(KeyCheck, source: KeyCheckSource, httpStatus: Int?)
     case keyRead(KeyReadState, status: Int?, at: KeyReadContext)
@@ -183,6 +185,7 @@ public enum CoachLogEvent: Equatable, Sendable {
     public var rendered: String {
         switch self {
         case .coachEnabled(let on): return line("coach.enabled", ("on", .flag(on)))
+        case .screenshotSharing(let on): return line("coach.screenshots", ("on", .flag(on)))
         case .keyCheck(let result, let source, let status):
             return line("key.check", ("result", .word(result.rawValue)), ("source", .word(source.rawValue)), ("http", .number(status)))
         case .keyRead(let state, let status, let context):

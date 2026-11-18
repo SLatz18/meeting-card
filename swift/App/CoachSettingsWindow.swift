@@ -27,6 +27,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private var shownKeyPlaceholder: KeyPlaceholder?
     private let anyAppBox = NSButton(checkboxWithTitle: CoachCopy.anyApp, target: nil, action: nil)
     private let callControlsSwitch = NSSwitch()
+    private let screenshotsSwitch = NSSwitch()
     private let callControlsNote = CoachSettingsWindow.text("", font: Theme.CallControls.explainerFont,
                                                             color: CoachSettingsWindow.color(Theme.CallControls.explainerText))
     private let requestAccessButton = NSButton(title: CoachCopy.requestAccess, target: nil, action: nil)
@@ -461,7 +462,19 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
                                 color: Self.color(.secondary), maxWidth: Self.outerWidth)
-        return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), privacy, feedbackGroup()]
+        return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), screenshotsGroup(), privacy, feedbackGroup()]
+    }
+
+    /// "Show Coach in Screenshots": whether captures include the coach card and its captions.
+    private func screenshotsGroup() -> Group {
+        screenshotsSwitch.target = self
+        screenshotsSwitch.action = #selector(screenshotsToggled(_:))
+        screenshotsSwitch.setAccessibilityLabel(CoachCopy.screenshotsToggle)
+        let row = Self.row(Self.text(CoachCopy.screenshotsToggle, font: Theme.Settings.rowFont), screenshotsSwitch)
+        let help = Self.text(CoachCopy.screenshotsHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
+        let g = Self.group([row, help])
+        for v in [row, help] { pin(v, in: g) }
+        return g
     }
 
     /// Last, so everything above it lays out exactly as before.
@@ -634,6 +647,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     }
 
     private func applyState() {
+        screenshotsSwitch.state = coach.showInScreenshots ? .on : .off
         toggle.state = coach.enabled ? .on : .off
         startButton.isHidden = !(coach.enabled && (coach.indicator == .hidden || coach.indicator == .on))
         permissionNote.isHidden = !(coach.enabled && coach.service?.captureProblem == true)
@@ -720,6 +734,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         var startable: Bool
         var captureProblem: Bool
         var anyApp: Bool
+        var showInScreenshots: Bool
         var keyStored: Bool
         var toggleError: String
         var keyStatusEmpty: Bool
@@ -754,6 +769,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             startable: coach.enabled && (coach.indicator == .hidden || coach.indicator == .on),
             captureProblem: coach.enabled && coach.service?.captureProblem == true,
             anyApp: coach.anyApp,
+            showInScreenshots: coach.showInScreenshots,
             keyStored: coach.keyStored,
             toggleError: coach.enabled ? toggleMessage(coach) ?? "" : "",
             keyStatusEmpty: keyStatus.stringValue.isEmpty,
@@ -801,6 +817,11 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     }
 
     @objc private func startNow(_ sender: Any?) { coach.startClicked(sender) }
+
+    @objc private func screenshotsToggled(_ sender: NSSwitch) {
+        coach.setShowInScreenshots(sender.state == .on)
+        update()
+    }
 
     @objc private func callControlsToggled(_ sender: NSSwitch) {
         coach.setCallControls(sender.state == .on)

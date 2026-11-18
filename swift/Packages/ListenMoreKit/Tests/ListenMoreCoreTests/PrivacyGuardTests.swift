@@ -237,7 +237,7 @@ final class PrivacyGuardTests: XCTestCase {
     func testHostDefaultsAreSettingsOnly() throws {
         let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
                                     "coach.judgeProvider", "coach.cardPosition", "coach.captions", "coach.saveTranscripts",
-                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen"]
+                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen", "coach.showInScreenshots"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
         for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {

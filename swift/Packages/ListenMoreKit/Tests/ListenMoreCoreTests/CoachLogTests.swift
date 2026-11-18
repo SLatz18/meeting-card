@@ -25,7 +25,7 @@ final class CoachLogTests: XCTestCase {
         let hostile = LogToken("User's Headset Pro: \"hello, this is my transcript\"")
         let app = LogToken("us.zoom.xos")
         return [
-            .coachEnabled(true), .coachEnabled(false),
+            .coachEnabled(true), .coachEnabled(false), .screenshotSharing(true),
             .keyCheck(.ok, source: .stored, httpStatus: 200), .keyCheck(.rejected, source: .save, httpStatus: 401),
             .keyCheck(.unreachable, source: .save, httpStatus: nil), .keyCheck(.empty, source: .stored, httpStatus: nil),
             .keyRead(.present, status: nil, at: .call), .keyRead(.absent, status: nil, at: .stored),
