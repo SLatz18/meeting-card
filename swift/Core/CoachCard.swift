@@ -153,6 +153,15 @@ public struct CoachNudgeHold: Equatable, Sendable {
         shownAt = now
     }
 
+    /// Shows a cue only if it arrived while the coach was listening; one that arrives otherwise
+    /// (paused, muted, the coach's Mute, no session, no card) is neither shown nor kept. True if shown.
+    @discardableResult
+    public mutating func show(_ n: CoachNudge, now: TimeInterval, status: CoachCardState.Status?) -> Bool {
+        guard status == .listening else { return false }
+        show(n, now: now)
+        return true
+    }
+
     private func age(_ now: TimeInterval) -> TimeInterval? { shownAt.map { now - $0 } }
 
     /// The cue whose words show.

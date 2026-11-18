@@ -138,6 +138,13 @@ final class CoachCardWiringTests: XCTestCase {
         let controller = try read("App/CoachController.swift")
         XCTAssertTrue(controller.contains("s.onCue = { [weak self] cue in self?.showNudge(cue) }"))
         XCTAssertTrue(controller.contains("CoachCardPresenter.announce(n.announcement)"))
+        // A cue that arrives while not listening is neither shown nor announced: the status gate comes first.
+        let show = try XCTUnwrap(controller.components(separatedBy: "private func showNudge(_ cue: Cue) {").dropFirst().first?
+            .components(separatedBy: "\n    }").first)
+        let gate = try XCTUnwrap(show.range(of: "guard let n = CoachNudge(cue), nudges.show(n, now: ProcessInfo.processInfo.systemUptime, status: status) else { return }"))
+        let announce = try XCTUnwrap(show.range(of: "CoachCardPresenter.announce(n.announcement)"))
+        XCTAssertLessThan(gate.lowerBound, announce.lowerBound, "gated before the announcement")
+        XCTAssertTrue(show.contains("let status = enabled ? CoachCardState.Status(indicator) : nil"))
         XCTAssertEqual(controller.components(separatedBy: "CoachCardPresenter.announce(").count - 1, 3,
                        "the nudge, Stop and the coach's Mute only: the linger announces nothing")
         XCTAssertTrue(controller.contains("guard let wait = nudges.nextChange(now: ProcessInfo.processInfo.systemUptime) else { return }"))

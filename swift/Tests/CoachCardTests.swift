@@ -481,6 +481,28 @@ final class CoachCardTests: XCTestCase {
         }
     }
 
+    /// A cue that arrives while the coach isn't listening (paused, muted in Zoom, the coach's own Mute,
+    /// no session, no card) is neither shown nor kept, so the controller doesn't announce it; one that
+    /// arrives while listening is.
+    func testACueArrivingWhileNotListeningIsIgnored() {
+        let r = CoachNudge(kind: .interrupt, tone: .rose)
+        for status in [CoachCardState.Status.paused, .muted, .micOff, .idle, nil] as [CoachCardState.Status?] {
+            var h = CoachNudgeHold()
+            XCTAssertFalse(h.show(r, now: 10, status: status), "\(String(describing: status)): not shown, not announced")
+            XCTAssertNil(h.nudge)
+            XCTAssertNil(h.active(now: 10))
+            XCTAssertNil(h.nextChange(now: 10), "nothing to time")
+            XCTAssertFalse(h.follow(.listening))
+            XCTAssertNil(h.lingering(now: 16), "\(String(describing: status)): nothing after Resume or unmute either")
+        }
+        var h = CoachNudgeHold()
+        XCTAssertTrue(h.show(r, now: 10, status: .listening))
+        XCTAssertEqual(h.active(now: 10), r)
+        let a = CoachNudge(kind: .monologue, tone: .amber)
+        XCTAssertFalse(h.show(a, now: 12, status: .paused), "a cue arriving during a pause doesn't replace the one on show")
+        XCTAssertEqual(h.active(now: 12), r)
+    }
+
     /// A state that isn't listening carries no cue: no words, no lingering glyph, no "Last cue" label,
     /// no cue tooltip or edge on the pill, the status's own glyph.
     func testOnlyAListeningStateCarriesACue() {

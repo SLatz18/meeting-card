@@ -368,9 +368,10 @@ final class CoachController: NSObject {
         refresh()
     }
 
+    /// A cue that arrives while the coach isn't listening is neither shown nor announced.
     private func showNudge(_ cue: Cue) {
-        guard let n = CoachNudge(cue) else { return }
-        nudges.show(n, now: ProcessInfo.processInfo.systemUptime)
+        let status = enabled ? CoachCardState.Status(indicator) : nil
+        guard let n = CoachNudge(cue), nudges.show(n, now: ProcessInfo.processInfo.systemUptime, status: status) else { return }
         CoachCardPresenter.announce(n.announcement)
         scheduleNudgeStep()
         refresh()
