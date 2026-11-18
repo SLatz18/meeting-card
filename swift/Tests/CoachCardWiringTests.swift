@@ -51,8 +51,8 @@ final class CoachCardWiringTests: XCTestCase {
         }
     }
 
-    /// Mute is CallControlsModel's one press of Zoom's own control; it never pauses or stops the
-    /// coach's capture. The card shows CoachMuteCopy's presentation: disabled Mute says why in its tooltip.
+    /// Mute in Zoom is CallControlsModel's one press of Zoom's own control; it never pauses or stops the
+    /// coach's capture, and shows only while it can act. The pill's own Mute is the coach's (mic only).
     func testMuteUsesTheCallAppsOwnControl() throws {
         let controller = try read("App/CoachController.swift")
         let body = try XCTUnwrap(controller.components(separatedBy: "func toggleMute() {").dropFirst().first?
@@ -64,9 +64,18 @@ final class CoachCardWiringTests: XCTestCase {
         XCTAssertTrue(controller.contains("CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted"))
         let view = try read("App/CoachCardView.swift")
         XCTAssertTrue(view.contains("b.toolTip = c.tooltip") && view.contains("b.setAccessibilityHelp(c.accessibilityHelp)"))
-        XCTAssertTrue(view.contains("b.setAccessibilityLabel(c.accessibilityLabel)"), "VoiceOver reads CoachMuteCopy's label (its own on Meet)")
+        XCTAssertTrue(view.contains("b.setAccessibilityLabel(c.accessibilityLabel)"), "VoiceOver reads each control's own label")
         XCTAssertEqual(view.components(separatedBy: "set(mute, s.muteControl,").count - 1, 2, "card and pill share the one mapping")
-        XCTAssertTrue(try read("App/UISnapshots.swift").contains("CoachMuteCopy.presentation(reason: r, isMuted: false)"))
+        XCTAssertTrue(try read("App/UISnapshots.swift").contains("static let noZoomMute = CoachMuteCopy.presentation(reason: .toggleOff, isMuted: false)"))
+        // The pill's Mute is the coach's own; Mute in Zoom sits beside it only while it can act.
+        XCTAssertTrue(controller.contains("muteMic: { [weak self] in self?.toggleMicMuted() }"))
+        XCTAssertTrue(controller.contains("coachMicMuted: micMuted"))
+        let toggle = try XCTUnwrap(controller.components(separatedBy: "func toggleMicMuted() {").dropFirst().first?
+            .components(separatedBy: "\n    }").first)
+        XCTAssertEqual(toggle.trimmingCharacters(in: .whitespacesAndNewlines), "setMicMuted(!micMuted)")
+        XCTAssertTrue(view.contains("set(micMute, s.coachMuteControl, glyph: p.buttonGlyph)"))
+        XCTAssertTrue(view.contains("let shown: [CardButton] = state.showsMute ? [micMute, mute, pause, stop] : [micMute, pause, stop]"))
+        XCTAssertTrue(view.contains("@objc func muteMicPressed(_ sender: Any?) { actions.muteMic() }"))
         XCTAssertTrue(view.contains("b.isEnabled = c.enabled"))
     }
 
@@ -145,7 +154,7 @@ final class CoachCardWiringTests: XCTestCase {
         let shots = try read("App/UISnapshots.swift"), script = try read("scripts/snapshots.sh")
         let names = try NSRegularExpression(pattern: #"\("((?:card|pill)-[a-z-]+)", shotState\("#)
         let found = names.matches(in: shots, range: NSRange(shots.startIndex..., in: shots)).map { (shots as NSString).substring(with: $0.range(at: 1)) }
-        XCTAssertEqual(found.count, 19, "#19's 15 states, #13c's card-saving and card-saving-nudge, and the mic-off card and pill")
+        XCTAssertEqual(found.count, 19, "card and pill states incl. mic off and Mute in Zoom (shown only while it can act)")
         for n in found + ["morph-end", "collapse-end"] {
             XCTAssertNotNil(script.range(of: #"(\s|\\\n)\#(n)(\s|;)"#, options: .regularExpression), "snapshots.sh doesn't check \(n)")
         }

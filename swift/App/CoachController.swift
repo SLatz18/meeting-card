@@ -48,8 +48,8 @@ final class CoachController: NSObject {
         MainActor.assumeIsolated { self?.service?.session.session?.appKey }
     })
 
-    /// What the card shows for Mute in Zoom: enabled with Mute in Zoom / Unmute in Zoom, disabled
-    /// with the reason text, or hidden with no Zoom call (CoachMuteCopy).
+    /// What the card shows for Mute in Zoom: Mute in Zoom / Unmute in Zoom while it can act, hidden
+    /// otherwise (CoachMuteCopy).
     var muteControl: MuteControlPresentation {
         let m = callControlsModel
         return CoachMuteCopy.presentation(reason: m.muteUnavailableReason.map(Self.muteDisabledReason), isMuted: m.isMuted)
@@ -347,6 +347,11 @@ final class CoachController: NSObject {
         refresh()
     }
 
+    /// The pill's Mute: the coach's own, flipped.
+    func toggleMicMuted() {
+        setMicMuted(!micMuted)
+    }
+
     func pauseOrResume() {
         if indicator == .paused { service?.resume() } else { service?.pause() }
     }
@@ -393,7 +398,8 @@ final class CoachController: NSObject {
         guard enabled, let status = CoachCardState.Status(indicator) else { return nil }
         let now = ProcessInfo.processInfo.systemUptime
         nudges.expire(now: now)
-        return CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, nudge: nudges.active(now: now),
+        return CoachCardState(status: status, mute: muteControl, micMuted: callControlsModel.isMuted, coachMicMuted: micMuted,
+                              nudge: nudges.active(now: now),
                               mode: minimized ? .pill : .card,
                               increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
                               savingBadge: transcript.live.recorder.isSaving ? CoachCopy.savingNow : nil)
@@ -417,6 +423,7 @@ final class CoachController: NSObject {
         let p = CoachCardPresenter(defaults: defaults, positionKey: Keys.cardPosition, captions: CaptionFeedSlot(model: transcript.feed))
         p.actions = CoachCardActions(stop: { [weak self] in self?.stopForThisCall() },
                                      mute: { [weak self] in self?.toggleMute() },
+                                     muteMic: { [weak self] in self?.toggleMicMuted() },
                                      pause: { [weak self] in self?.pauseOrResume() },
                                      resize: { [weak self] in self?.toggleMinimized() })
         p.callScreen = { [weak self] in self?.service?.glowScreen }
