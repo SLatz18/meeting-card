@@ -486,6 +486,7 @@ final class CoachController: NSObject {
             menu.addItem(menuItem(entry))
             #if MEETINGCARD_TEST_ID
             if entry == .settings { menu.addItem(CoachDebugReadout.shared.menuItem()) }
+            if entry == .settings { menu.addItem(CoachCueDisplayLab.shared.menuItem()) }
             if case .status = entry { menu.addItem(CoachDebugReadout.shared.statusMenuItem()) }
             #endif
         }
