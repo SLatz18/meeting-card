@@ -27,10 +27,12 @@ In Settings, under **Captions and transcript**:
 | Daily note path | `Daily/{yyyy}-{MM}-{dd}.md` | Under the vault, or under the chosen folder when it isn't in a vault. Also `{date}` |
 | Show the call as | Link | **Link**: `- 09:05 [[path\|title]]`. **Embed**: `![[path]]` (Obsidian shows the note inside the daily note; its text stays in the call's file) |
 | Keep transcripts | Forever | Or 7, 30 or 90 days, or 1 year. See [Delete and retention](#delete-and-retention) |
-| Delete This Call's Transcript | | Removes the current call's note (or the last call's) |
+| Delete This Call's Transcript | | Removes the current call's notes (or the last call's) |
 
-The folder is kept as a bookmark plus its path, so it follows a rename or a move. MeetingCard isn't
-sandboxed, so this needs no entitlement. A sandboxed build would make the bookmark security-scoped and would need
+The folder is kept as a bookmark plus its path. It is looked up again at each call's start and whenever it
+is no longer where it was, so a rename or a move is followed rather than the old path recreated. A chosen
+folder that is missing or in the Trash takes no notes: Settings says so under the path, nothing is saved, and
+nothing goes anywhere else instead. MeetingCard isn't sandboxed, so this needs no entitlement. A sandboxed build would make the bookmark security-scoped and would need
 `com.apple.security.files.user-selected.read-write` and `com.apple.security.files.bookmarks.app-scope`.
 
 ## File names
@@ -39,12 +41,18 @@ The pattern fills `{date}` (`2026-01-31`), `{time}` (`0905`, the call's local st
 The title is the calendar event's, when the call was joined from a reminder card and is still within that
 event, and **Call** otherwise. The name is then made safe for macOS, Windows, Android and Obsidian links:
 
-- `/ \ : * ? " < > | # ^ [ ] %` and control characters become spaces, and runs of spaces become one;
+- `/ \ : * ? " < > | # ^ [ ] %` and control characters become spaces, runs of spaces become one, and runs
+  of dots become one (a name never holds `..`);
 - leading and trailing dots and spaces are removed (a leading dot would hide the file);
-- names are cut to 120 characters, and Windows device names (`CON`, `NUL`, `COM1`…) get a trailing `_`;
+- names are cut to 120 characters and to 200 UTF-8 bytes, so a long title in any script still leaves room
+  for ` (n)`, `.md` and the hidden temporary file beside it within the usual 255-byte limit;
+- a Windows device name (`CON`, `NUL`, `COM1`…, the part before the first dot) gets an `_` there: `con.txt`
+  becomes `con_.txt`;
 - a pattern that leaves nothing falls back to the default.
 
-If the name is taken (compared without case), the note gets ` (2)`, ` (3)` and so on.
+If the name is taken (compared without case), the note gets ` (2)`, ` (3)` and so on. The note's first
+write never replaces a file: if something appears at the name between choosing it and writing (another
+app, a sync), the note moves on to the next free name.
 
 ## What a note holds
 
@@ -63,6 +71,7 @@ Properties (YAML front matter):
 | `transcriber` | `"gpt-live-transcribe"` | The transcription model |
 | `coach-cues` | `2` | Coaching cues shown during the call |
 | `transcript-status` | `complete` | `in-progress` during the call, `recovered` after a crash |
+| `recovered` | `2026-01-31T10:12:00` | Only on a note recovery wrote: when it did. Retention reads it as MeetingCard's last write |
 | `meetingcard-call` | `"c0123…"` | A random ID. Retention and the daily-note line use it to recognise MeetingCard's own notes |
 
 Then the body:
@@ -81,7 +90,7 @@ Gaps are marked where they happen, with their start and end:
 | Pause | `*[start–end] Coach paused: nothing transcribed.*` |
 | Muted in the call app (with Use Zoom/Meet controls) | `*[start–end] Muted in the call app: nothing transcribed.*` |
 | Transcription stopped (cost cap or error) | `*[start–end] Transcription stopped (cost cap reached).*` |
-| Transcriber retrying, call audio reconnecting | `*[start–end] Transcription reconnecting.*`, `*[start–end] Call audio reconnecting.*` (the format supports them; see [Limits](#limits)) |
+| Transcriber retrying, call audio reconnecting | `*[start–end] Transcription reconnecting.*`, `*[start–end] Call audio reconnecting.*`. The format has them, but MeetingCard doesn't report either yet; see [Limits](#limits) |
 | The app quit mid-call (recovered) | `*[time–] The app quit during the call; this transcript was recovered and ends here.*` |
 
 ## Sample note
@@ -157,7 +166,8 @@ from the path pattern, under the vault (or under the chosen folder when it isn't
 - **Created if missing**, with its folders, holding just that line. If you use Obsidian's Daily notes
   template, open the day's note in Obsidian before your first call so the template is applied first.
 - A path pattern that is absolute, starts with `~`, uses `..` or goes through a symlink out of the vault is
-  refused (no line is written).
+  refused (no line is written). Recovery checks the path again, and makes the line again, rather than
+  trusting what the spool says.
 - The line is added when the call starts, so even a call the app quits during is linked.
 
 ## While a call is saving
@@ -168,12 +178,15 @@ from the path pattern, under the vault (or under the chosen folder when it isn't
 - Then the whole note is replaced atomically: written to a hidden temporary file beside it, synced, and
   renamed over the note. Obsidian, or anything else reading it, sees the old version or the new one, never
   half of one. Writes never follow a symlink.
-- All of this runs on a background queue, in order, off the main thread.
+- All of this runs on a background queue, in order, off the main thread, including choosing the name and
+  finding the vault when the call starts.
 - **Editing the note during the call is safe.** If the note on disk is no longer what MeetingCard last
-  wrote, it is never overwritten: the rest of the call goes to a new note beside it (` (2)`).
+  wrote, or can't be read, it is never overwritten: the rest of the call goes to a new note beside it
+  (` (2)`).
 - **Deleting the note during the call** (in Finder or Obsidian) stops saving for that call; it isn't recreated.
 - When the call ends, the note gets its end time and duration, and the spool is removed.
-- Quitting MeetingCard during a call finishes the note at the time of the quit.
+- Quitting MeetingCard during a call finishes the note at the time of the quit. Quit waits at most 2 s for
+  the writes; anything still queued is recovered at the next launch.
 
 ## If the app quits mid-call
 
@@ -182,6 +195,15 @@ launch, MeetingCard rebuilds the note from the spool, including lines that hadn'
 ends it at the last thing recorded with the app-quit line, sets `transcript-status: recovered`, and removes
 the spool. A torn last line in the spool (from a crash mid-write) is skipped. If you edited the note after the
 crash, the recovered note goes beside it instead. Recovery also clears temporary files more than an hour old.
+
+Recovery trusts nothing in a spool, which may have come from another Mac through a synced folder:
+
+- it uses a note name only if it is a single plain `.md` file name (no folders, no `..`, not hidden), so it
+  writes only in the chosen folder;
+- it finds the daily note again from its path relative to the vault, with the same escape checks;
+- it leaves a spool that another running MeetingCard on this Mac is writing, and one from another Mac unless
+  it has been untouched for six hours (each spool names its device by a hash, never the Mac's name);
+- it never writes over a file it didn't write: a note changed after the crash gets the recovered note beside it.
 
 ## Delete and retention
 
@@ -194,9 +216,13 @@ crash, the recovered note goes beside it instead. Recovery also clears temporary
   - carry `meetingcard-call`;
   - sit directly in the chosen folder (not in subfolders);
   - are from a call that started more than that many days ago;
-  - haven't been modified since then.
+  - have a name the File name pattern could make;
+  - haven't changed since MeetingCard's last write: the call's `end` (or `recovered`) plus 10 seconds;
+  - aren't still `in-progress`.
 
-  Your own notes, and notes you have edited, are never removed.
+  It reads only the first 4 KB of a note (its properties). Your own notes, and notes you edited after the
+  call (a summary added the same day, for example), are never removed. Notes made under an older File name
+  pattern are kept too.
 
 ## Privacy
 
@@ -212,9 +238,11 @@ crash, the recovered note goes beside it instead. Recovery also clears temporary
 
 - **Them 1 / Them 2.** The note format supports numbered voices within Them, but the live transcription
   can't tell voices apart today, so every other person is **Them**. See [how-it-works.md](how-it-works.md#speakers).
-- **Transcriber retries.** The transcriber doesn't retry or reconnect within a call today: an error stops
-  transcription for the rest of the call, which is marked as a gap. The retry and reconnect gaps are ready
-  for when it does.
+- **Transcriber retries and call audio reconnects.** The transcriber doesn't retry or reconnect within a
+  call today: an error stops transcription for the rest of the call, which is marked as a gap. MeetingCard
+  doesn't report call audio reconnecting either (the capture fallback restarts at once). The note format has
+  both gap kinds, ready for when it does.
+- **Renaming the note during a call** counts as deleting it: saving stops for that call.
 - **Participants** are left out because MeetingCard doesn't read attendee names.
 
 ## Tests
@@ -222,8 +250,9 @@ crash, the recovered note goes beside it instead. Recovery also clears temporary
 - Unit tests (ListenMoreCore, which also runs on Linux in the `Core on Linux` workflow):
   - `CallNoteTests`, `NoteFileNameTests`: properties, sanitizing, collisions;
   - `GapMarkingTests`: Mute, Pause and other gaps;
-  - `TranscriptDurabilityTests`: incremental, atomic writes, crash recovery, retention, daily-note
-    idempotence, path escapes;
+  - `TranscriptDurabilityTests`: incremental, atomic and exclusive writes, crash recovery (including spool
+    paths that try to escape, live spools, unreadable notes), retention (including a note edited the day of
+    its call), daily-note idempotence, path escapes, long non-Latin titles;
   - `TranscriptRecorderTests`: edited and deleted notes;
   - `PrivacyGuardTests`;
   - `SampleNoteDocTests`.
