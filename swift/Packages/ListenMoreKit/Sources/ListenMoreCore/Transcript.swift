@@ -278,6 +278,21 @@ public final class TranscriptRecorder {
         io.wait()
     }
 
+    /// Recovery and retention for `folder`, queued behind this recorder's writes so they never race
+    /// a call being saved: the current call's spool and note are left alone. `retentionDays` nil: off.
+    public func maintain(folder: URL, retentionDays: Int?, labels: SpeakerLabels = SpeakerLabels(), now: Date = Date()) {
+        let skip: Set<String> = record.map { [$0.callId] } ?? []
+        let keep: Set<URL> = lastURL.map { [$0] } ?? []
+        let store = store, wording = wording, timeZone = timeZone
+        io.run {
+            TranscriptMaintenance.recover(folder: folder, store: store, labels: labels, wording: wording, timeZone: timeZone,
+                                          now: now, skip: skip)
+            if let days = retentionDays {
+                TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: days, now: now, timeZone: timeZone, keep: keep)
+            }
+        }
+    }
+
     // MARK: private
 
     private func render(_ status: NoteStatus) -> String {
@@ -458,7 +473,7 @@ public enum TranscriptMaintenance {
     @discardableResult
     public static func recover(folder: URL, store: TranscriptStore, labels: SpeakerLabels = SpeakerLabels(),
                                wording: NoteWording = NoteWording(), timeZone: TimeZone = .current,
-                               now: Date = Date()) -> [URL] {
+                               now: Date = Date(), skip: Set<String> = []) -> [URL] {
         for url in store.contents(of: folder) where url.lastPathComponent.hasPrefix(".")
             && url.lastPathComponent.hasSuffix(FileTranscriptStore.tempSuffix) {
             if let m = store.modified(url), now.timeIntervalSince(m) < 3600 { continue }
@@ -471,6 +486,7 @@ public enum TranscriptMaintenance {
                 if let m = store.modified(spool), now.timeIntervalSince(m) > 86_400 { try? store.remove(spool) }
                 continue
             }
+            guard !skip.contains(replay.record.callId) else { continue }
             var r = replay.record
             let status: NoteStatus
             if replay.ended {

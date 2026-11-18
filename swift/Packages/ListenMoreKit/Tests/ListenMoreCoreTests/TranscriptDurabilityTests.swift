@@ -145,6 +145,25 @@ final class TranscriptDurabilityTests: XCTestCase {
         XCTAssertFalse(md.contains("app quit"))
     }
 
+    func testMaintenanceDuringACallLeavesThatCallAlone() throws {
+        let crashed = try crashMidCall()
+        let r = TranscriptRecorder(store: FileTranscriptStore(), timeZone: utc, io: .serial(label: "test.maintain"), newCallId: { "live1" })
+        r.begin(start: start.addingTimeInterval(7200), folder: folder, labels: SpeakerLabels(), info: CallInfo(title: "Live"))
+        r.add(TranscriptLine(speaker: .me, offset: 1, text: "live line"))
+        r.maintain(folder: folder, retentionDays: 1, now: start.addingTimeInterval(86_400 * 30))
+        r.add(TranscriptLine(speaker: .me, offset: 2, text: "after upkeep"))
+        r.flush()
+        XCTAssertTrue(try read(crashed).contains("transcript-status: recovered"), "the crashed call is finished")
+        let live = try XCTUnwrap(r.lastURL)
+        XCTAssertTrue(r.isSaving)
+        let md = try read(live)
+        XCTAssertTrue(md.contains("transcript-status: in-progress") && md.contains("after upkeep"), "the live call keeps going")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: CallSpool.url(callId: "live1", in: folder).path), "its spool is kept")
+        r.end()
+        r.flush()
+        XCTAssertTrue(try read(live).contains("transcript-status: complete"))
+    }
+
     func testRecoveryClearsOldTemporaryFilesAndEmptySpools() throws {
         let temp = folder.appendingPathComponent(".x.md.123\(FileTranscriptStore.tempSuffix)")
         try "partial".write(to: temp, atomically: false, encoding: .utf8)
