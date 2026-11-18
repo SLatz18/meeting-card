@@ -40,6 +40,8 @@ final class MutationTests: XCTestCase {
         let r = try await run(Scenarios.interruption, overrides: ["local": ["cut_in_min_overlap_ms": 5000]])
         assertFails(r, ["coaching"])
         XCTAssertEqual(r.cues.missed.map(\.type), [.interrupt])
+        XCTAssertTrue(r.diagnostics.contains { $0.hasPrefix("missed interrupt") && $0.contains("shadow local layer: no interrupt") },
+                      "the shadow replay explains the miss: \(r.diagnostics)")
     }
 
     func testEarlyMonologueIsCaught() async throws {

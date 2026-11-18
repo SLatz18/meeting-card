@@ -19,6 +19,8 @@ public struct ScenarioResult: Sendable {
     public var billedSeconds: Double
     public var lastMeter: CostReading?
     public var judgeCalls: Int
+    /// For each missed or false interrupt: what the shadow local layer saw on the same audio.
+    public var diagnostics: [String] = []
 
     public var passed: Bool { checks.allSatisfy(\.passed) }
     public var failures: [CheckResult] { checks.filter { !$0.passed } }
@@ -44,7 +46,7 @@ public enum Checks {
 
         // Coaching.
         let oracle = CueOracle.expected(r.timeline, config: r.config,
-                                        facts: .init(keyless: s.keyless, gptStopT: r.gptStop?.t, mode: r.mode))
+                                        facts: .init(keyless: s.keyless, gptStopT: r.gptStop?.t, mode: r.mode, judgeOn: r.judgeOn))
         let match = CueOracle.match(expected: oracle.cues, tolerated: oracle.tolerated, actual: r.cues)
         check("coaching", match.passed,
               "expected \(oracle.cues.filter { !$0.optional }.count), matched \(match.outcomes.filter { $0.actual != nil }.count), missed \(match.missed.count), false \(match.falseCues.count)"
@@ -112,6 +114,9 @@ public enum Checks {
         check("no-audio-on-disk", r.diskViolations.isEmpty && r.workDirWiped,
               "audio-like files outside the run dir: \(r.diskViolations.count); run dir wiped: \(r.workDirWiped)")
         if !live { check("lockstep", r.barrierTimeouts == 0, "\(r.barrierTimeouts) barrier timeouts") }
+        if !r.judgeOn {
+            check("judge off: 0 judge calls", r.judgeCalls == 0, "\(r.judgeCalls) judge calls (not_listening not exercised)")
+        }
         let problems = r.problems.filter { $0 != "transcriberClearRejected" }
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))
 
@@ -167,12 +172,18 @@ public enum Checks {
             }
             check("paused: indicator", r.indicators.contains { $0.indicator == .paused }, "indicator showed paused")
         }
-        if s.checks.contains(.silenceStop), let callEnd = r.timeline.times(.callEnds).first {
-            let stopAfter = r.config.trigger.stopAfterS
+        if s.checks.contains(.silenceStop), let callEnd = r.applied.first(where: { $0.kind == .callEnds })?.t {
+            // The trigger sees the call app's audio off at its next poll (up to poll_s later) and stops at
+            // the first poll at least stop_after_s after that. Offline the polls are exact. Live they run
+            // on the paced loop's wall clock, so the poll stop_after_s later can measure a hair short and
+            // the stop takes one more poll: up to 2 x poll_s, plus 0.25 s of scheduling slack.
+            let stopAfter = r.config.trigger.stopAfterS, poll = r.config.trigger.pollS
+            let upper = live ? stopAfter + 2 * poll + 0.25 : stopAfter + poll + 0.05
             let stopAt = r.sessionStops.first
             let delay = stopAt.map { $0 - callEnd }
-            let onTime = delay.map { $0 >= stopAfter - 0.01 && $0 <= stopAfter + r.config.trigger.pollS + 0.05 } ?? false
-            check("silence: stops after stop_after_s", onTime, "session stopped \(delay.map { fmt($0) } ?? "never") s after the call audio stopped (stop_after_s = \(fmt(stopAfter)))")
+            let onTime = delay.map { $0 >= stopAfter - 0.01 && $0 <= upper } ?? false
+            check("silence: stops after stop_after_s", onTime,
+                  "session stopped \(delay.map { String(format: "%.2f", $0) } ?? "never") s after the call audio stopped (allowed \(fmt(stopAfter))-\(String(format: "%.2f", upper)) s)")
             let lateCues = r.cues.filter { $0.t >= callEnd }
             let lastIndicator = r.indicators.last?.indicator
             check("silence: released and quiet", lateCues.isEmpty && goneAfter && lastIndicator == .hidden,
@@ -201,8 +212,18 @@ public enum Checks {
                   "stopped \(stop.map { "\($0.reason) at \(fmt($0.t)) s" } ?? "no"), captions after \(after.count), caption state \(state == .stopped(.budgetCap) ? "stopped (budget cap)" : state.map { "\($0)" } ?? "-"), local cue after cap \(localAfter)")
         }
 
+        var diagnostics: [String] = []
+        if let shadow = r.shadow {
+            for e in match.missed where e.type == .interrupt {
+                diagnostics.append("missed interrupt (\(e.reason)): " + shadow.explainCutIn(around: e.window, config: r.config))
+            }
+            for c in match.falseCues where c.type == .interrupt {
+                diagnostics.append(String(format: "false interrupt at %.2f s: ", c.t) + shadow.explainCutIn(around: (c.t - 1.5)...c.t, config: r.config))
+            }
+        }
         return ScenarioResult(scenario: s.name, summary: s.summary, mode: r.mode, transcription: tx, speakers: sp, cues: match,
-                              checks: checks, billedSeconds: r.sockets.billedSeconds, lastMeter: r.meters.last, judgeCalls: r.judgeCalls)
+                              checks: checks, billedSeconds: r.sockets.billedSeconds, lastMeter: r.meters.last, judgeCalls: r.judgeCalls,
+                              diagnostics: diagnostics)
     }
 
     static func fmt(_ x: Double) -> String { String(format: "%.1f", x) }

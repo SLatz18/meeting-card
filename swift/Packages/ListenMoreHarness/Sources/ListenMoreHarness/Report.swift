@@ -81,6 +81,10 @@ public enum Report {
             for c in r.cues.tolerated { out += "| judged / edge (informational) | – | \(cueText(c)) | not scored |\n" }
             out += "\nChecks:\n\n"
             for c in r.checks { out += "- \(c.passed ? "PASS" : "FAIL") \(c.name): \(c.detail)\n" }
+            if !r.diagnostics.isEmpty {
+                out += "\nDiagnostics:\n\n"
+                for d in r.diagnostics { out += "- \(d)\n" }
+            }
         }
         return out
     }
@@ -138,6 +142,7 @@ public enum Report {
                     "passed": r.cues.passed,
                 ],
                 "checks": r.checks.map { ["name": $0.name, "passed": $0.passed, "detail": $0.detail] },
+                "diagnostics": r.diagnostics,
             ]
         }
         let obj: [String: Any] = ["mode": mode.rawValue, "scenarios": scenarios]

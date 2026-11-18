@@ -39,13 +39,20 @@ public enum CueOracle {
         public var keyless: Bool
         public var gptStopT: Double?
         public var mode: Mode
+        public var judgeOn: Bool
 
-        public init(keyless: Bool, gptStopT: Double?, mode: Mode) {
+        public init(keyless: Bool, gptStopT: Double?, mode: Mode, judgeOn: Bool = true) {
             self.keyless = keyless
             self.gptStopT = gptStopT
             self.mode = mode
+            self.judgeOn = judgeOn
         }
     }
+
+    /// Live speech end to transcript, allowed for cues that wait on a transcript: about twice the
+    /// 0.66-0.80 s the first live run measured for a line's last segment (WER under 3 %).
+    public static let liveTranscriptAllowanceS = 1.5
+    static let offlineTranscriptAllowanceS = 1.0
 
     public static func expected(_ timeline: Timeline, config c: ListenMoreConfig, facts: Facts) -> (cues: [ExpectedCue], tolerated: Set<CueType>) {
         let l = c.local
@@ -67,7 +74,8 @@ public enum CueOracle {
         }
 
         var cands: [ExpectedCue] = []
-        var tolerated: Set<CueType> = live ? [.notListening] : []
+        var tolerated: Set<CueType> = live && facts.judgeOn && !c.cues.disabledTypes.contains(.notListening) ? [.notListening] : []
+        let allowance = live ? liveTranscriptAllowanceS : offlineTranscriptAllowanceS
 
         // Cut-in.
         let cutOverlap = l.cutInMinOverlapMs / 1000, cutContinue = l.cutInOthersContinueMs / 1000
@@ -162,12 +170,22 @@ public enum CueOracle {
             let stop = Set(c.text.stopwords)
             let shared = ScriptText.content(question, stop: stop).intersection(ScriptText.content(reply, stop: stop))
             if shared.count >= c.text.questionClearMinSharedWords { continue }
-            let decided = ScriptText.tokens(reply).count >= c.text.questionDecideWords
-            let at = decided ? r.end : r.end + l.monologueMeGapResetS
-            if inside(pauses, at) || at >= captureEnd { continue }
-            cands.append(ExpectedCue(type: .missedQuestion, level: .soft,
-                                     window: live ? at...(at + 6.0) : (at - 0.3)...(at + 1.0), optional: false,
-                                     reason: "\(r.line.id) doesn't take up \(q.line.id)'s question (\(shared.count) shared words)"))
+            // The rule decides on the reply's transcript as it arrives, segment by segment: the soft cue
+            // comes once `question_decide_words` words are in, which with pauses in the reply can be
+            // before the reply ends (from when that word is spoken), and at the latest when the reply's
+            // last segment is transcribed; a shorter reply is decided at the end of the turn.
+            let words = ScriptText.tokens(reply).count
+            let window: ClosedRange<Double>
+            if words >= c.text.questionDecideWords {
+                let decideWordSpoken = r.start + (r.end - r.start) * Double(c.text.questionDecideWords) / Double(words)
+                window = decideWordSpoken...(r.end + hang + allowance)
+            } else {
+                let endOfTurn = r.end + l.monologueMeGapResetS
+                window = (endOfTurn - 0.3)...(endOfTurn + allowance)
+            }
+            if inside(pauses, window.lowerBound) || window.lowerBound >= captureEnd { continue }
+            cands.append(ExpectedCue(type: .missedQuestion, level: .soft, window: window, optional: false,
+                                     reason: "\(r.line.id) doesn't take up \(q.line.id)'s question (\(shared.count) shared words, \(words) words)"))
         }
 
         // Cue policy: one at a time, cooldowns, the closing-phrase quiet.

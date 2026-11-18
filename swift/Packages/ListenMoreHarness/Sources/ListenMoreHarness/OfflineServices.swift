@@ -40,6 +40,7 @@ public final class ScriptedRealtime: WebSocketConnector, @unchecked Sendable {
     private var _routingMismatches = 0
     private var _sendsAfterClose = 0
     private var _authorizedConnects = 0
+    private var _segments: [TranscribedSegment] = []
     /// Final transcripts sent (the runner waits until the session has delivered as many captions).
     public let finalsSent = AsyncCounter()
 
@@ -67,6 +68,7 @@ public final class ScriptedRealtime: WebSocketConnector, @unchecked Sendable {
     public var routingMismatches: Int { lock.withLock { _routingMismatches } }
     public var sendsAfterClose: Int { lock.withLock { _sendsAfterClose } }
     public var authorizedConnects: Int { lock.withLock { _authorizedConnects } }
+    public var segments: [TranscribedSegment] { lock.withLock { _segments } }
 
     /// `GptLayer` connects the ME transcriber, then OTHERS, on every engine start.
     public func connect(url: URL, headers: [String: String]) async throws -> WebSocketConnection {
@@ -108,7 +110,9 @@ public final class ScriptedRealtime: WebSocketConnector, @unchecked Sendable {
             let seconds = (pendingSeconds[stream] ?? 0).rounded(.up)
             pendingSeconds[stream] = 0
             _commits.append((t, stream))
-            return ("item_\(items)", due.map(\.text).joined(separator: " "), seconds)
+            let text = due.map(\.text).joined(separator: " ")
+            _segments.append(TranscribedSegment(stream: stream, committedAt: t, transcribedAt: t, text: text))
+            return ("item_\(items)", text, seconds)
         }
     }
 

@@ -109,22 +109,6 @@ public enum Scoring {
         }
     }
 
-    /// The line a caption (or a fragment of one, live) transcribes: among lines that started before the
-    /// caption arrived and ended at most 8 s before it, the one holding the largest share of the
-    /// caption's words; ties go to the line that ended closest before the caption. nil under half.
-    static func bestLine(_ caption: CaptionRecord, lines: [PlacedLine]) -> PlacedLine? {
-        let words = Set(ScriptText.tokens(caption.text))
-        guard !words.isEmpty else { return nil }
-        var best: (line: PlacedLine, score: Double)?
-        for p in lines where p.start <= caption.t && p.end >= caption.t - 8 {
-            let score = Double(Set(ScriptText.tokens(p.line.text)).intersection(words).count) / Double(words.count)
-            if let b = best, score < b.score || (score == b.score && abs(caption.t - p.end) >= abs(caption.t - b.line.end)) { continue }
-            best = (p, score)
-        }
-        guard let b = best, b.score >= 0.5 else { return nil }
-        return b.line
-    }
-
     /// The caption carries most of the line's words, wherever and whenever it appeared.
     static func carries(_ caption: CaptionRecord, _ line: Line) -> Bool {
         let ref = Set(ScriptText.tokens(line.text))
@@ -132,37 +116,59 @@ public enum Scoring {
         return Double(ref.intersection(ScriptText.tokens(caption.text)).count) / Double(ref.count) >= 0.6
     }
 
+    /// The script line a transcribed segment holds: among lines whose span contains the segment's
+    /// speech end (its commit less the VAD hangover, with 0.3 s / 0.6 s of VAD slack), the one holding
+    /// the largest share of the segment's words; ties go to the line ending nearest that point. nil
+    /// under half. Uses audio timing, not the stream, so audio on the wrong transcriber shows as wrong.
+    public static func line(for seg: TranscribedSegment, lines: [PlacedLine], hangover: Double) -> PlacedLine? {
+        let words = Set(ScriptText.tokens(seg.text))
+        guard !words.isEmpty else { return nil }
+        let end = seg.committedAt - hangover
+        var best: (line: PlacedLine, score: Double)?
+        for p in lines where p.start - 0.3 <= end && end <= p.end + 0.6 {
+            let score = Double(Set(ScriptText.tokens(p.line.text)).intersection(words).count) / Double(words.count)
+            if let b = best, score < b.score || (score == b.score && abs(end - p.end) >= abs(end - b.line.end)) { continue }
+            best = (p, score)
+        }
+        guard let b = best, b.score >= 0.5 else { return nil }
+        return b.line
+    }
+
+    static func hangover(_ r: RunRecord) -> Double { Double(r.config.vad.hangoverMs) / 1000 }
+
     public static func transcription(_ r: RunRecord, keyless: Bool) -> [Speaker: StreamTranscription] {
         let expected = transcribedLines(r, keyless: keyless)
         let finals = r.captions.filter { $0.isFinal && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+        let segments = r.sockets.segments.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+        let hang = hangover(r)
         var out: [Speaker: StreamTranscription] = [:]
         for speaker in Speaker.allCases {
             let refLines = expected.filter { $0.line.voice.speaker == speaker }
             let hyp = finals.filter { $0.speaker == speaker }
             let errors = WordErrors.compute(reference: refLines.flatMap { ScriptText.tokens($0.line.text) },
                                             hypothesis: hyp.flatMap { ScriptText.tokens($0.text) })
-            var firstCaption: [String: Double] = [:]
-            for c in hyp {
-                if let p = bestLine(c, lines: refLines), firstCaption[p.line.id] == nil { firstCaption[p.line.id] = c.t - p.end }
-            }
-            out[speaker] = StreamTranscription(errors: errors, latencies: refLines.compactMap { firstCaption[$0.line.id] },
-                                               linesExpected: refLines.count, linesCaptioned: firstCaption.count)
+            let mine = segments.filter { $0.stream == (speaker == .me ? .mic : .call) }
+            let latencies = mine.map { $0.transcribedAt - ($0.committedAt - hang) }
+            let captioned = Set(mine.compactMap { line(for: $0, lines: refLines, hangover: hang)?.line.id })
+            out[speaker] = StreamTranscription(errors: errors, latencies: latencies,
+                                               linesExpected: refLines.count, linesCaptioned: captioned.count)
         }
         return out
     }
 
     public static func speakers(_ r: RunRecord) -> SpeakerScore {
-        let finals = r.captions.filter { $0.isFinal && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+        let hang = hangover(r)
         var correct = 0, total = 0, unmatched = 0
         var themBSpeakers: [Speaker] = []
-        for c in finals {
-            guard let p = bestLine(c, lines: r.timeline.lines) else {
+        for seg in r.sockets.segments where !seg.text.trimmingCharacters(in: .whitespaces).isEmpty {
+            guard let p = line(for: seg, lines: r.timeline.lines, hangover: hang) else {
                 unmatched += 1
                 continue
             }
             total += 1
-            if c.speaker == p.line.voice.speaker { correct += 1 }
-            if p.line.voice == .themB { themBSpeakers.append(c.speaker) }
+            let speaker: Speaker = seg.stream == .mic ? .me : .others
+            if speaker == p.line.voice.speaker { correct += 1 }
+            if p.line.voice == .themB { themBSpeakers.append(speaker) }
         }
         let multi: MultiThem
         if !r.timeline.lines.contains(where: { $0.line.voice == .themB }) || themBSpeakers.isEmpty {

@@ -20,8 +20,35 @@ public struct SocketStats: Sendable {
     public var routingMismatches: Int?
     /// Billed transcription seconds the service reported.
     public var billedSeconds = 0.0
+    /// One per transcribed speech segment: when its commit was sent and when its final transcript arrived.
+    public var segments: [TranscribedSegment] = []
 
     public init() {}
+}
+
+/// A committed speech segment and its transcript (synthetic script text; kept in memory for scoring).
+public struct TranscribedSegment: Sendable {
+    public var stream: AudioStream
+    /// Scenario time the commit was sent: the VAD offset plus its hangover after the speech ended.
+    public var committedAt: Double
+    public var transcribedAt: Double
+    public var text: String
+}
+
+/// Pairs commits with transcripts on one transcription socket: commits are acknowledged in order
+/// (`input_audio_buffer.committed` names the item), and `completed` names the same item.
+struct SegmentPairing {
+    private var pendingCommits: [Double] = []
+    private var itemCommit: [String: Double] = [:]
+
+    mutating func commitSent(at t: Double) { pendingCommits.append(t) }
+
+    mutating func acknowledged(item: String) {
+        guard !pendingCommits.isEmpty else { return }
+        itemCommit[item] = pendingCommits.removeFirst()
+    }
+
+    mutating func completed(item: String) -> Double? { itemCommit.removeValue(forKey: item) }
 }
 
 public protocol SocketObserver: AnyObject, Sendable {
@@ -42,6 +69,7 @@ extension ScriptedRealtime: SocketObserver {
         s.clears = clears
         s.sendsAfterClose = sendsAfterClose
         s.routingMismatches = routingMismatches
+        s.segments = segments
         return s
     }
 }
@@ -55,6 +83,8 @@ public struct RunServices: @unchecked Sendable {
     public var engineConfig: ListenMoreConfig
     /// Test hook: controls the runner records but doesn't perform (a broken Mute or Pause).
     public var ignoredControls: Set<ControlKind> = []
+    /// The not_listening judge is on (off: `Harness.judgeOff`, 0 judge calls).
+    public var judgeOn = true
     public var key: APIKey?
     public var transports: GptTransports?
     public var clock: HarnessClock
@@ -130,7 +160,10 @@ public struct RunRecord: @unchecked Sendable {
     public var micOfferedWhileMuted = 0
     public var micMuteCalls: [Bool] = []
     public var judgeCalls = 0
+    public var judgeOn = true
     public var meters: [CostReading] = []
+    /// Every cost reading with its scenario time (each engine's meter starts at 0).
+    public var meterLog: [(t: Double, reading: CostReading)] = []
     public var transcripts: [TranscriptObservation] = []
     public var deleteResults: [(t: Double, deleted: Bool)] = []
     public var transcriptDeletedAtTeardown = false
@@ -146,6 +179,8 @@ public struct RunRecord: @unchecked Sendable {
     public var recorderLastURL: URL?
     public var barrierTimeouts = 0
     public var problems: [String] = []
+    /// The same audio replayed through `LocalLayer` afterwards (diagnostics for local cues).
+    public var shadow: ShadowTrace?
     /// Filled in by the harness after teardown.
     public var diskViolations: [String] = []
     public var workDirWiped = false
@@ -331,7 +366,9 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.micOfferedWhileMuted = mic.offeredWhileMuted
         record.micMuteCalls = mic.muteCalls
         record.judgeCalls = services.judgeCalls()
+        record.judgeOn = services.judgeOn
         record.captionStates.append((now, live.captionState))
+        record.shadow = ShadowTrace.record(config: config, tracks: tracks, applied: record.applied)
         return record
     }
 
@@ -460,6 +497,7 @@ public final class ScenarioRun: CoachSessionDelegate {
 
     public func coachSession(_ session: CoachSession, didMeter reading: CostReading) {
         record?.meters.append(reading)
+        record?.meterLog.append((now, reading))
     }
 
     public func coachSession(_ session: CoachSession, didReport problem: CoachSession.Problem) {

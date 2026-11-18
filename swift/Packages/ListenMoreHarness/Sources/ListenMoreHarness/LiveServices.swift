@@ -18,15 +18,19 @@ public struct LiveBackend: @unchecked Sendable {
     }
 
     public static func real() -> LiveBackend {
-        LiveBackend(http: EphemeralHTTPTransport(), webSocket: PlatformWebSocket.connector())
+        LiveBackend(http: EphemeralHTTPTransport.shared, webSocket: PlatformWebSocket.connector())
     }
 }
 
 /// `HTTPTransport` over an ephemeral URLSession: no cache, cookies or credential storage on disk.
+/// One session for the whole process, never torn down: on Linux, FoundationNetworking with libcurl
+/// 8.11 or newer aborts when a URLSession's curl multi handle is released ("_MultiHandle deallocated
+/// with non-zero retain count", swift-corelibs-foundation #5203), so live mode never releases one.
 public final class EphemeralHTTPTransport: HTTPTransport, @unchecked Sendable {
+    public static let shared = EphemeralHTTPTransport()
     let session: URLSession
 
-    public init() {
+    private init() {
         let c = URLSessionConfiguration.ephemeral
         c.urlCache = nil
         c.httpCookieStorage = nil
@@ -91,7 +95,7 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
     private var _calls = 0
     private var _inputTokens = 0
     private var _outputTokens = 0
-    private var _failures = 0
+    private var _failures: [String] = []
 
     public init(inner: HTTPTransport) {
         self.inner = inner
@@ -99,29 +103,50 @@ public final class MeteredHTTP: HTTPTransport, @unchecked Sendable {
 
     public var calls: Int { lock.withLock { _calls } }
     public var tokens: (input: Int, output: Int) { lock.withLock { (_inputTokens, _outputTokens) } }
-    public var failures: Int { lock.withLock { _failures } }
+    /// One class per failed call: `HTTP <status> <error code>` or the thrown error's type (a timeout
+    /// shows as its URLError code). Never a body, header or message text.
+    public var failures: [String] { lock.withLock { _failures } }
 
     public func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
-        let reply = try await inner.post(url: url, headers: headers, body: body, timeout: timeout)
-        let usage = ((try? JSONSerialization.jsonObject(with: reply.body)) as? [String: Any])?["usage"] as? [String: Any]
+        let reply: (status: Int, body: Data)
+        do {
+            reply = try await inner.post(url: url, headers: headers, body: body, timeout: timeout)
+        } catch {
+            lock.withLock {
+                _calls += 1
+                _failures.append(GptError.safe(error))
+            }
+            throw error
+        }
+        let root = (try? JSONSerialization.jsonObject(with: reply.body)) as? [String: Any]
+        let usage = root?["usage"] as? [String: Any]
         lock.withLock {
             _calls += 1
-            if reply.status != 200 { _failures += 1 }
+            if reply.status != 200 { _failures.append(Self.failureClass(status: reply.status, root: root)) }
             _inputTokens += (usage?["input_tokens"] as? NSNumber)?.intValue ?? 0
             _outputTokens += (usage?["output_tokens"] as? NSNumber)?.intValue ?? 0
         }
         return reply
     }
+
+    /// `HTTP 401 incorrect_hostname`: the status and OpenAI's error code (a fixed identifier), if any.
+    static func failureClass(status: Int, root: [String: Any]?) -> String {
+        let code = (root?["error"] as? [String: Any])?["code"] as? String
+        let safe = code.flatMap { $0.range(of: #"^[a-z0-9_]{1,40}$"#, options: .regularExpression) != nil ? $0 : nil }
+        return "HTTP \(status)" + (safe.map { " \($0)" } ?? "")
+    }
 }
 
 /// Wraps the realtime connector to observe traffic: appends per stream with times, commits, clears,
-/// closes, and billed seconds from `completed` usage. Transcript text is never read or kept.
+/// closes, billed seconds from `completed` usage, and each segment's commit and transcript times with
+/// its (synthetic) transcript for scoring, in memory. No audio is kept.
 public final class MeteredConnector: WebSocketConnector, SocketObserver, @unchecked Sendable {
     let inner: WebSocketConnector
     let clock: HarnessClock
     private let lock = NSLock()
     private var origin = 0.0
     private var s = SocketStats()
+    private var pairing: [Int: SegmentPairing] = [:]
 
     public init(inner: WebSocketConnector, clock: HarnessClock) {
         self.inner = inner
@@ -132,16 +157,16 @@ public final class MeteredConnector: WebSocketConnector, SocketObserver, @unchec
     public func stats() -> SocketStats { lock.withLock { s } }
 
     public func connect(url: URL, headers: [String: String]) async throws -> WebSocketConnection {
-        let stream: AudioStream = lock.withLock {
+        let (stream, id): (AudioStream, Int) = lock.withLock {
             defer { s.connections += 1 }
-            return s.connections % 2 == 0 ? .mic : .call
+            return (s.connections % 2 == 0 ? .mic : .call, s.connections)
         }
-        return MeteredConnection(inner: try await inner.connect(url: url, headers: headers), stream: stream, owner: self)
+        return MeteredConnection(inner: try await inner.connect(url: url, headers: headers), stream: stream, id: id, owner: self)
     }
 
     var now: Double { clock.now() - lock.withLock { origin } }
 
-    func sent(_ stream: AudioStream, _ text: String) {
+    func sent(_ stream: AudioStream, id: Int, _ text: String) {
         let t = now
         // Only the event type is parsed; an append's audio is measured, never kept.
         guard let data = text.data(using: .utf8), let msg = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -150,19 +175,36 @@ public final class MeteredConnector: WebSocketConnector, SocketObserver, @unchec
             case "input_audio_buffer.append":
                 let pcm = Data(base64Encoded: msg["audio"] as? String ?? "") ?? Data()
                 s.appends.append(.init(t: t, stream: stream, samples: pcm.count / 2, loud: ScriptedRealtime.loud(pcm)))
-            case "input_audio_buffer.commit": s.commits.append((t, stream))
+            case "input_audio_buffer.commit":
+                s.commits.append((t, stream))
+                pairing[id, default: SegmentPairing()].commitSent(at: t)
             case "input_audio_buffer.clear": s.clears.append((t, stream))
             default: break
             }
         }
     }
 
-    func received(_ text: String) {
-        guard text.contains("\"usage\""), let data = text.data(using: .utf8),
-              let msg = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let usage = msg["usage"] as? [String: Any], usage["type"] as? String == "duration" else { return }
-        let seconds = (usage["seconds"] as? NSNumber)?.doubleValue ?? 0
-        lock.withLock { s.billedSeconds += seconds }
+    func received(_ stream: AudioStream, id: Int, _ text: String) {
+        let t = now
+        guard text.contains("input_audio_buffer.committed") || text.contains("transcription.completed"),
+              let data = text.data(using: .utf8),
+              let msg = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let item = msg["item_id"] as? String ?? ""
+        lock.withLock {
+            switch msg["type"] as? String ?? "" {
+            case "input_audio_buffer.committed":
+                pairing[id, default: SegmentPairing()].acknowledged(item: item)
+            case "conversation.item.input_audio_transcription.completed":
+                if let usage = msg["usage"] as? [String: Any], usage["type"] as? String == "duration" {
+                    s.billedSeconds += (usage["seconds"] as? NSNumber)?.doubleValue ?? 0
+                }
+                if let committed = pairing[id]?.completed(item: item) {
+                    s.segments.append(TranscribedSegment(stream: stream, committedAt: committed, transcribedAt: t,
+                                                         text: msg["transcript"] as? String ?? ""))
+                }
+            default: break
+            }
+        }
     }
 
     func closed() { lock.withLock { s.closes += 1 } }
@@ -172,25 +214,27 @@ public final class MeteredConnector: WebSocketConnector, SocketObserver, @unchec
 final class MeteredConnection: WebSocketConnection, @unchecked Sendable {
     let inner: WebSocketConnection
     let stream: AudioStream
+    let id: Int
     unowned let owner: MeteredConnector
     private let lock = NSLock()
     private var isClosed = false
 
-    init(inner: WebSocketConnection, stream: AudioStream, owner: MeteredConnector) {
+    init(inner: WebSocketConnection, stream: AudioStream, id: Int, owner: MeteredConnector) {
         self.inner = inner
         self.stream = stream
+        self.id = id
         self.owner = owner
     }
 
     func send(_ text: String) async throws {
         if lock.withLock({ isClosed }) { owner.sendAfterClose() }
-        owner.sent(stream, text)
+        owner.sent(stream, id: id, text)
         try await inner.send(text)
     }
 
     func receive() async throws -> String {
         let m = try await inner.receive()
-        owner.received(m)
+        owner.received(stream, id: id, m)
         return m
     }
 
