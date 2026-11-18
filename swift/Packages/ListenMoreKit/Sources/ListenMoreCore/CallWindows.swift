@@ -76,6 +76,14 @@ public struct CallWindowSelector: Sendable {
         self.lookbackS = lookbackS
     }
 
+    /// The apps whose window list is worth reading on this poll: every native call app (windows are
+    /// watched from the moment they open, so a call's window is told from the home window by when
+    /// it appeared), but a browser only once the Meet script has named the window holding a
+    /// meeting. A browser with no hint binds nothing, so it never costs a window-list read.
+    public static func keysToRead(appKeys: Set<String>, browserKeys: Set<String>, hints: [String: CallWindowHint]) -> Set<String> {
+        appKeys.filter { !browserKeys.contains($0) || hints[$0] != nil }
+    }
+
     /// Forget everything (the coach was switched off; ages restart as unknown).
     public mutating func reset() {
         self = CallWindowSelector(lookbackS: lookbackS)

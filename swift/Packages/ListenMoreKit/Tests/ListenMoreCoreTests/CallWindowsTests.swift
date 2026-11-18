@@ -150,6 +150,18 @@ final class CallWindowsTests: XCTestCase {
         XCTAssertEqual(selector.target(appKey: Self.zoom), meeting, "the binding moves to the meeting window")
     }
 
+    func testOnlyNativeAppsAndBrowsersWithAHintAreRead() {
+        let hint = CallWindowHint(rank: 1, visibleWindows: 1)
+        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: keys, browserKeys: browsers, hints: [:]), [Self.zoom],
+                       "browsers without a hint cost no window-list read")
+        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: keys, browserKeys: browsers, hints: [Self.chrome: hint]),
+                       [Self.zoom, Self.chrome])
+        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: browsers, browserKeys: browsers, hints: [:]), [],
+                       "browser-only: nothing to read")
+        XCTAssertEqual(CallWindowSelector.keysToRead(appKeys: [Self.zoom, "com.microsoft.teams2"], browserKeys: browsers, hints: [:]),
+                       [Self.zoom, "com.microsoft.teams2"])
+    }
+
     func testReResolveFindsAMeetingWindowOlderThanTheLookback() {
         observe([zoomWindow(1, home)], at: 0)
         observe([zoomWindow(1, home), zoomWindow(2, meeting)], at: 10)                 // in the meeting, no audio yet

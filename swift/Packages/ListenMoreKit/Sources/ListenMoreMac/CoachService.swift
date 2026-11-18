@@ -32,6 +32,8 @@ public final class CoachService: CoachSessionDelegate {
     /// Display for a session's app: the one place the call's window is chosen, for the glow and (through
     /// `glowScreen`) the host's coach card. `init` points it at `callWindows`. Injectable for tests.
     var locateScreen: (String?, NSRect?) -> NSRect? = { _, fallback in fallback }
+    /// The attached displays' frames (Cocoa, the primary first); injectable for tests.
+    var screenFrames: () -> [NSRect] = { NSScreen.screens.map(\.frame) }
     public var onChange: (() -> Void)?
     /// A cue was shown (after the glow started).
     public var onCue: ((Cue) -> Void)?
@@ -72,7 +74,6 @@ public final class CoachService: CoachSessionDelegate {
         self.glow = glow
         let callWindows = callWindows ?? CallWindowTracker(config: config)
         self.callWindows = callWindows
-        locateScreen = { appKey, fallback in CallDisplayLocator.screen(callWindow: callWindows.target(appKey: appKey), fallback: fallback) }
         let settings = TriggerSettings(config: config, anyApp: anyApp, ownPid: getpid(), ownBundleId: ownBundleId,
                                        excludedBundleIds: excludedBundleIds, allowlist: allowlist)
         session = CoachSession(config: config, engine: engine, mic: mic, call: call ?? CallCapture(config: config),
@@ -87,6 +88,9 @@ public final class CoachService: CoachSessionDelegate {
             let keys = Set(self.session.trigger.settings.allowlist.map { $0.lowercased() } + [s?.appKey].compactMap { $0 })
             self.callWindows.update(session: s.flatMap { s in s.appKey.map { (appKey: $0, startedAt: s.startedAt) } }, appKeys: keys,
                                     browserKeys: browserKeys, hints: hints?.windowHints ?? [:])
+        }
+        locateScreen = { [weak self] appKey, fallback in
+            CallDisplayLocator.screen(callWindow: callWindows.target(appKey: appKey), fallback: fallback, screens: self?.screenFrames())
         }
         glow.placement = { [weak self] in
             guard let self else { return .init(screen: nil) }
