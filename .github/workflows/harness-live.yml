@@ -12,6 +12,11 @@ on:
         description: "One scenario name (blank runs all; see lm-harness --list)"
         required: false
         default: ""
+      judge:
+        description: "Also run the not_listening judge (off: 0 judge calls)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -27,12 +32,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: openai-live
-    container: swift:6.2-noble
+    # swift:6.2-noble, pinned by digest.
+    container: swift:6.2-noble@sha256:3459518b2e723a7c363d0f8cfa44fc796c77ecd8c18e92fd10e6f92dd78c0b12
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Toolchain
@@ -47,14 +53,16 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SCENARIO: ${{ inputs.scenario }}
+          JUDGE: ${{ inputs.judge }}
         run: |
           args=(--live --out "$GITHUB_WORKSPACE/harness-live")
           if [ -n "$SCENARIO" ]; then args+=(--scenario "$SCENARIO"); fi
+          if [ "$JUDGE" = "true" ]; then args+=(--judge); else args+=(--no-judge); fi
           swift run --skip-build lm-harness "${args[@]}"
       - name: Results in the job summary
         if: always()
         run: cat "$GITHUB_WORKSPACE/harness-live/results.md" >> "$GITHUB_STEP_SUMMARY" || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: harness-live-results

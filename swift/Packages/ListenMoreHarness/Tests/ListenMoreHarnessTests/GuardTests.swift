@@ -118,6 +118,12 @@ final class GuardTests: XCTestCase {
         XCTAssertTrue(live.contains("if: github.actor == github.repository_owner && github.triggering_actor == github.repository_owner"))
         XCTAssertTrue(live.contains("environment: openai-live"))
         XCTAssertTrue(live.contains("--live"))
+        // The paid job runs pinned code: the container by digest, every action by full commit SHA.
+        let uses = live.components(separatedBy: "\n").filter { $0.contains("uses:") }
+        XCTAssertGreaterThanOrEqual(uses.count, 2)
+        for u in uses { XCTAssertNotNil(u.range(of: #"uses: [\w./-]+@[0-9a-f]{40}( |$)"#, options: .regularExpression), u) }
+        XCTAssertNotNil(live.range(of: #"container: [\w./:-]+@sha256:[0-9a-f]{64}"#, options: .regularExpression))
+        XCTAssertTrue(live.contains("--no-judge"), "0 judge calls unless the judge input is set")
         for f in try FileManager.default.contentsOfDirectory(atPath: wf.path) where f.hasSuffix(".yml") {
             let text = try String(contentsOf: wf.appendingPathComponent(f), encoding: .utf8)
             XCTAssertFalse(text.contains("pull_request_target"), "\(f) uses pull_request_target")
