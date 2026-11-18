@@ -52,6 +52,24 @@ final class LiveRun2Tests: XCTestCase {
         XCTAssertEqual(Checks.evaluate(r).check("speaker-id")?.passed, false)
     }
 
+    /// A caption the host got but the caption feed never showed is a named mismatch, not a pass: the
+    /// stream and the caption's speaker are right, the feed just doesn't have it.
+    func testCaptionMissingFromTheFeedIsAMismatch() throws {
+        var r = try muteRecord()
+        let a1 = r.timeline.line("a1")!
+        let text = "let me share where the migration stands before we decide anything"
+        r.sockets.segments = [TranscribedSegment(stream: .call, committedAt: a1.end + 0.2, transcribedAt: a1.end + 0.8, text: text)]
+        r.captions = [CaptionRecord(t: a1.end + 0.8, speaker: .others, text: text, isFinal: true)]
+        r.captionViews = [CaptionView(t: a1.end + 0.8, rows: [.init(label: "Them", speaker: .others, text: text)])]
+        XCTAssertEqual(Scoring.speakers(r).correct, 1, "shown in the feed: correct")
+        r.captionViews = [CaptionView(t: a1.end + 0.8, rows: [.init(label: "Them", speaker: .others, text: "something else entirely")])]
+        let missingRow = Scoring.speakers(r)
+        XCTAssertEqual(missingRow.correct, 0)
+        XCTAssertTrue(missingRow.mismatches.first?.contains("its caption is missing from the caption feed") == true, missingRow.mismatches.joined())
+        r.captionViews = []
+        XCTAssertEqual(Scoring.speakers(r).correct, 0, "no feed update at all for that caption")
+    }
+
     /// A wrong attribution names the segment, so a live report says which one.
     func testMismatchIsNamed() throws {
         var r = try muteRecord()
