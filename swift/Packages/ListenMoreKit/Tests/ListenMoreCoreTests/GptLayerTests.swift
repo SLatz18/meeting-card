@@ -101,7 +101,7 @@ final class GptClientTests: XCTestCase {
         let http = FakeHTTP()
         http.queued = [(401, Self.hostError("Use the regional host eu.api.openai.com for this project."))]
         _ = try await LiveJudge(config: config, key: APIKey("sk-test-host")!, http: http, hosts: hosts).judge(prompt: "x")
-        XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl), "https://eu.api.openai.com/v1/responses")
+        XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl, scope: KeyScope(APIKey("sk-test-host")!)), "https://eu.api.openai.com/v1/responses")
         let next = LiveJudge(config: config, key: APIKey("sk-test-host")!, http: http, hosts: hosts)
         XCTAssertEqual(next.currentURL, "https://eu.api.openai.com/v1/responses")
         _ = try await next.judge(prompt: "y")
@@ -113,23 +113,26 @@ final class GptClientTests: XCTestCase {
     /// the one resend goes there (the configured host), and the learned host is forgotten.
     func testStaleLearnedHostIsRedirectedToTheConfiguredHost() async throws {
         let hosts = LearnedHosts()
-        hosts.learn("https://eu.api.openai.com/v1/responses", for: config.gpt.responsesUrl)
+        hosts.learn("https://eu.api.openai.com/v1/responses", for: config.gpt.responsesUrl, scope: KeyScope(APIKey("sk-other")!))
         let http = FakeHTTP()
         http.queued = [(401, Self.hostError("Use the regional host api.openai.com for this project."))]
         let judge = LiveJudge(config: config, key: APIKey("sk-other")!, http: http, hosts: hosts)
         _ = try await judge.judge(prompt: "x")
         XCTAssertEqual(http.requests.map { $0.url.host }, ["eu.api.openai.com", "api.openai.com"])
         XCTAssertEqual(judge.currentURL, config.gpt.responsesUrl)
-        XCTAssertNil(hosts.url(for: config.gpt.responsesUrl))
+        XCTAssertNil(hosts.url(for: config.gpt.responsesUrl, scope: KeyScope(APIKey("sk-other")!)))
     }
 
-    /// Only 401 incorrect_hostname resends. Any other reply from a learned host (a rejected key, a rate limit,
-    /// an outage) is one post and its own error, and the host is kept.
+    /// Only 401 incorrect_hostname resends. Any other reply from a learned host is one post and its own error.
+    /// A non-transient one (a rejected key) forgets the learned host for that key; a rate limit or an outage
+    /// keeps it.
     func testOnlyIncorrectHostnameResends() async {
         let learned = "https://eu.api.openai.com/v1/responses"
-        for (status, body) in [(401, Data(#"{"error":{"code":"invalid_api_key","message":"x"}}"#.utf8)), (403, Data()), (429, Data()), (500, Data())] {
+        for (status, body, kept) in [(401, Data(#"{"error":{"code":"invalid_api_key","message":"x"}}"#.utf8), false), (403, Data(), false),
+                                     (429, Data(), true), (500, Data(), true)] {
             let hosts = LearnedHosts()
-            hosts.learn(learned, for: config.gpt.responsesUrl)
+            let scope = KeyScope(APIKey("k")!)
+            hosts.learn(learned, for: config.gpt.responsesUrl, scope: scope)
             let http = FakeHTTP()
             http.queued = [(status, body)]
             do {
@@ -138,7 +141,7 @@ final class GptClientTests: XCTestCase {
             } catch {
                 XCTAssertEqual(error as? GptError, .http(status))
                 XCTAssertEqual(http.requests.count, 1, "HTTP \(status)")
-                XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl), learned)
+                XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl, scope: scope), kept ? learned : nil, "HTTP \(status)")
             }
         }
     }

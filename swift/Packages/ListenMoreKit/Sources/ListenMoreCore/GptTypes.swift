@@ -119,9 +119,14 @@ public enum GptError: Error, Equatable, CustomStringConvertible {
     /// The configured Responses host answered 401 incorrect_hostname and the regional host it named
     /// failed too. Hosts and the inner error class only.
     case hostRejected(first: String, regional: String, inner: String)
-    /// A 401 incorrect_hostname named a host that isn't `api.openai.com` or `*.api.openai.com` over https.
+    /// A 401 incorrect_hostname named a host that isn't `api.openai.com` or `<label>.api.openai.com` over https.
     /// Nothing is sent to it. A judge error: it stops that judge's cue only.
     case untrustedHost
+    /// A 401 incorrect_hostname named only the host just used: there is nowhere else to send it.
+    case redirectToSameHost
+    /// A 401 incorrect_hostname whose one resend the call's owner refused (the switch is off, a cap is reached
+    /// or the layer stopped). Not a fault of the judge: the self-pivot lane goes on.
+    case resendRefused
 
     public var description: String {
         switch self {
@@ -130,6 +135,8 @@ public enum GptError: Error, Equatable, CustomStringConvertible {
         case .notConnected: return "not connected"
         case .budgetExhausted: return "budget cap reached"
         case .untrustedHost: return "responses host redirect to a host that is not an OpenAI API host; set gpt.responses_url"
+        case .redirectToSameHost: return "responses host redirect names the host just used; set gpt.responses_url"
+        case .resendRefused: return "responses host redirect not followed (resend not allowed)"
         case let .hostRejected(first, regional, inner):
             return "responses host \(first) rejected the key (incorrect_hostname) and the regional host \(regional) failed too (\(inner)); set gpt.responses_url"
         }
@@ -140,6 +147,24 @@ public enum GptError: Error, Equatable, CustomStringConvertible {
         if let g = error as? GptError { return g.description }
         if let u = error as? URLError { return "URLError \(u.code.rawValue)" }
         return String(describing: type(of: error))
+    }
+
+    /// Redirect-path errors: the cue judge stops judging for them (never the layer), and the self-pivot lane
+    /// stops for all but `resendRefused`.
+    public var isRedirectProblem: Bool {
+        switch self {
+        case .untrustedHost, .redirectToSameHost, .resendRefused, .hostRejected: return true
+        case .http, .badResponse, .notConnected, .budgetExhausted: return false
+        }
+    }
+
+    /// The learned host (if the call used one) is no good for this key: forget it.
+    var isHostFault: Bool {
+        switch self {
+        case .untrustedHost, .redirectToSameHost, .resendRefused, .hostRejected: return true
+        case .http(let code): return !(code == 429 || code >= 500)
+        case .badResponse, .notConnected, .budgetExhausted: return false
+        }
     }
 
     /// Port of `is_transient`: network blips and overload skip one verdict instead of stopping the layer.

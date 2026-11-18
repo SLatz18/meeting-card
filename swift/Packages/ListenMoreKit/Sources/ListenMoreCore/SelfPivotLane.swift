@@ -43,7 +43,16 @@ public final class SelfPivotLedger: @unchecked Sendable {
     }
 
     func recordCall() { lock.withLock { _judgeCalls += 1 } }
-    func recordPost() { lock.withLock { _posts += 1 } }
+
+    /// Counts one more post if judging hasn't stopped and the call is under `cap` posts and `usdCap` of spend;
+    /// the check and the count are one step under one lock, so concurrent callers can't both take the last post.
+    func tryRecordPost(cap: Int, usdCap: Double) -> Bool {
+        lock.withLock {
+            guard _stop == nil, _posts < cap, _usd < usdCap else { return false }
+            _posts += 1
+            return true
+        }
+    }
     func addUsd(_ usd: Double) { lock.withLock { _usd += usd } }
     /// The first reason sticks.
     func stop(_ reason: SelfPivotStop) { lock.withLock { if _stop == nil { _stop = reason } } }
@@ -191,12 +200,11 @@ final class SelfPivotLane {
             return nil
         }
         if ledger.stop == nil && ledger.usd >= gpt.selfPivotBudgetUsdPerCall { ledger.stop(.budgetCap) }
-        guard ledger.stop == nil, ledger.posts < gpt.selfPivotMaxJudgeCallsPerCall else {
+        guard ledger.tryRecordPost(cap: gpt.selfPivotMaxJudgeCallsPerCall, usdCap: gpt.selfPivotBudgetUsdPerCall) else {
             counters.capped += 1
             return nil
         }
         ledger.recordCall()
-        ledger.recordPost()
         runPosts.add()
         counters.calls += 1
         lastJudgeAt = now
@@ -204,25 +212,27 @@ final class SelfPivotLane {
     }
 
     /// The posts of the call `begin` just allowed (its first post is already counted). The judge asks the
-    /// gate before its one resend: allowed only while the switch is on, judging hasn't stopped and the call is
-    /// under both caps, and then the resend is counted as a post.
-    func newPosts() -> JudgePosts {
+    /// gate before its one resend: allowed only while the layer is on (`layerOpen`, set on the loop), the switch
+    /// is on, judging hasn't stopped and the call is under both caps; the resend is then counted as a post in
+    /// the same step. A refusal is `GptError.resendRefused`, which doesn't stop the lane.
+    func newPosts(layerOpen: @escaping @Sendable () -> Bool) -> JudgePosts {
         let ledger = ledger, gpt = gpt, allowed = allowed, tally = runPosts
-        return JudgePosts {
-            guard allowed(), ledger.stop == nil, ledger.posts < gpt.selfPivotMaxJudgeCallsPerCall,
-                  ledger.usd < gpt.selfPivotBudgetUsdPerCall else { return false }
-            ledger.recordPost()
+        return JudgePosts(resendGate: {
+            guard layerOpen(), allowed(),
+                  ledger.tryRecordPost(cap: gpt.selfPivotMaxJudgeCallsPerCall, usdCap: gpt.selfPivotBudgetUsdPerCall) else { return false }
             tally.add()
             return true
-        }
+        })
     }
 
-    /// A self-pivot judge call finished. Errors stop self-pivot judging only (for the rest of the call).
+    /// A self-pivot judge call finished. Errors stop self-pivot judging only (for the rest of the call), except a
+    /// refused resend (the switch was off or a cap was reached; the lane's own checks handle the next candidate).
     func finish(_ req: Request, result: Result<(JudgeResult, JudgeUsage), Error>, cost: inout CostTracker,
                 now: TimeInterval) -> GptCore.Offer? {
         switch result {
         case .failure(let error):
             counters.failures += 1
+            if case .resendRefused? = error as? GptError { return nil }
             if GptError.isTransient(error) {
                 transientErrors += 1
                 if transientErrors >= gpt.judgeMaxTransientErrors { ledger.stop(.judgeError) }

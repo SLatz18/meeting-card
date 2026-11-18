@@ -23,6 +23,15 @@ import Foundation
 ///
 /// `GptLayer` drives it with real sockets and timers; a test or parity harness can drive it on a
 /// simulated clock. Transcript text stays in RAM.
+/// Whether the layer is still on, for a judge's task to read: set on the loop, read from any thread.
+final class OpenFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var open = true
+
+    var isOpen: Bool { lock.withLock { open } }
+    func set(_ v: Bool) { lock.withLock { open = v } }
+}
+
 public final class GptCore {
     public enum TxAction: Equatable {
         case send(Speaker, [Float])
@@ -155,8 +164,12 @@ public final class GptCore {
     public private(set) var judgeInputTokens = 0
     public private(set) var judgeOutputTokens = 0
     public private(set) var judgeModel: String?
-    /// HTTP posts the cue judge made (see `JudgePosts`).
-    public private(set) var cuePosts = 0
+    /// HTTP posts the cue judge made (see `JudgePosts`), counted as each goes out.
+    private let cuePostTally = PostTally()
+    /// Read by the judges' resend gates: the layer is on and the layer budget isn't spent (`syncGates`); the cue
+    /// judge's also needs cue judging active.
+    private let selfPivotOpen = OpenFlag()
+    private let cueOpen = OpenFlag()
     public private(set) var callSeconds = 0.0
     private var failuresInARow = 0
     private let judges: Bool
@@ -207,7 +220,7 @@ public final class GptCore {
                         selfPivotSwitchedOff: selfPivot.counters.switchedOff, selfPivotFailures: selfPivot.counters.failures,
                         selfPivotStop: selfPivot.ledger.stop, selfPivotJudgeUsd: cost.selfPivotJudgeUsd,
                         selfPivotInputTokens: cost.selfPivotInTok, selfPivotOutputTokens: cost.selfPivotOutTok,
-                        selfPivotCallUsd: selfPivot.ledger.usd, otherJudgeCalls: cost.judgeCalls - cost.selfPivotCalls, otherJudgePosts: cuePosts)
+                        selfPivotCallUsd: selfPivot.ledger.usd, otherJudgeCalls: cost.judgeCalls - cost.selfPivotCalls, otherJudgePosts: cuePostTally.value)
     }
 
     /// A self-pivot judge for the configured provider is there (`JudgeProviders.selfPivotJudge`).
@@ -220,10 +233,26 @@ public final class GptCore {
     public func stopJudging() {
         judgeActive = false
         pending = nil
+        syncGates()
     }
 
-    public func recordCuePosts(_ n: Int) {
-        cuePosts += n
+    /// The posts of a cue judge call (counted as each goes out; its resend asks `cueOpen`).
+    func cuePosts() -> JudgePosts {
+        let open = cueOpen, tally = cuePostTally
+        return JudgePosts(resendGate: { open.isOpen }, onSent: { tally.add() })
+    }
+
+    /// Brings the resend gates up to date; the loop calls it after every step and each state change calls it too.
+    func syncGates() {
+        let live = enabled && !cost.exhausted
+        selfPivotOpen.set(live)
+        cueOpen.set(live && judgeActive)
+    }
+
+    /// The layer is closing: no judge resends after this.
+    func closeGates() {
+        selfPivotOpen.set(false)
+        cueOpen.set(false)
     }
 
     public func recordJudgeLatency(ms: Int) {
@@ -237,6 +266,7 @@ public final class GptCore {
         pivot.clear()
         selfPivot.clear()
         if stopReason == nil { stopReason = reason }
+        syncGates()
     }
 
     private func budgetStop() {
@@ -386,6 +416,7 @@ public final class GptCore {
 
     /// The prompt to send, or nil when the budget is spent (the layer stops).
     public func beginJudge(_ req: JudgeRequest, now: TimeInterval) -> String? {
+        guard enabled, judgeActive else { return nil }
         if cost.exhausted {
             budgetStop()
             return nil
@@ -402,6 +433,7 @@ public final class GptCore {
         case .gpt:
             return beginJudge(req, now: now).map { JudgeInput(prompt: $0, window: []) }
         case .typesafe:
+            guard enabled, judgeActive else { return nil }
             if cost.exhausted {
                 budgetStop()
                 return nil
@@ -464,11 +496,11 @@ public final class GptCore {
     public func finishJudge(_ req: JudgeRequest, result: Result<(JudgeResult, JudgeUsage), Error>, now: TimeInterval) -> Offer? {
         switch result {
         case .failure(let error):
-            if case .untrustedHost? = error as? GptError {
+            if let g = error as? GptError, g.isRedirectProblem {
                 judgeFailures += 1
-                lastJudgeFailure = .http(401)
+                lastJudgeFailure = .untrustedHost
                 if judgeActive {
-                    judgeStopReason = .http(401)
+                    judgeStopReason = .untrustedHost
                     stopJudging()
                 }
             } else if GptError.isTransient(error) {
@@ -536,7 +568,8 @@ public final class GptCore {
 
     /// The posts of the self-pivot call `beginSelfPivot` just allowed.
     func selfPivotPosts() -> JudgePosts {
-        selfPivot.newPosts()
+        let open = selfPivotOpen
+        return selfPivot.newPosts(layerOpen: { open.isOpen })
     }
 
     /// The prompt to send, or nil. The call's budget cap stops the whole layer, as for the cue judge.
@@ -579,7 +612,7 @@ public final class GptLayer: @unchecked Sendable {
         case micMuted(Bool)
         case transcript(TranscriptEvent)
         case runJudge(GptCore.JudgeRequest)
-        case judgeDone(GptCore.JudgeRequest, Result<JudgeReply, Error>, latencyMs: Int, posts: Int)
+        case judgeDone(GptCore.JudgeRequest, Result<JudgeReply, Error>, latencyMs: Int)
         case runSelfPivot(SelfPivotLane.Request)
         case selfPivotDone(SelfPivotLane.Request, Result<(JudgeResult, JudgeUsage), Error>, latencyMs: Int)
         case snapshot(CheckedContinuation<Snapshot, Never>)
@@ -674,8 +707,9 @@ public final class GptLayer: @unchecked Sendable {
         self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped, onJudgeStopped: onJudgeStopped,
                   onCaption: onCaption, onMeter: onMeter, onClearRejected: onClearRejected,
                   provider: JudgeProviders.make(config: config, openAIKey: key, judgeKey: judgeKey, http: transports.http,
-                                                scheduler: transports.scheduler),
-                  selfPivotJudge: JudgeProviders.selfPivotJudge(config: config, openAIKey: key, http: transports.http),
+                                                scheduler: transports.scheduler, hosts: transports.hosts),
+                  selfPivotJudge: JudgeProviders.selfPivotJudge(config: config, openAIKey: key, http: transports.http,
+                                                                hosts: transports.hosts),
                   call: call, selfPivotAllowed: selfPivotAllowed,
                   scheduler: transports.scheduler) { speaker, onEvent in
             LiveTranscriber(config: config, key: key, speaker: speaker, connector: transports.webSocket, onEvent: onEvent)
@@ -747,9 +781,8 @@ public final class GptLayer: @unchecked Sendable {
             core.fail(msg)
         case .runJudge(let req):
             runJudge(req)
-        case let .judgeDone(req, result, latencyMs, posts):
+        case let .judgeDone(req, result, latencyMs):
             core.recordJudgeLatency(ms: latencyMs)
-            core.recordCuePosts(posts)
             for o in core.finishJudge(req, reply: result, now: now()) { offer(o.label, o.t, o.refT, o.confidence) }
             onMeter?(core.cost.reading)
             if let next = core.judgeEnded() { schedule(next) }
@@ -763,6 +796,7 @@ public final class GptLayer: @unchecked Sendable {
         case .snapshot(let c):
             c.resume(returning: core.snapshot)
         case .close(let c):
+            core.closeGates()
             tasks.forEach { $0.cancel() }
             tasks.removeAll()
             await closeTranscribers()
@@ -770,6 +804,7 @@ public final class GptLayer: @unchecked Sendable {
             c.resume()
             return true
         }
+        core.syncGates()
         if core.closeTranscribersRequested {
             core.closeTranscribersRequested = false
             await closeTranscribers()
@@ -871,7 +906,7 @@ public final class GptLayer: @unchecked Sendable {
             if let next = core.judgeEnded() { schedule(next) }
             return
         }
-        let posts = JudgePosts()
+        let posts = core.cuePosts()
         spawn { [scheduler, inbox] in
             let start = scheduler.monotonic()
             let result: Result<JudgeReply, Error>
@@ -881,7 +916,7 @@ public final class GptLayer: @unchecked Sendable {
                 result = .failure(error)
             }
             let ms = Int(((scheduler.monotonic() - start) * 1000).rounded())
-            inbox.yield(.judgeDone(req, result, latencyMs: ms, posts: posts.sent))
+            inbox.yield(.judgeDone(req, result, latencyMs: ms))
         }
     }
 }

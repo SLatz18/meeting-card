@@ -231,7 +231,8 @@ final class SelfPivotSingleRequestTests: XCTestCase {
     }
 
     /// The 20-call cap counts posts: with a cap of 3, a call that resends uses two, and the next call's
-    /// resend would be the fourth post, so it isn't sent.
+    /// resend would be the fourth post, so it isn't sent. A refused resend doesn't stop the lane: the cap
+    /// holds the later candidates itself.
     func testTheCapCountsEveryPostIncludingResends() async throws {
         var c = config!
         c.text.pivotRearmS = 0
@@ -246,11 +247,12 @@ final class SelfPivotSingleRequestTests: XCTestCase {
             }
         }
         let snap = await runLayer(pivots(4, every: 30), config: c, selfPivotJudge: selfPivotJudge(http, config: c), count: 4, until: 125,
-                                  settle: { $0.selfPivotStop != nil })
+                                  settle: { $0.selfPivotFailures >= 1 && $0.selfPivotCapped >= 2 })
         XCTAssertEqual(http.hosts.count, 3, "post 1 and its resend, then post 3 whose resend would be over the cap")
         XCTAssertEqual(snap.selfPivotCallPosts, 3)
         XCTAssertEqual(snap.selfPivotJudgeCalls, 2)
-        XCTAssertEqual(snap.selfPivotStop, .judgeError)
+        XCTAssertNil(snap.selfPivotStop, "a refused resend doesn't stop self-pivot")
+        XCTAssertEqual(snap.selfPivotCapped, 2)
     }
 
     /// The spend cap counts the resend's usage: the one call that resends spends past a tiny cap, and
@@ -336,7 +338,7 @@ final class SelfPivotSingleRequestTests: XCTestCase {
         XCTAssertEqual(snap.otherJudgePosts, 1)
         XCTAssertFalse(snap.judgeActive)
         XCTAssertTrue(snap.enabled, "transcription and captions go on")
-        XCTAssertEqual(snap.judgeStopReason, .http(401))
+        XCTAssertEqual(snap.judgeStopReason, .untrustedHost)
     }
 
     // MARK: LiveJudge, both specs, with a delayed stub
@@ -387,7 +389,7 @@ final class SelfPivotSingleRequestTests: XCTestCase {
                 _ = try await judge(denied).judge(prompt: "x", posts: deniedPosts)
                 XCTFail("\(name): expected an error")
             } catch {
-                XCTAssertEqual(error as? GptError, .http(401), name)
+                XCTAssertEqual(error as? GptError, .resendRefused, name)
             }
             XCTAssertEqual(denied.hosts.count, 1, "\(name): the owner's gate stops the resend")
             XCTAssertEqual(deniedPosts.sent, 1, name)
@@ -397,7 +399,7 @@ final class SelfPivotSingleRequestTests: XCTestCase {
                 _ = try await judge(sameHost).judge(prompt: "x")
                 XCTFail("\(name): expected an error")
             } catch {
-                XCTAssertEqual(error as? GptError, .http(401), name)
+                XCTAssertEqual(error as? GptError, .redirectToSameHost, name)
             }
             XCTAssertEqual(sameHost.hosts.count, 1, "\(name): no resend to the host that just answered")
         }
@@ -410,11 +412,11 @@ final class SelfPivotSingleRequestTests: XCTestCase {
         open.open()
         let failing = DelayedHTTP(latch: open) { _ in DelayedHTTP.wrongHost() }
         _ = try? await LiveJudge(config: config, key: key, http: failing, hosts: hosts, spec: .selfPivot).judge(prompt: "x")
-        XCTAssertNil(hosts.url(for: config.gpt.responsesUrl), "a failed resend teaches nothing")
+        XCTAssertNil(hosts.url(for: config.gpt.responsesUrl, scope: KeyScope(key)), "a failed resend teaches nothing")
         let working = DelayedHTTP(latch: open) { n in n == 1 ? DelayedHTTP.wrongHost() : DelayedHTTP.ok("none") }
         let judge = LiveJudge(config: config, key: key, http: working, hosts: hosts, spec: .selfPivot)
         _ = try await judge.judge(prompt: "x")
-        XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl), "https://eu.api.openai.com/v1/responses")
+        XCTAssertEqual(hosts.url(for: config.gpt.responsesUrl, scope: KeyScope(key)), "https://eu.api.openai.com/v1/responses")
         _ = try await judge.judge(prompt: "y")
         XCTAssertEqual(working.hosts, ["api.openai.com", "eu.api.openai.com", "eu.api.openai.com"])
     }
@@ -439,17 +441,29 @@ final class SelfPivotSingleRequestTests: XCTestCase {
                           "https://.api.openai.com/v1", "https://-.api.openai.com/v1", "https://api.openai.com./v1"] {
             XCTAssertFalse(OpenAIHost.isTrusted(lookalike), "look-alike: \(lookalike)")
         }
+        for deeper in ["https://a.b.api.openai.com/v1/responses", "https://a.b.c.api.openai.com", "https://eu.us.api.openai.com/v1/responses"] {
+            XCTAssertFalse(OpenAIHost.isTrusted(deeper), "deeper subdomain: \(deeper)")
+            XCTAssertFalse(OpenAIHost.isTrustedHost(URL(string: deeper)?.host ?? ""), deeper)
+        }
+        for odd in ["https://a_b.api.openai.com/v1", "https://api.openai.com%2eevil.example/v1", "https://eu .api.openai.com/v1",
+                    "https://API.OPENAI.COM.evil.example/v1", "https://a.api.openai.com.evil.example/",
+                    "https://openai.com.api.openai.com.cn/", "https://api.openai.com:0/v1"] {
+            XCTAssertFalse(OpenAIHost.isTrusted(odd), "odd host: \(odd)")
+        }
+        XCTAssertTrue(OpenAIHost.isTrustedHost("eu.api.openai.com"))
+        XCTAssertFalse(OpenAIHost.isTrustedHost("a.b.api.openai.com"))
+        XCTAssertFalse(OpenAIHost.isTrustedHost("api.openai.com.evil.example"))
     }
 
     func testLearnedHostsKeepOnlyTrustedHosts() {
         let hosts = LearnedHosts()
         let configured = config.gpt.responsesUrl
         for bad in ["http://eu.api.openai.com/v1/responses", "https://api.openai.com.evil.example/v1/responses", "https://evil.example/v1/responses"] {
-            hosts.learn(bad, for: configured)
-            XCTAssertNil(hosts.url(for: configured), bad)
+            hosts.learn(bad, for: configured, scope: KeyScope(key))
+            XCTAssertNil(hosts.url(for: configured, scope: KeyScope(key)), bad)
         }
-        hosts.learn("https://eu.api.openai.com/v1/responses", for: configured)
-        XCTAssertEqual(hosts.url(for: configured), "https://eu.api.openai.com/v1/responses")
+        hosts.learn("https://eu.api.openai.com/v1/responses", for: configured, scope: KeyScope(key))
+        XCTAssertEqual(hosts.url(for: configured, scope: KeyScope(key)), "https://eu.api.openai.com/v1/responses")
     }
 
     /// What a 401 incorrect_hostname names: a trusted host, a look-alike (untrusted), or no API host at all.
@@ -464,6 +478,22 @@ final class SelfPivotSingleRequestTests: XCTestCase {
         XCTAssertEqual(named("Use api.example.com"), .none)
         XCTAssertEqual(named("Use the regional host", status: 401), .none)
         XCTAssertEqual(named("Use eu.api.openai.com", status: 403), .none)
+        XCTAssertEqual(named("Use a.b.api.openai.com instead"), .untrusted, "a deeper subdomain isn't trusted")
+    }
+
+    /// The first trusted host named that differs from the host just used; the host just used is never the target,
+    /// and a look-alike beside a trusted host doesn't block it.
+    func testNamedHostPicksTheFirstTrustedHostThatDiffers() {
+        func named(_ message: String, current: String?) -> LiveJudge.NamedHost {
+            LiveJudge.namedHost(status: 401, body: GptClientTests.hostError(message), current: current)
+        }
+        XCTAssertEqual(named("Use eu.api.openai.com or us.api.openai.com", current: "api.openai.com"), .trusted("eu.api.openai.com"))
+        XCTAssertEqual(named("Not api.openai.com, use us.api.openai.com", current: "api.openai.com"), .trusted("us.api.openai.com"))
+        XCTAssertEqual(named("Use eu.api.openai.com or us.api.openai.com", current: "eu.api.openai.com"), .trusted("us.api.openai.com"))
+        XCTAssertEqual(named("Use api.openai.com.evil.example, or eu.api.openai.com", current: "api.openai.com"), .trusted("eu.api.openai.com"))
+        XCTAssertEqual(named("Use eu.api.openai.com", current: "eu.api.openai.com"), .sameHost)
+        XCTAssertEqual(named("Use EU.api.openai.com", current: "eu.api.openai.com"), .sameHost)
+        XCTAssertEqual(named("Use api.openai.com.evil.example", current: "api.openai.com"), .untrusted)
     }
 
     /// The one resend goes only to an https OpenAI API host; otherwise it is a judge error with one post.

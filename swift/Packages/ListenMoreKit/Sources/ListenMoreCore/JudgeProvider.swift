@@ -51,6 +51,9 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
     case timeout
     case transport
     case badResponse
+    /// The OpenAI judge was told to use another host that can't be used (not an OpenAI API host, or the
+    /// redirect failed): it stops judging, with no more posts. Not a TypeSafe failure.
+    case untrustedHost
 
     public var description: String {
         switch self {
@@ -58,6 +61,7 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
         case .timeout: "timeout"
         case .transport: "transport error"
         case .badResponse: "bad response"
+        case .untrustedHost: "untrusted host"
         }
     }
 
@@ -75,6 +79,7 @@ public enum JudgeFailure: Error, Equatable, Sendable, CustomStringConvertible {
         case .timeout: return .timeout
         case .transport: return .unreachable
         case .badResponse: return .badReply
+        case .untrustedHost: return .untrustedHost
         }
     }
 
@@ -101,6 +106,8 @@ public enum JudgeFailureKind: String, CaseIterable, Equatable, Sendable {
     case timeout
     case unreachable
     case badReply
+    /// `JudgeFailure.untrustedHost`.
+    case untrustedHost
 }
 
 /// One state-based provider call. Content-free: labels, confidences, counts and the configured price.
@@ -180,10 +187,10 @@ public enum JudgeProviders {
     /// without a TypeSafe key: then nothing is judged, and transcription and the transcript rules keep
     /// running (there is no fallback to another provider).
     public static func make(config: ListenMoreConfig, openAIKey: APIKey, judgeKey: APIKey?, http: HTTPTransport,
-                            scheduler: GptScheduler) -> JudgeProvider? {
+                            scheduler: GptScheduler, hosts: LearnedHosts = .shared) -> JudgeProvider? {
         switch config.judge.provider {
         case .gpt:
-            return GptJudgeProvider(LiveJudge(config: config, key: openAIKey, http: http))
+            return GptJudgeProvider(LiveJudge(config: config, key: openAIKey, http: http, hosts: hosts))
         case .typesafe:
             guard let judgeKey else { return nil }
             return TypeSafeJudge(config: config.judge.typesafe, key: judgeKey, http: http, clock: scheduler)

@@ -135,6 +135,16 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertTrue(try read("App/CoachController.swift").contains("var judgeStopped: JudgeFailure? { previewJudgeStop ?? service?.judgeStopped }"))
     }
 
+    /// A judge told to use an address MeetingCard won't send the key to stops with its own generic note: not
+    /// TypeSafe's wording, not a key or HTTP status.
+    func testUntrustedHostStopHasItsOwnGenericCopy() throws {
+        let copy = try read("App/CoachCopy.swift")
+        let line = "static let judgeUntrustedHost = \"The AI provider pointed to an address MeetingCard won't use\""
+        XCTAssertTrue(copy.contains(line))
+        XCTAssertFalse(line.contains("TypeSafe") || line.contains("key"))
+        XCTAssertTrue(copy.contains("case .untrustedHost: (why, advice) = (CoachCopy.judgeUntrustedHost, \"\")"))
+    }
+
     /// Local-only: turning on never waits for or requires a key; a stored key is checked afterwards.
     func testEnablingNeedsNoKey() throws {
         let src = try read("App/CoachController.swift")

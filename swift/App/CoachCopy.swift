@@ -58,6 +58,9 @@ enum CoachCopy {
     static let typeSafeKeySavedPlaceholder = "TypeSafe key saved in your Keychain"
     static let typeSafeKeyMissing = "Nothing is judged until you add a TypeSafe API key. The transcript rules and on-device cues still run."
 
+    /// Not tied to one provider: the judge was told to use an address MeetingCard won't send your key to.
+    static let judgeUntrustedHost = "The AI provider pointed to an address MeetingCard won't use"
+
     /// Why judging stopped: the failure's kind and status code only, never key text.
     static func judgeStopped(_ failure: JudgeFailure) -> String {
         let why: String, advice: String
@@ -70,6 +73,7 @@ enum CoachCopy {
         case .timeout: (why, advice) = ("TypeSafe didn't answer in time", "")
         case .unreachable: (why, advice) = ("Couldn't reach TypeSafe", "")
         case .badReply: (why, advice) = ("TypeSafe's reply couldn't be read", "")
+        case .untrustedHost: (why, advice) = (CoachCopy.judgeUntrustedHost, "")
         }
         var code = ""
         if case .http(let status) = failure { code = " (HTTP \(status))" }
