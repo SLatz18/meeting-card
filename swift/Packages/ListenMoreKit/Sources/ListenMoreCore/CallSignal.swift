@@ -8,6 +8,13 @@ public protocol CallSignal: AnyObject {
     /// True if helper processes of the captured app (not the app process itself) are producing
     /// output, i.e. per-app capture may be missing their audio.
     func helpersAudible(bundleIds: [String]) -> Bool
+    /// The Core Audio state behind the last `poll`, for the detection diagnostics; nil for signals
+    /// that don't read it.
+    func detectionSnapshot() -> AudioStateSnapshot?
+}
+
+public extension CallSignal {
+    func detectionSnapshot() -> AudioStateSnapshot? { nil }
 }
 
 /// Core Audio running state: an app (with its helpers) has input AND output running. Used by hosts
@@ -25,6 +32,8 @@ public final class AudioActivitySignal: CallSignal {
         let live = Set(settings.group(last).filter { $0.value.both }.keys)
         return (live, last.defaultInputRunning)
     }
+
+    public func detectionSnapshot() -> AudioStateSnapshot? { last }
 
     public func helpersAudible(bundleIds: [String]) -> Bool {
         last.processes.contains { p in

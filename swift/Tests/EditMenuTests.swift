@@ -30,6 +30,8 @@ final class EditMenuTests: XCTestCase {
         }
         XCTAssertTrue(menu.contains("item.keyEquivalentModifierMask = c.shift ? [.command, .shift] : [.command]"))
         XCTAssertTrue(menu.contains("NSApp.mainMenu = main"))
+        XCTAssertTrue(menu.contains("action: #selector(NSApplication.terminate(_:)), keyEquivalent: MenuFooter.quitKeyEquivalent"), "Cmd-Q quits from Settings too")
+        XCTAssertTrue(menu.contains("appItem.submenu = appMenu"))
         let copy = try read("App/CoachCopy.swift")
         for s in ["editMenu = \"Edit\"", "editUndo = \"Undo\"", "editRedo = \"Redo\"", "editCut = \"Cut\"", "editCopy = \"Copy\"",
                   "editPaste = \"Paste\"", "editSelectAll = \"Select All\""] {

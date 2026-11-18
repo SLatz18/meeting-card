@@ -22,8 +22,14 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let permissionNote = CoachSettingsWindow.text(CoachCopy.permissionDenied, font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
     private let keyField = NSSecureTextField()
     private let keyStatus = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.critical))
+    /// The note under the key field, as a kind (so it can be cleared when the call it names ends).
+    private var keyNoticeKind: KeyNotice?
+    private let keyNote = CoachSettingsWindow.text("", font: Theme.Settings.helperFont, color: CoachSettingsWindow.color(.secondary))
+    /// The placeholder the key field shows now (never the key), so it is redrawn only when the Keychain differs.
+    private var shownKeyPlaceholder: KeyPlaceholder?
     private let anyAppBox = NSButton(checkboxWithTitle: CoachCopy.anyApp, target: nil, action: nil)
     private let callControlsSwitch = NSSwitch()
+    private let screenshotsSwitch = NSSwitch()
     private let callControlsNote = CoachSettingsWindow.text("", font: Theme.CallControls.explainerFont,
                                                             color: CoachSettingsWindow.color(Theme.CallControls.explainerText))
     private let requestAccessButton = NSButton(title: CoachCopy.requestAccess, target: nil, action: nil)
@@ -58,6 +64,12 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let themField = NSTextField()
     private let costLabel = CoachSettingsWindow.text("", font: Theme.Captions.costFont, color: CoachSettingsWindow.color(Theme.Captions.cost))
     private var notice: CoachNotice?
+    /// What the last applied refresh showed: a refresh with nothing changed touches no view.
+    private var viewGate = ChangeGate<ViewState>()
+    /// The size the window was last fitted to: relayout and resize only when it changes.
+    private var layoutGate = ChangeGate<SettingsLayoutKey>()
+    /// Scroll to the top at the next fit: when the window is built or shown. Otherwise a fit keeps the place.
+    private var scrollToTopOnNextFit = true
     /// Snapshots: the Captions and transcript group on its own.
     private(set) var transcriptGroupView: NSView?
 
@@ -140,6 +152,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     func present() {
         window.center()
+        keyNoticeKind = nil
+        keyNote.stringValue = ""
+        scrollToTopOnNextFit = true
         update()
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
@@ -302,6 +317,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     // MARK: content
 
     private func build() {
+        scrollToTopOnNextFit = true
+        viewGate.reset()
         let swappedVisible = useWindowForMode()
         rootWidth.constant = CGFloat(windowWidth)
         root.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -329,13 +346,23 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private func fitWindow() {
         root.layoutSubtreeIfNeeded()
         let w = windowWidth, fitting = Double(root.fittingSize.height)
-        document.frame = NSRect(x: 0, y: 0, width: w, height: fitting)
         let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
         let chrome = Double(window.frameRect(forContentRect: .zero).height)
         let h = Theme.Settings.contentHeight(fitting: fitting, visibleHeight: visibleHeightOverride ?? Double(visible.height),
                                              chrome: chrome).height
+        let previous = layoutGate.applied
+        let toTop = scrollToTopOnNextFit
+        let key = SettingsLayoutKey(width: w, fitting: fitting, height: h)
+        guard layoutGate.shouldApply(key) || toTop else { return }
+        scrollToTopOnNextFit = false
+        // Where the user had scrolled to, as the distance from the top, read before the geometry changes.
+        let fromTop = previous.map {
+            SettingsScroll.offsetFromTop(originY: Double(scroll.contentView.bounds.origin.y), fitting: $0.fitting, visible: $0.height)
+        } ?? 0
+        document.frame = NSRect(x: 0, y: 0, width: w, height: fitting)
         window.setContentSize(NSSize(width: w, height: h))
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, fitting - h)))
+        let y = SettingsScroll.originY(fromTop: toTop ? 0 : fromTop, fitting: fitting, visible: h)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
         let f = window.frame
         let o = Theme.Settings.clamp(origin: (Double(f.minX), Double(f.minY)), size: (Double(f.width), Double(f.height)),
@@ -409,7 +436,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let gControls = Self.group([callControlsRow, callControlsHelp, callControlsNote, requestAccessButton])
         for v in [callControlsRow, callControlsHelp, callControlsNote] { pin(v, in: gControls) }
 
-        keyField.placeholderString = coach.hasKey ? CoachCopy.keySavedPlaceholder : CoachCopy.keyPlaceholder
+        refreshKeyField()
         keyField.font = Theme.font(Theme.Settings.itemFont)
         keyField.target = self
         keyField.action = #selector(keyEntered(_:))
@@ -419,8 +446,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         let keyRow = NSStackView(views: [keyField, lock])
         keyRow.orientation = .horizontal
         let keyHelp = Self.text(CoachCopy.keyHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
-        let g2 = Self.group([Self.text(CoachCopy.keyLabel, font: Theme.Settings.rowFont), keyRow, keyHelp, keyStatus])
-        for v in [keyRow, keyHelp, keyStatus] { pin(v, in: g2) }
+        let g2 = Self.group([Self.text(CoachCopy.keyLabel, font: Theme.Settings.rowFont), keyRow, keyHelp, keyNote, keyStatus])
+        for v in [keyRow, keyHelp, keyNote, keyStatus] { pin(v, in: g2) }
 
         let gJudge = judgeGroup()
 
@@ -440,7 +467,19 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
                                 color: Self.color(.secondary), maxWidth: Self.outerWidth)
-        return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), privacy, feedbackGroup()]
+        return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), screenshotsGroup(), privacy, feedbackGroup()]
+    }
+
+    /// "Show Coach in Screenshots": whether captures include the coach card and its captions.
+    private func screenshotsGroup() -> Group {
+        screenshotsSwitch.target = self
+        screenshotsSwitch.action = #selector(screenshotsToggled(_:))
+        screenshotsSwitch.setAccessibilityLabel(CoachCopy.screenshotsToggle)
+        let row = Self.row(Self.text(CoachCopy.screenshotsToggle, font: Theme.Settings.rowFont), screenshotsSwitch)
+        let help = Self.text(CoachCopy.screenshotsHelp, font: Theme.Settings.helperFont, color: Self.color(.secondary))
+        let g = Self.group([row, help])
+        for v in [row, help] { pin(v, in: g) }
+        return g
     }
 
     /// Last, so everything above it lays out exactly as before.
@@ -593,9 +632,32 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     // MARK: state
 
+    /// The once-a-second refresh from the controller: applies only what changed, and nothing at all when
+    /// nothing did (no view write, no relayout, no scroll).
+    func refresh() {
+        refreshKeyField()
+        guard !showingOnboarding else { return }
+        guard viewGate.shouldApply(viewState()) else { return }
+        applyState()
+        fitWindow()
+    }
+
+    /// A user action or a screenshot changed something the state doesn't see (a note, a field): apply it all.
     func update() {
         defer { fitWindow() }
+        refreshKeyField()
         guard !showingOnboarding else { return }
+        viewGate.force(viewState())
+        applyState()
+    }
+
+    private func applyState() {
+        // A note that names "this call" or "the next call" goes when that call has ended.
+        if !(coach.service?.isCapturing ?? false), let kind = keyNoticeKind, kind.clearedAtCallEnd != kind {
+            keyNoticeKind = kind.clearedAtCallEnd
+            keyNote.stringValue = keyNoticeKind.map(Self.noteText) ?? ""
+        }
+        screenshotsSwitch.state = coach.showInScreenshots ? .on : .off
         toggle.state = coach.enabled ? .on : .off
         startButton.isHidden = !(coach.enabled && (coach.indicator == .hidden || coach.indicator == .on))
         permissionNote.isHidden = !(coach.enabled && coach.service?.captureProblem == true)
@@ -605,9 +667,30 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         toggleError.stringValue = coach.enabled ? toggleMessage(coach) ?? "" : ""
         toggleError.isHidden = toggleError.stringValue.isEmpty
         keyStatus.isHidden = keyStatus.stringValue.isEmpty
+        keyNote.isHidden = keyNote.stringValue.isEmpty
         updateCallControls()
         updateJudge()
         updateTranscript()
+    }
+
+    /// Sets the key field's placeholder from the Keychain when it differs from what is shown: after a save,
+    /// after a delete, and whenever the window is shown or refreshed. Only whether a key is stored is read.
+    private func refreshKeyField() {
+        guard let next = coach.keyPresence.placeholder(shown: shownKeyPlaceholder) else { return }
+        shownKeyPlaceholder = next
+        switch next {
+        case .saved: keyField.placeholderString = CoachCopy.keySavedPlaceholder
+        case .empty: keyField.placeholderString = CoachCopy.keyPlaceholder
+        }
+    }
+
+    private static func noteText(_ notice: KeyNotice) -> String {
+        switch notice {
+        case .saved: CoachCopy.keySavedNote
+        case .savedForNextCall: CoachCopy.keySavedNextCallNote
+        case .removed: CoachCopy.keyRemovedNote
+        case .removedAfterThisCall: CoachCopy.keyRemovedThisCallNote
+        }
     }
 
     /// The toggle, and while it's on, what it still needs (checked, never asked; the Request access
@@ -632,15 +715,8 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         transcriptNote.isHidden = usable
         folderPath.stringValue = (t.folder.path as NSString).abbreviatingWithTildeInPath
         noteRows.update(visible: window.isVisible)
-        let rec = t.live.recorder
-        savingHolder.isHidden = !rec.isSaving
-        switch rec.state {
-        case .saving: transcriptStatus.stringValue = ""
-        case .saved: transcriptStatus.stringValue = rec.lastURL == nil ? "" : CoachCopy.savedLast
-        case .deleted: transcriptStatus.stringValue = CoachCopy.transcriptDeleted
-        case .failed: transcriptStatus.stringValue = CoachCopy.saveFailed
-        case .off: transcriptStatus.stringValue = rec.lastURL == nil ? "" : CoachCopy.savedLast
-        }
+        savingHolder.isHidden = !t.live.recorder.isSaving
+        transcriptStatus.stringValue = Self.transcriptStatusText(t.live.recorder)
         transcriptStatus.isHidden = transcriptStatus.stringValue.isEmpty
         deleteButton.isHidden = !t.canDelete
         let inCall = t.live.inCall
@@ -651,6 +727,88 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         }
         costLabel.stringValue = t.costLine()
         costLabel.isHidden = !usable
+    }
+
+    private static func transcriptStatusText(_ rec: TranscriptRecorder) -> String {
+        switch rec.state {
+        case .saving: ""
+        case .saved: rec.lastURL == nil ? "" : CoachCopy.savedLast
+        case .deleted: CoachCopy.transcriptDeleted
+        case .failed: CoachCopy.saveFailed
+        case .off: rec.lastURL == nil ? "" : CoachCopy.savedLast
+        }
+    }
+
+    /// Everything `applyState` reads, so a refresh can tell whether anything changed.
+    private struct ViewState: Equatable {
+        var enabled: Bool
+        var startable: Bool
+        var captureProblem: Bool
+        var anyApp: Bool
+        var showInScreenshots: Bool
+        var keyStored: Bool
+        var toggleError: String
+        var keyStatusEmpty: Bool
+        var keyNoteEmpty: Bool
+        var windowVisible: Bool
+        var capturing: Bool
+        var noMicNote: Bool
+        var callControlsOn: Bool
+        var callNeeds: CoachController.CallControlsNeeds
+        var judge: JudgeProviderKind
+        var typeSafeKeyStored: Bool
+        var judgeStopped: String
+        var captionsOn: Bool
+        var savingOn: Bool
+        var transcriptUsable: Bool
+        var folder: String
+        var folderUsable: Bool
+        var unfinished: Int
+        var isSaving: Bool
+        var transcriptStatus: String
+        var canDelete: Bool
+        var inCall: Bool
+        var labelMe: String
+        var labelThem: String
+        var cost: String
+    }
+
+    private func viewState() -> ViewState {
+        let t = coach.transcript
+        let visible = window.isVisible
+        let judge = coach.judgeProvider
+        let typeSafe = judge == .typesafe
+        return ViewState(
+            enabled: coach.enabled,
+            startable: coach.enabled && (coach.indicator == .hidden || coach.indicator == .on),
+            captureProblem: coach.enabled && coach.service?.captureProblem == true,
+            anyApp: coach.anyApp,
+            showInScreenshots: coach.showInScreenshots,
+            keyStored: coach.keyStored,
+            toggleError: coach.enabled ? toggleMessage(coach) ?? "" : "",
+            keyStatusEmpty: keyStatus.stringValue.isEmpty,
+            keyNoteEmpty: keyNote.stringValue.isEmpty,
+            windowVisible: visible,
+            capturing: coach.service?.isCapturing ?? false,
+            noMicNote: visible && NoMicNotice.showsSettingsNote(builtInMicPresent: CoreAudioRoutes().snapshot().builtInInput != nil),
+            callControlsOn: coach.callControlsOn,
+            callNeeds: visible ? coach.callControlsNeeds() : CoachController.CallControlsNeeds(),
+            judge: judge,
+            typeSafeKeyStored: coach.typeSafeKeyStored,
+            judgeStopped: (typeSafe ? coach.judgeStopped : nil).map(CoachCopy.judgeStopped) ?? "",
+            captionsOn: t.captionsOn,
+            savingOn: t.savingOn,
+            transcriptUsable: coach.transcriptKeyUsable,
+            folder: t.folder.path,
+            folderUsable: t.folderUsable,
+            unfinished: t.unfinished,
+            isSaving: t.live.recorder.isSaving,
+            transcriptStatus: Self.transcriptStatusText(t.live.recorder),
+            canDelete: t.canDelete,
+            inCall: t.live.inCall,
+            labelMe: t.live.labels.label(.me),
+            labelThem: t.live.labels.label(.others),
+            cost: t.costLine())
     }
 
     /// Under the toggle: problems with the stored key. A missing key is the GPT note, not an error.
@@ -677,6 +835,11 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
     @objc private func startNow(_ sender: Any?) { coach.startClicked(sender) }
 
+    @objc private func screenshotsToggled(_ sender: NSSwitch) {
+        coach.setShowInScreenshots(sender.state == .on)
+        update()
+    }
+
     @objc private func callControlsToggled(_ sender: NSSwitch) {
         coach.setCallControls(sender.state == .on)
         update()
@@ -692,10 +855,12 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     @objc private func keyEntered(_ sender: NSSecureTextField) {
         let text = sender.stringValue
         sender.stringValue = ""
+        let hadKey = coach.keyStored
         coach.saveKey(text) { [weak self] check in
             guard let self else { return }
             self.keyStatus.stringValue = self.message(check) ?? ""
-            self.keyField.placeholderString = self.coach.hasKey ? CoachCopy.keySavedPlaceholder : CoachCopy.keyPlaceholder
+            self.keyNoticeKind = KeyNotice.after(check, callCapturing: self.coach.service?.isCapturing ?? false, hadKey: hadKey)
+            self.keyNote.stringValue = self.keyNoticeKind.map(Self.noteText) ?? ""
             self.update()
         }
     }

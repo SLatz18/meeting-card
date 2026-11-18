@@ -203,6 +203,6 @@ final class FeedbackTests: XCTestCase {
         let settings = try read("App/CoachSettingsWindow.swift")
         XCTAssertTrue(settings.contains("coach.feedbackClicked(sender)"))
         XCTAssertTrue(settings.contains("FeedbackCopy.settingsButton"))
-        XCTAssertTrue(settings.contains("return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), privacy, feedbackGroup()]"), "the row is last")
+        XCTAssertTrue(settings.contains("return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), screenshotsGroup(), privacy, feedbackGroup()]"), "the row is last")
     }
 }

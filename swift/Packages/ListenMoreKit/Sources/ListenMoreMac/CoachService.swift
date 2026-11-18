@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import CoreGraphics
 import ListenMoreCore
 
 /// The coach for a host app, wired with the real parts: Core Audio running-state drives the trigger
@@ -73,6 +75,7 @@ public final class CoachService: CoachSessionDelegate {
                                signal: AudioActivitySignal(provider: provider), keys: keys, renderer: glow,
                                settings: settings, enabled: enabled, callState: callState)
         session.delegate = self
+        session.permissionSummary = { Self.permissionSummary() }
         glow.placement = { [weak self] in
             guard let self else { return .init(screen: nil) }
             let screen = self.locateScreen(self.session.session?.appKey, self.fallbackScreen())
@@ -128,6 +131,8 @@ public final class CoachService: CoachSessionDelegate {
     public func pause() { session.setPaused(true) }
     public func resume() { session.setPaused(false) }
     public func stop() { session.stopManual() }
+    /// The app is quitting: the session ends with reason `quit`.
+    public func quit() { session.quit() }
     /// The coach's own Mute: it stops listening to the user's mic only (`CoachSession.setMicMuted`).
     public var micMuted: Bool { session.micMuted }
     public func setMicMuted(_ muted: Bool) { session.setMicMuted(muted) }
@@ -152,9 +157,37 @@ public final class CoachService: CoachSessionDelegate {
         if start != seenSessionStart {
             if seenSessionStart != nil { onCallEnd?() }
             seenSessionStart = start
-            if start != nil { onCallStart?() }
+            if start != nil {
+                Self.logPermissions()
+                onCallStart?()
+            }
         }
         onChange?()
+    }
+
+    /// Granted when both the mic and screen recording are; unknown while the mic's answer is still pending.
+    static func permissionSummary() -> PermissionSummary {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return CGPreflightScreenCaptureAccess() ? .granted : .notGranted
+        case .denied, .restricted: return .notGranted
+        case .notDetermined: return .unknown
+        @unknown default: return .unknown
+        }
+    }
+
+    /// What the OS says about the two permissions a call needs, when a session starts. There is no public
+    /// check for System Audio Recording; a refusal shows up as a call-audio failure code instead.
+    static func logPermissions() {
+        let mic: PermissionState
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: mic = .granted
+        case .denied: mic = .denied
+        case .restricted: mic = .restricted
+        case .notDetermined: mic = .notDetermined
+        @unknown default: mic = .notDetermined
+        }
+        CoachLog.record(.permission(.microphone, mic))
+        CoachLog.record(.permission(.screenRecording, CGPreflightScreenCaptureAccess() ? .granted : .notGranted))
     }
 
     public func coachSession(_ session: CoachSession, didShow cue: Cue) { onCue?(cue) }
@@ -169,6 +202,10 @@ public final class CoachService: CoachSessionDelegate {
         case .callCaptureFailed(let stage): Log.coach.error("call capture failed, stage \(stage.rawValue, privacy: .public)")
         case .keyUnreadable: Log.coach.error("key unreadable")
         case .fallbackEngaged(let stage): Log.coach.info("capture fallback, stage \(stage.rawValue, privacy: .public)")
+        // A refused System Audio Recording permission delivers silence: put the permission states beside it.
+        case .callAudioSilent(let kind):
+            Log.coach.info("call audio silent, kind \(kind.rawValue, privacy: .public)")
+            Self.logPermissions()
         // The event type only: no audio, no text, nothing from the server's reply.
         case .transcriberClearRejected: Log.coach.info("realtime input_audio_buffer.clear rejected")
         }

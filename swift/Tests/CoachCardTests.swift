@@ -683,7 +683,7 @@ final class CoachCardTests: XCTestCase {
     // MARK: screen sharing
 
     func testEveryCoachStateIsLeftOutOfScreenShares() {
-        XCTAssertEqual(Set(CoachSurface.allCases.map(\.sharing)), [.excluded])
+        XCTAssertEqual(Set(CoachSurface.allCases.map { $0.sharing(showInScreenshots: CoachSurface.showInScreenshotsDefault) }), [.excluded], "left out by default")
         var seen: Set<String> = []
         for mode in [CoachCardState.Mode.card, .pill] {
             for nudge in [nil, CoachNudge(kind: .interrupt, tone: .rose)] {
@@ -691,7 +691,7 @@ final class CoachCardTests: XCTestCase {
                     for moving in [false, true] {
                         let state = CoachCardState(status: status, mute: Self.live, nudge: nudge, mode: mode)
                         let s = CoachSurface.surface(for: state, transitioning: moving)
-                        XCTAssertEqual(s.sharing, .excluded)
+                        XCTAssertEqual(s.sharing(showInScreenshots: false), .excluded)
                         seen.insert("\(s)")
                     }
                 }

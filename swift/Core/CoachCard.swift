@@ -543,7 +543,8 @@ public enum CoachMotion {
 
 // MARK: screen sharing
 
-/// Everything the coach card draws. All of it lives in one panel that screen shares leave out.
+/// Everything the coach card draws, captions included. All of it lives in one panel, which screenshots and
+/// screen recordings leave out unless the user turns on "Show Coach in Screenshots" in Settings.
 public enum CoachSurface: CaseIterable, Equatable, Sendable {
     case card
     case pill
@@ -554,7 +555,11 @@ public enum CoachSurface: CaseIterable, Equatable, Sendable {
 
     public enum Sharing: Equatable, Sendable { case excluded, shared }
 
-    public var sharing: Sharing { .excluded }
+    /// Whether captures include this surface: never by default, and the one Settings toggle decides for all of them.
+    public func sharing(showInScreenshots: Bool) -> Sharing { showInScreenshots ? .shared : .excluded }
+
+    /// The setting's default: the coach stays out of captures.
+    public static let showInScreenshotsDefault = false
 
     public static func surface(for state: CoachCardState, transitioning: Bool) -> CoachSurface {
         if transitioning { return .morph }

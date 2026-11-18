@@ -163,6 +163,7 @@ final class Controller: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ n: Notification) {
+        MainActor.assumeIsolated { coach?.willQuit() }
         MainActor.assumeIsolated { coach?.willTerminate() }
         log("exiting")
     }

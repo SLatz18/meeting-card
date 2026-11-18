@@ -17,11 +17,12 @@ final class CoachCardWiringTests: XCTestCase {
 
     static let cardFiles = ["App/CoachCardView.swift", "App/CoachCardPanel.swift", "App/CoachCaptions.swift"]
 
-    /// Card, pill, morph and nudges all draw in the one coach panel, whose sharingType can only be `.none`.
+    /// Card, pill, morph, nudges and captions all draw in the one coach panel, which captures leave out unless
+    /// the Settings toggle (and only it, through `SharingRegistry`) says otherwise.
     func testEveryCoachStateDrawsInThePanelScreenSharesLeaveOut() throws {
         let panel = try read("App/CoachCardPanel.swift")
-        XCTAssertTrue(panel.contains("override var sharingType: NSWindow.SharingType {\n        get { super.sharingType }\n        set { super.sharingType = .none }"))
-        XCTAssertTrue(panel.contains("p.sharingType = .none"))
+        XCTAssertFalse(panel.contains("override var sharingType"), "the lock is replaced by the setting")
+        XCTAssertTrue(panel.contains("p.sharing = .excluded"), "left out of captures by default")
         XCTAssertTrue(panel.contains("let panel = CoachCardPanel.make()"), "the presenter has one panel")
         let windows = try NSRegularExpression(pattern: #"\b(NSPanel|NSWindow|CardPanelWindow)\("#)
         for f in Self.cardFiles + ["App/CoachController.swift"] {
@@ -33,7 +34,8 @@ final class CoachCardWiringTests: XCTestCase {
         // The morph shows the reminder card's image inside the coach panel, and hides the card itself.
         XCTAssertTrue(panel.contains("outgoing.image = NSImage(cgImage: image, size: start.size)"))
         XCTAssertTrue(panel.contains("card.panel.orderOut(nil)"))
-        XCTAssertEqual(Set(CoachSurface.allCases.map(\.sharing)), [.excluded])
+        XCTAssertEqual(Set(CoachSurface.allCases.map { $0.sharing(showInScreenshots: false) }), [.excluded])
+        XCTAssertEqual(Set(CoachSurface.allCases.map { $0.sharing(showInScreenshots: true) }), [.shared])
     }
 
     /// Stop ends the coach for this call, says so to VoiceOver, and replaces Skip this call everywhere.

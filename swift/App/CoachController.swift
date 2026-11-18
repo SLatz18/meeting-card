@@ -25,6 +25,7 @@ final class CoachController: NSObject {
         static let callControls = "coach.callControls"
         static let judgeProvider = "coach.judgeProvider"
         static let cardPosition = "coach.cardPosition"
+        static let showInScreenshots = "coach.showInScreenshots"
     }
 
     /// MeetingCard's choices on top of the coach's generic config: not_listening and self_pivot nudges are off by default.
@@ -34,6 +35,10 @@ final class CoachController: NSObject {
     static let keychainService = AppIdentity.current.keychainService
 
     let defaults: UserDefaults
+    /// Local diagnostics: event names, times, device and app names, codes and counts (`CoachLog`).
+    let coachLogFile: CoachLogFile
+    /// Keeps the coach card's window in step with "Show Coach in Screenshots".
+    let sharingRegistry: SharingRegistry
     let config: ListenMoreConfig
     let keychain: KeychainStore
     /// The TypeSafe key: whatever service the OpenAI key uses, in its own account.
@@ -77,6 +82,7 @@ final class CoachController: NSObject {
     var keyProblem: KeyCheck?
     /// The coach card, made the first time it shows.
     private(set) var coachCard: CoachCardPresenter?
+    private var lastCaptionsState: CoachLogEvent?
     private var nudges = CoachNudgeHold()
     private var nudgeTimer: Timer?
     /// Shows the headphones-in-call-mode tip on the card at most once per call.
@@ -88,9 +94,15 @@ final class CoachController: NSObject {
     /// The event joined from a card: its title and end, for the saved note (memory only).
     private var joined: (title: String?, until: Date)?
 
-    init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
-         showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore()) throws {
+    /// `coachLogSink` replaces the log file as the destination of coach events: UI snapshot runs pass a discarding sink so
+    /// they never write the real log. nil (the app) writes `coachLogFile`.
+    init(defaults: UserDefaults = .standard, coachLogSink: CoachLogSink? = nil, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
+         showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore(),
+         coachLogFile: CoachLogFile = CoachLogFile(url: AppPaths.coachLog(for: .current))) throws {
         self.defaults = defaults
+        self.coachLogFile = coachLogFile
+        sharingRegistry = SharingRegistry(showInScreenshots: defaults.bool(forKey: Keys.showInScreenshots))
+        CoachLog.install(coachLogSink ?? coachLogFile)
         self.keychain = keychain
         typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
@@ -101,8 +113,14 @@ final class CoachController: NSObject {
         super.init()
         callControls.isEnabled = callControlsOn
         callControlsModel.onChange = { [weak self] in self?.refresh() }
-        keyStored = keychain.hasKey
+        _ = keyPresence.load(from: keychain)
         typeSafeKeyStored = typeSafeKeychain.hasKey
+        let info = Bundle.main.infoDictionary
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        CoachLog.record(.appStarted(version: LogToken.version(info?["CFBundleShortVersionString"] as? String),
+                                    build: LogToken.version(info?["CFBundleVersion"] as? String),
+                                    os: LogToken.version("\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)") ?? LogToken.constant("unknown")))
+        CoachLog.record(.coachEnabled(enabled))
         if enabled {
             makeService()
             checkStoredKey()
@@ -114,13 +132,27 @@ final class CoachController: NSObject {
     var anyApp: Bool { defaults.bool(forKey: Keys.anyApp) }
     var onboarded: Bool { defaults.bool(forKey: Keys.onboarded) }
     var callControlsOn: Bool { defaults.bool(forKey: Keys.callControls) }
-    var hasKey: Bool { keychain.hasKey }
+    /// Off by default: the coach card and captions stay out of screenshots and screen recordings.
+    var showInScreenshots: Bool { defaults.bool(forKey: Keys.showInScreenshots) }
+
+    /// Applies at once to the coach card's window (registry) and to reminder cards carrying the chip (refresh).
+    func setShowInScreenshots(_ on: Bool) {
+        defaults.set(on, forKey: Keys.showInScreenshots)
+        sharingRegistry.set(showInScreenshots: on)
+        CoachLog.record(.screenshotSharing(on))
+        refresh()
+    }
     /// GPT cues can run: a key is stored and OpenAI hasn't rejected it.
     var gptAvailable: Bool { keyStored && !keyGate.rejected }
     /// Captions and transcripts read the GPT cues' transcription: the coach is on with a usable key.
     var transcriptKeyUsable: Bool { enabled && gptAvailable }
-    /// Whether a key is in the Keychain, kept current by key actions (refresh runs every second).
-    var keyStored = false
+    /// Whether a key is in the Keychain: loaded once, then updated by save and remove. Refresh runs every
+    /// second and reads this, never the Keychain (reading the item returns the secret).
+    var keyPresence = KeyPresence()
+    var keyStored: Bool {
+        get { keyPresence.stored }
+        set { if newValue { keyPresence.saved() } else { keyPresence.removed() } }
+    }
     var typeSafeKeyStored = false
 
     /// The cue judge the next call uses: the user's pick, else the config's (gpt).
@@ -155,6 +187,7 @@ final class CoachController: NSObject {
     /// coach runs local cues only. A stored key is checked in the background.
     func setEnabled(_ on: Bool, completion: @escaping (KeyCheck?) -> Void) {
         defaults.set(on, forKey: Keys.enabled)
+        CoachLog.record(.coachEnabled(on))
         guard on else {
             service?.setEnabled(false)
             keyProblem = nil
@@ -170,16 +203,21 @@ final class CoachController: NSObject {
 
     /// Flags a stored key OpenAI rejects (GPT cues stay off until it is replaced); local cues are unaffected.
     func checkStoredKey(completion: @escaping (KeyCheck?) -> Void = { _ in }) {
-        keyStored = hasKey
-        guard let key = try? keychain.readKey() else {
-            keyGate.rejected = false
+        guard let key = keyPresence.load(from: keychain) else {
+            // Nothing stored, or the Keychain refused (logged with its status by `load`); either way there is
+            // nothing to ask OpenAI about, and a refusal is not "no key".
+            if !keyPresence.unreadable {
+                keyGate.record(.empty)
+                CoachLog.record(.keyCheck(.empty, source: .stored, httpStatus: nil))
+            }
             completion(nil)
             return
         }
         Task { @MainActor in
-            let check = await KeyValidator.check(key.value)
-            self.keyGate.rejected = check == .rejected
-            self.keyProblem = check == .ok ? nil : check
+            let outcome = await KeyValidator.checkWithStatus(key.value)
+            CoachLog.record(.keyCheck(outcome.check, source: .stored, httpStatus: outcome.httpStatus))
+            self.keyGate.record(outcome.check)
+            self.keyProblem = outcome.check == .ok ? nil : outcome.check
             self.refresh()
             completion(self.keyProblem)
         }
@@ -320,6 +358,12 @@ final class CoachController: NSObject {
 
     // MARK: controls
 
+    /// The app is quitting (Quit in the menu, Cmd-Q): a running session ends with reason `quit`.
+    func willQuit() {
+        service?.quit()
+        CoachLog.flush()
+    }
+
     /// `title`: the joined event's, for the saved note's name and properties until the event ends.
     func joinHint(endsAt: Date?, title: String? = nil) {
         guard enabled, let endsAt else { return }
@@ -443,14 +487,24 @@ final class CoachController: NSObject {
     func refresh() {
         let card = coachCardState()
         let chip = card == nil ? self.chip : nil
-        for c in visibleCards() { c.setCoach(chip) }
+        for c in visibleCards() { c.setCoach(chip, showInScreenshots: showInScreenshots) }
         transcript.sync(keyUsable: transcriptKeyUsable)
         transcript.observe(callConditions)
         if transcript.live.inCall { transcript.setCallInfo(callInfo()) }
+        logCaptionsState()
         if let reason = service?.gptStopped { transcript.gptStopped(reason) }
         updateCoachCard(card)
         updateStatusItem()
-        settingsWindow?.update()
+        settingsWindow?.refresh()
+    }
+
+    /// The captions and saving settings, with whether they can run, logged when any of them changes.
+    private func logCaptionsState() {
+        let event = CoachLogEvent.captionsState(captions: transcript.captionsOn, saving: transcript.savingOn,
+                                                keyUsable: transcriptKeyUsable, inCall: transcript.live.inCall)
+        guard event != lastCaptionsState else { return }
+        lastCaptionsState = event
+        CoachLog.record(event)
     }
 
     /// What the coach card shows now, or nil while the coach isn't on for a call.
@@ -504,6 +558,7 @@ final class CoachController: NSObject {
                                      resize: { [weak self] in self?.toggleMinimized() },
                                      dismissCallModeTip: { [weak self] in self?.dismissCallModeTip() })
         p.callScreen = { [weak self] in self?.service?.glowScreen }
+        sharingRegistry.register(p.panel)
         return p
     }
 
@@ -548,7 +603,27 @@ final class CoachController: NSObject {
         }
         addTranscriptItems(to: menu)
         menu.addItem(feedbackMenuItem())
+        menu.addItem(coachLogMenuItem())
+        for entry in MenuFooter.entries { menu.addItem(footerItem(entry)) }
         return menu
+    }
+
+    /// The menu's last entries: the disabled version line, then Quit.
+    private func footerItem(_ entry: MenuFooterEntry) -> NSMenuItem {
+        switch entry {
+        case .separator:
+            return .separator()
+        case .version:
+            let title = AppVersion.menuLine(label: CoachCopy.menuVersion, unknown: CoachCopy.menuVersionUnknown,
+                                            infoDictionary: Bundle.main.infoDictionary)
+            let m = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            m.isEnabled = false
+            return m
+        case .quit:
+            let m = NSMenuItem(title: CoachCopy.menuQuit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: MenuFooter.quitKeyEquivalent)
+            m.target = NSApplication.shared
+            return m
+        }
     }
 
     /// The saved transcript's entries: Saving transcript while one is written, Delete Transcript…
@@ -579,6 +654,20 @@ final class CoachController: NSObject {
         m.image = Theme.symbol(Theme.Coach.menuSymbols.feedback, Theme.FontSpec(Theme.Coach.menuSymbolSize), label: title)
         m.target = self
         return m
+    }
+
+    private func coachLogMenuItem() -> NSMenuItem {
+        let m = NSMenuItem(title: CoachCopy.menuShowCoachLog, action: #selector(showCoachLogClicked(_:)), keyEquivalent: "")
+        m.toolTip = CoachCopy.menuShowCoachLogHelp
+        m.target = self
+        return m
+    }
+
+    /// Reveals the diagnostics file in Finder (its folder before anything has been written).
+    @objc func showCoachLogClicked(_ sender: Any?) {
+        let file = coachLogFile.url
+        let target = CoachLogFile.revealTarget(fileExists: FileManager.default.fileExists(atPath: file.path), file: file)
+        NSWorkspace.shared.activateFileViewerSelecting([target])
     }
 
     @objc func deleteTranscriptClicked(_ sender: Any?) {

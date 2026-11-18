@@ -61,9 +61,11 @@ Ad-hoc is fine for trying it out. A stable self-signed identity is nicer for dai
 ## Run, quit, turn off
 
 - Start: `open ~/Applications/MeetingCardSwift.app`. The first run from `~/Applications` registers it as a login item.
-- Quit: `pkill -f MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift`.
+- Quit: choose **Quit** in the coach menu (the menu bar icon), or press ⌘Q while its Settings window is in front.
 - Stop launching at login: System Settings > General > Login Items, switch MeetingCardSwift off. The app never re-enables itself.
 - Log: `~/Library/Logs/MeetingCardSwift.log`. It records event ids, start times, counts and skip reasons, never titles, descriptions or attendees. It **does** record the meeting link a card offers and the link opened on Join, which can include a Zoom passcode, so redact links before sharing log lines.
+- Coach log: `~/Library/Logs/MeetingCardSwift-Coach.log` (the coach menu's **Show Coach Log** reveals it). Local only, for diagnosing a call with no captions. It lists event names, times, error codes and counts, plus the names of apps (bundle IDs) and **audio devices**. A device name can be one you gave it, so read the file before sharing it. Entries cover key check results and Keychain read status, why a call did or did not start, mic and call-audio start, flow and failure, permission states, transcriber open, ready, counts and error codes, and caption counts. Never transcript text, audio, your key, headers or request or response bodies. It holds at most about 1 MB plus one older file, and entries older than three days are removed.
+- Screenshots: Settings has **Show Coach in Screenshots**, off by default and saved. Off, the coach card and its captions stay out of screenshots and screen recordings; on, they can be captured (and so can show in a screen share), and the change applies to windows already open. The cue glow stays out either way. No extra permission is involved.
 
 ## Try it without a calendar
 

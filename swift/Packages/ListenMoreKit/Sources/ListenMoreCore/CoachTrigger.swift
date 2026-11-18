@@ -145,6 +145,8 @@ public enum CoachStopReason: String, Equatable, Sendable {
     /// The calendar event the user joined ended.
     case eventEnded
     case manual
+    /// The app is quitting.
+    case quit
     /// The opt-in setting was switched off.
     case disabled
 }
@@ -213,6 +215,11 @@ public struct CoachTrigger: Sendable {
 
     public var isActive: Bool { session != nil }
     public var isCapturing: Bool { session.map { !$0.held } ?? false }
+    /// Seconds each app has had its input and output running together, for the diagnostics.
+    public func startTimers(now: Double) -> [String: Double] {
+        qualifyingSince.mapValues { max(0, now - $0) }
+    }
+
     /// The session's app reports its call ended; the session itself ends `endedStopAfterS` later.
     public var callEndPending: Bool { session != nil && endedSince != nil }
 
@@ -317,6 +324,12 @@ public struct CoachTrigger: Sendable {
         session = s
         offSince = nil
         return [.start(s)]
+    }
+
+    /// The app is quitting: ends any session, so the log says why it ended.
+    public mutating func quit() -> [TriggerAction] {
+        guard session != nil else { return [] }
+        return end(.quit)
     }
 
     public mutating func manualStop() -> [TriggerAction] {

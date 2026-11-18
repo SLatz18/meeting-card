@@ -112,6 +112,10 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     public var cueHolds: [CuePolicy.Hold] { pipeline?.policy.held ?? [] }
 
     public func start(config: ListenMoreConfig, apiKey: APIKey?) {
+        start(config: config, apiKey: apiKey, keyAvailability: apiKey == nil ? .absent : .present)
+    }
+
+    public func start(config: ListenMoreConfig, apiKey: APIKey?, keyAvailability: KeyAvailability) {
         stop()
         let config = sessionConfig(config)
         self.config = config
@@ -151,6 +155,10 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
             layer.start()
             gpt = layer
             bridge = box
+            CoachLog.record(.gptLayer(enabled: true, reason: .keyPresent))
+        } else {
+            let reason: GptLayerReason = keyAvailability == .rejected ? .keyRejected : apiKey == nil ? .noKey : .noTransports
+            CoachLog.record(.gptLayer(enabled: false, reason: reason))
         }
         pipeline = CoachPipeline(config: config, gpt: bridge, participants: participants)
         isRunning = true

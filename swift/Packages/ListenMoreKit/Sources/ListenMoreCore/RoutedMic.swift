@@ -46,7 +46,7 @@ public final class RoutedMic: MicSource {
         case opened(MicPlan, applied: MicProcessing?, deviceID: UInt32?)
         case closed
         case restarted(count: Int)
-        case openFailed(MicPlan)
+        case openFailed(MicPlan, step: MicOpenStep?, status: Int?)
         /// The built-in mic delivered no sound and was set aside.
         case inputSilent(device: UInt32)
     }
@@ -186,7 +186,8 @@ public final class RoutedMic: MicSource {
             try open()
             return true
         } catch {
-            events?(.openFailed(currentPlan()))
+            let failure = error as? MicOpenFailure
+            events?(.openFailed(currentPlan(), step: failure?.step, status: failure?.status ?? CoachLog.status(of: error)))
             return false
         }
     }

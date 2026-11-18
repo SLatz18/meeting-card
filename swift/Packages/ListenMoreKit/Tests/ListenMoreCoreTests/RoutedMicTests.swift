@@ -54,6 +54,7 @@ final class FakeInput: MicInput {
 final class FakeOpener: MicInputOpening {
     var opened: [FakeInput] = []
     var failNext = false
+    var failWith: Error?
 
     var open: FakeInput? { opened.last.flatMap { $0.stopped ? nil : $0 } }
 
@@ -61,7 +62,7 @@ final class FakeOpener: MicInputOpening {
               onStopped: @escaping @Sendable () -> Void) throws -> MicInput {
         if failNext {
             failNext = false
-            throw NSError(domain: "FakeOpener", code: 1)
+            throw failWith ?? NSError(domain: "FakeOpener", code: 1)
         }
         let i = FakeInput(plan: plan, handler: handler, onStopped: onStopped)
         opened.append(i)
@@ -236,6 +237,31 @@ final class RoutedMicTests: XCTestCase {
         XCTAssertLessThanOrEqual(mic.restartCount, 3 * (180 / 30) + 3)
         XCTAssertEqual(opener.opened.filter { !$0.stopped }.count, 1, "one input open at a time")
         XCTAssertEqual(mic.plan, mic.currentPlan(), "settles on the final routes")
+    }
+
+    /// An open failure reports the step that failed and its OSStatus; one that doesn't say gets neither guessed.
+    func testOpenFailureCarriesItsStepAndStatus() throws {
+        struct StepFailure: MicOpenFailure {
+            var step: MicOpenStep
+            var status: Int?
+        }
+        let mic = make(speakers)
+        try mic.start(sampleRate: 24000) { _ in }
+        opener.failNext = true
+        opener.failWith = StepFailure(step: .engineStart, status: -10875)
+        routes.set(bluetooth)
+        clock.advance(1)
+        guard case let .openFailed(plan, step, status)? = events.last else { return XCTFail("\(String(describing: events.last))") }
+        XCTAssertEqual(plan.route, .bluetooth)
+        XCTAssertEqual(step, .engineStart)
+        XCTAssertEqual(status, -10875)
+        opener.failNext = true
+        opener.failWith = NSError(domain: "FakeOpener", code: 1)
+        routes.set(speakers)
+        clock.advance(1)
+        guard case let .openFailed(_, step2, status2)? = events.last else { return XCTFail("no failure event") }
+        XCTAssertNil(step2)
+        XCTAssertNil(status2, "a plain error is not an OSStatus")
     }
 
     func testAFailedReopenIsRetriedOnTheNextChange() throws {

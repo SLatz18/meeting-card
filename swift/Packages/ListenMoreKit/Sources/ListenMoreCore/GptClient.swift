@@ -9,6 +9,24 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     /// Drops the audio sent since the last commit: nothing is transcribed from it.
     func clear() async throws
     func close() async
+    /// What this session has sent and been told so far (numbers only), for the diagnostics file.
+    var counters: TranscriberCounters { get }
+}
+
+public extension TranscriptionSession {
+    var counters: TranscriberCounters { TranscriberCounters() }
+}
+
+/// One speaker's transcription session in numbers: audio appends and commits sent, commits the server
+/// acknowledged, transcripts it completed, and completions with no text in them.
+public struct TranscriberCounters: Equatable, Sendable {
+    public var appends = 0
+    public var commits = 0
+    public var acks = 0
+    public var completions = 0
+    public var emptyCompletions = 0
+
+    public init() {}
 }
 
 public protocol CueJudge: Sendable {
@@ -44,6 +62,10 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
     /// rejection, not a session failure.
     private var pendingClears: [String] = []
     private var clearCount = 0
+    private var _counters = TranscriberCounters()
+    private var readyLogged = false
+
+    public var counters: TranscriberCounters { lock.withLock { _counters } }
 
     public init(config: ListenMoreConfig, key: APIKey, speaker: Speaker, connector: WebSocketConnector,
                 onEvent: @escaping @Sendable (TranscriptEvent) -> Void) {
@@ -82,12 +104,16 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
 
     public func sendAudio(_ pcm16: Data) async throws {
         guard let ws = lock.withLock({ socket }) else { throw GptError.notConnected }
+        lock.withLock { _counters.appends += 1 }
         try await ws.send(Self.json(["type": "input_audio_buffer.append", "audio": pcm16.base64EncodedString()]))
     }
 
     public func commit(refT: TimeInterval) async throws {
         guard let ws = lock.withLock({ socket }) else { throw GptError.notConnected }
-        lock.withLock { commitRefs.append(refT) }
+        lock.withLock {
+            commitRefs.append(refT)
+            _counters.commits += 1
+        }
         try await ws.send(Self.json(["type": "input_audio_buffer.commit"]))
     }
 
@@ -119,7 +145,12 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
                 handle(msg)
             }
         } catch {
-            if !Task.isCancelled { onEvent(.error("realtime read: \(GptError.safe(error))")) }
+            if !Task.isCancelled {
+                let failure = CoachLog.describe(error)
+                CoachLog.record(.transcriberError(speaker: speaker, model: LogToken.model(gpt.transcribeModel),
+                                                  httpStatus: failure.httpStatus, code: failure.code))
+                onEvent(.error("realtime read: \(GptError.safe(error))"))
+            }
         }
     }
 
@@ -132,6 +163,7 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
             lock.withLock {
                 let ref = commitRefs.isEmpty ? -1 : commitRefs.removeFirst()
                 itemRef[item] = ref
+                _counters.acks += 1
             }
         case "conversation.item.input_audio_transcription.delta":
             let delta = ev["delta"] as? String ?? ""
@@ -142,7 +174,17 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
                 onEvent(.usage(speaker, (usage["seconds"] as? NSNumber)?.doubleValue ?? 0))
             }
             let ref: TimeInterval = lock.withLock { itemRef.removeValue(forKey: item) ?? -1 }
-            onEvent(.text(speaker, ev["transcript"] as? String ?? "", refT: ref))
+            let transcript = ev["transcript"] as? String ?? ""
+            lock.withLock {
+                _counters.completions += 1
+                if transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { _counters.emptyCompletions += 1 }
+            }
+            onEvent(.text(speaker, transcript, refT: ref))
+        case "session.updated", "transcription_session.updated":
+            // The server applied our session.update: the handshake is confirmed.
+            if lock.withLock({ let first = !readyLogged; readyLogged = true; return first }) {
+                CoachLog.record(.transcriberReady(speaker: speaker, model: LogToken.model(gpt.transcribeModel)))
+            }
         case "input_audio_buffer.cleared":
             lock.withLock { if !pendingClears.isEmpty { pendingClears.removeFirst() } }
         case "error":
@@ -152,7 +194,10 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
                 onEvent(.clearRejected(speaker))
                 return
             }
-            onEvent(.error("realtime error \(err["type"] as? String ?? "")/\(err["code"] as? String ?? "")"))
+            let type = err["type"] as? String ?? "", code = err["code"] as? String ?? ""
+            CoachLog.record(.transcriberError(speaker: speaker, model: LogToken.model(gpt.transcribeModel), httpStatus: nil,
+                                              code: LogToken.serverCode("\(type)/\(code)")))
+            onEvent(.error("realtime error \(type)/\(code)"))
         default:
             break
         }

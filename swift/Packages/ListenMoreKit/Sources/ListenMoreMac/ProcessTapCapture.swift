@@ -6,8 +6,8 @@ import CoreAudio
 /// data, so callers pass the helpers' objects. Needs the "System Audio Recording" permission.
 @available(macOS 14.2, *)
 final class ProcessTapCapture {
-    enum TapError: Error {
-        case status(String, OSStatus)
+    enum TapError: LoggedFailure {
+        case status(CaptureStep, OSStatus)
         case format
     }
 
@@ -22,7 +22,7 @@ final class ProcessTapCapture {
         desc.isPrivate = true
 
         var tap = AudioObjectID(kAudioObjectUnknown)
-        try check("create tap", AudioHardwareCreateProcessTap(desc, &tap))
+        try check(.createTap, AudioHardwareCreateProcessTap(desc, &tap))
         tapID = tap
 
         var formatAddress = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat,
@@ -30,7 +30,7 @@ final class ProcessTapCapture {
                                                        mElement: kAudioObjectPropertyElementMain)
         var asbd = AudioStreamBasicDescription()
         var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        try check("tap format", AudioObjectGetPropertyData(tap, &formatAddress, 0, nil, &size, &asbd))
+        try check(.tapFormat, AudioObjectGetPropertyData(tap, &formatAddress, 0, nil, &size, &asbd))
         guard let format = AVAudioFormat(streamDescription: &asbd) else { throw TapError.format }
 
         var aggregate: [String: Any] = [
@@ -47,16 +47,16 @@ final class ProcessTapCapture {
             aggregate[kAudioAggregateDeviceSubDeviceListKey] = [[kAudioSubDeviceUIDKey: outputUID]]
         }
         var agg = AudioObjectID(kAudioObjectUnknown)
-        try check("create aggregate", AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &agg))
+        try check(.createAggregate, AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &agg))
         aggregateID = agg
 
         var procID: AudioDeviceIOProcID?
-        try check("io proc", AudioDeviceCreateIOProcIDWithBlock(&procID, agg, queue) { _, input, _, _, _ in
+        try check(.ioProc, AudioDeviceCreateIOProcIDWithBlock(&procID, agg, queue) { _, input, _, _, _ in
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil) else { return }
             handler(buffer)
         })
         ioProcID = procID
-        try check("start", AudioDeviceStart(agg, procID))
+        try check(.start, AudioDeviceStart(agg, procID))
     }
 
     func stop() {
@@ -79,8 +79,10 @@ final class ProcessTapCapture {
         stop()
     }
 
-    private func check(_ step: String, _ status: OSStatus) throws {
+    private func check(_ step: CaptureStep, _ status: OSStatus) throws {
         guard status == noErr else {
+            // The one line for this failure: the session does not log a `LoggedFailure` again.
+            CoachLog.record(.callAudioFailed(stage: .processTap, step: step, domain: LogToken.constant("OSStatus"), code: Int(status)))
             stop()
             throw TapError.status(step, status)
         }
