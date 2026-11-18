@@ -485,7 +485,7 @@ public final class GptLayer: @unchecked Sendable {
     private var judgeStopReported = false
     private var transcribersClosed = false
     private let transcribeModel: LogToken
-    private var segmentCounts: [Speaker: Int] = [:]
+    private var lastCountsAt: TimeInterval?
 
     /// `transcriberFactory` builds one session per speaker and must route its events to the given callback.
     /// `onStopped` is called once, from the event loop, when the layer turns itself off; `onJudgeStopped`
@@ -587,7 +587,7 @@ public final class GptLayer: @unchecked Sendable {
             do {
                 for speaker in Speaker.allCases {
                     try await transcribers[speaker]?.start()
-                    CoachLog.record(.transcriberConnected(speaker: speaker, model: transcribeModel))
+                    CoachLog.record(.transcriberOpened(speaker: speaker, model: transcribeModel))
                 }
             } catch {
                 let failure = CoachLog.describe(error)
@@ -599,6 +599,7 @@ public final class GptLayer: @unchecked Sendable {
             core.setMeRun(meRunS)
             await perform(core.feed(.me, frame: me, vad: meVad, now: now()))
             await perform(core.feed(.others, frame: others, vad: othersVad, now: now()))
+            logCountersIfDue()
         case .local(let ev):
             core.onLocal(ev)
         case .micMuted(let muted):
@@ -607,7 +608,6 @@ public final class GptLayer: @unchecked Sendable {
             guard !(speaker == .me && core.meMuted) else { break }
             let t = now()
             let r = core.onText(speaker, text: text, refT: refT, now: t)
-            countSegment(speaker)
             onSegment?(speaker, text, r.refT, t)
             if core.enabled { onCaption?(.final(speaker, text: text)) }
             if let req = r.start { schedule(req) }
@@ -690,22 +690,33 @@ public final class GptLayer: @unchecked Sendable {
     private func closeTranscribers() async {
         guard !transcribersClosed else { return }
         transcribersClosed = true
-        logSegments()
+        logCounters()
         for (speaker, t) in transcribers {
             await t.close()
             CoachLog.record(.transcriberDisconnected(speaker: speaker))
         }
     }
 
-    /// Counts a finished caption segment (never its text): the file hears of the first one, then every twentieth.
-    private func countSegment(_ speaker: Speaker) {
-        segmentCounts[speaker, default: 0] += 1
-        let total = segmentCounts.values.reduce(0, +)
-        if total == 1 || total % 20 == 0 { logSegments() }
+    /// Each transcriber's counters every `countersInterval` seconds of audio time, so a session that connects but never
+    /// transcribes shows as appends and commits going up with no acknowledgements or completions.
+    static let countersInterval: TimeInterval = 10
+
+    private func logCountersIfDue() {
+        let t = now()
+        guard let last = lastCountsAt else {
+            lastCountsAt = t
+            return
+        }
+        guard t - last >= Self.countersInterval else { return }
+        lastCountsAt = t
+        logCounters()
     }
 
-    private func logSegments() {
-        CoachLog.record(.captionSegments(me: segmentCounts[.me] ?? 0, others: segmentCounts[.others] ?? 0))
+    private func logCounters() {
+        for speaker in Speaker.allCases {
+            guard let c = transcribers[speaker]?.counters else { continue }
+            CoachLog.record(.transcriberCounts(speaker: speaker, counters: c))
+        }
     }
 
     private func speaker(of action: GptCore.TxAction) -> Speaker {

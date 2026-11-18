@@ -161,13 +161,20 @@ public enum CoachLogEvent: Equatable, Sendable {
     /// Per-app capture heard nothing while the app's helper processes were audible, so capture moved to `stage`.
     case fallbackEngaged(stage: CaptureStage)
     case permission(PermissionKind, PermissionState)
-    case transcriberConnected(speaker: Speaker, model: LogToken)
+    /// The socket was opened and the session update sent. The server has not confirmed anything yet: see `transcriberReady`.
+    case transcriberOpened(speaker: Speaker, model: LogToken)
+    /// The server confirmed the session update, so the session is configured and will transcribe.
+    case transcriberReady(speaker: Speaker, model: LogToken)
+    case transcriberCounts(speaker: Speaker, counters: TranscriberCounters)
     case transcriberDisconnected(speaker: Speaker)
     case transcriberError(speaker: Speaker?, model: LogToken, httpStatus: Int?, code: LogToken)
     /// The socket under a transcriber failed: the HTTP status of its handshake (when it got one), the
     /// URL error code and the WebSocket close code (-1 when there is none).
     case transcriberTransport(httpStatus: Int?, urlErrorCode: Int?, closeCode: Int)
-    case captionSegments(me: Int, others: Int)
+    /// Caption events the host received over `seconds`: finished segments and partial updates (counts only).
+    case captionsReceived(seconds: Int, final: Int, partial: Int)
+    /// The captions and saving settings and whether they can run (a usable key and a call in progress).
+    case captionsState(captions: Bool, saving: Bool, keyUsable: Bool, inCall: Bool)
     case gptLayer(enabled: Bool, reason: GptLayerReason)
     case gptStopped(reason: GptStopReason)
     case judgeStopped(kind: JudgeFailureKind, httpStatus: Int?)
@@ -219,15 +226,24 @@ public enum CoachLogEvent: Equatable, Sendable {
         case .callAudioSound(let source): return line("callAudio.sound", ("source", .word(source.rawValue)))
         case .fallbackEngaged(let stage): return line("callAudio.fallbackEngaged", ("stage", .word(stage.name)))
         case .permission(let kind, let state): return line("permission", ("kind", .word(kind.rawValue)), ("state", .word(state.rawValue)))
-        case .transcriberConnected(let speaker, let model):
-            return line("transcriber.connected", ("speaker", .word(Self.name(speaker))), ("model", .token(model)))
+        case .transcriberOpened(let speaker, let model):
+            return line("transcriber.opened", ("speaker", .word(Self.name(speaker))), ("model", .token(model)))
+        case .transcriberReady(let speaker, let model):
+            return line("transcriber.ready", ("speaker", .word(Self.name(speaker))), ("model", .token(model)))
+        case .transcriberCounts(let speaker, let c):
+            return line("transcriber.counts", ("speaker", .word(Self.name(speaker))), ("appends", .number(c.appends)), ("commits", .number(c.commits)),
+                        ("acks", .number(c.acks)), ("completions", .number(c.completions)), ("empty", .number(c.emptyCompletions)))
         case .transcriberDisconnected(let speaker): return line("transcriber.disconnected", ("speaker", .word(Self.name(speaker))))
         case .transcriberError(let speaker, let model, let status, let code):
             return line("transcriber.error", ("speaker", .word(speaker.map(Self.name) ?? "unknown")), ("model", .token(model)),
                         ("http", .number(status)), ("code", .token(code)))
         case .transcriberTransport(let status, let url, let close):
             return line("transcriber.transport", ("http", .number(status)), ("urlError", .number(url)), ("close", .number(close)))
-        case .captionSegments(let me, let others): return line("captions.segments", ("me", .number(me)), ("others", .number(others)))
+        case .captionsReceived(let seconds, let final, let partial):
+            return line("captions.received", ("seconds", .number(seconds)), ("final", .number(final)), ("partial", .number(partial)))
+        case .captionsState(let captions, let saving, let keyUsable, let inCall):
+            return line("captions.state", ("captions", .flag(captions)), ("saving", .flag(saving)), ("keyUsable", .flag(keyUsable)),
+                        ("inCall", .flag(inCall)))
         case .gptLayer(let on, let reason): return line("gpt.layer", ("enabled", .flag(on)), ("reason", .word(reason.rawValue)))
         case .gptStopped(let reason): return line("gpt.stopped", ("reason", .word(reason.rawValue)))
         case .judgeStopped(let kind, let status): return line("judge.stopped", ("kind", .word(kind.rawValue)), ("http", .number(status)))

@@ -300,6 +300,26 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertFalse(sink.lines.contains { $0.contains("sk-") })
     }
 
+    /// Caption events the host receives are counted per ten seconds, final and partial apart; the words never reach the log.
+    func testCoachLogCountsCaptionsReceived() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let s = makeSession()
+        meetInDia()
+        s.tick()
+        _ = await eventually { self.engine.isRunning }
+        for _ in 0..<3 { s.deliverCaptionForTesting(.final(.others, text: "confidential budget figures")) }
+        for _ in 0..<2 { s.deliverCaptionForTesting(.partial(.me, item: "i1", text: "private remark")) }
+        clock.advance(10)
+        s.tick()
+        XCTAssertTrue(sink.lines.contains("captions.received seconds=10 final=3 partial=2"), "\(sink.lines)")
+        clock.advance(10)
+        s.tick()
+        XCTAssertTrue(sink.lines.contains("captions.received seconds=10 final=0 partial=0"), "a quiet window is logged too")
+        for line in sink.lines { XCTAssertFalse(line.contains("confidential") || line.contains("private") || line.contains("budget"), line) }
+    }
+
     func testCoachLogRecordsTheFallback() async {
         let sink = CaptureSink()
         CoachLog.install(sink)

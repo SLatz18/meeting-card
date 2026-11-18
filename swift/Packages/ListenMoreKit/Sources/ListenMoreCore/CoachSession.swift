@@ -112,6 +112,9 @@ public final class CoachSession {
     private let micGate = AudioGate()
     private var fallback = CaptureFallbackPolicy()
     private let callLevel = CallLevelMeter()
+    private var captionFinal = 0
+    private var captionPartial = 0
+    private var captionWindowStart: TimeInterval = 0
     private var detectionThrottle = DetectionLogThrottle()
     /// What the host knows about the permissions a call needs; shown beside each detection check.
     public var permissionSummary: () -> PermissionSummary = { .unknown }
@@ -325,12 +328,21 @@ public final class CoachSession {
     private func logAudioFlow() {
         guard isCapturing else { return }
         let now = wallClock()
+        if now - captionWindowStart >= AudioFlowMeter.interval { logCaptionsReceived(now: now) }
         for event in callFlow.tick(now: now) + micFlow.tick(now: now) {
             CoachLog.record(event)
             if case .callAudioSilent(_, _, let kind, _) = event {
                 delegate?.coachSession(self, didReport: .callAudioSilent(kind))
             }
         }
+    }
+
+    /// Caption events the host got in the last window: counts only, never the text.
+    private func logCaptionsReceived(now: TimeInterval) {
+        CoachLog.record(.captionsReceived(seconds: Int((now - captionWindowStart).rounded()), final: captionFinal, partial: captionPartial))
+        captionFinal = 0
+        captionPartial = 0
+        captionWindowStart = now
     }
 
     private func apply(_ actions: [TriggerAction]) {
@@ -396,6 +408,9 @@ public final class CoachSession {
         if isNewSession {
             fallback.reset()
             callLevel.reset()
+            captionFinal = 0
+            captionPartial = 0
+            captionWindowStart = wallClock()
             callFlow.start(now: wallClock())
             micFlow.start(now: wallClock())
             let key: APIKey?
@@ -498,6 +513,7 @@ public final class CoachSession {
         gate.close()
         let now = wallClock()
         for event in callFlow.finish(now: now) + micFlow.finish(now: now) { CoachLog.record(event) }
+        if captionFinal + captionPartial > 0 { logCaptionsReceived(now: now) }
         capturingBundleIds = []
         captureStage = .parentApps
         let previous = callTask
@@ -551,6 +567,10 @@ public final class CoachSession {
 
     fileprivate func caption(_ event: CaptionEvent) {
         guard isCapturing else { return }
+        switch event {
+        case .final: captionFinal += 1
+        case .partial: captionPartial += 1
+        }
         delegate?.coachSession(self, didCaption: event)
     }
 

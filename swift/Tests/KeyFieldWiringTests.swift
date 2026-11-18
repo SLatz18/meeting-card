@@ -48,4 +48,17 @@ final class KeyFieldWiringTests: XCTestCase {
         XCTAssertFalse(check.contains("try? keychain"), "a failed read is not swallowed")
         XCTAssertTrue(check.contains("keyPresence.unreadable"))
     }
+
+    /// captions.state is logged from the controller (the caption and transcript sources never log), when it changes.
+    func testCaptionsStateIsLoggedOnChangeFromTheController() throws {
+        let src = try read("App/CoachController.swift")
+        let log = try XCTUnwrap(src.components(separatedBy: "    private func logCaptionsState() {").dropFirst().first?.components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(log.contains("guard event != lastCaptionsState"))
+        XCTAssertTrue(log.contains("CoachLog.record(event)"))
+        let refresh = try XCTUnwrap(src.components(separatedBy: "    func refresh() {").dropFirst().first?.components(separatedBy: "\n    }\n").first)
+        XCTAssertTrue(refresh.contains("logCaptionsState()"))
+        for name in ["App/CoachTranscript.swift", "App/CoachCaptions.swift"] {
+            XCTAssertFalse(try read(name).contains("CoachLog"), name)
+        }
+    }
 }

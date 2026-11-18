@@ -155,6 +155,44 @@ final class GptClientTests: XCTestCase {
         }
     }
 
+    /// Counters: audio appends and commits sent, commits acknowledged, transcripts completed, and the empty ones.
+    /// `transcriber.ready` is logged once, when the server confirms the session update, not when the socket opens.
+    func testTranscriberCountersAndReadyAreLogged() async throws {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let connector = FakeConnector()
+        let tx = LiveTranscriber(config: config, key: APIKey("sk-test-rt")!, speaker: .me, connector: connector) { _ in }
+        try await tx.start()
+        let conn = try XCTUnwrap(connector.connections.first)
+        XCTAssertEqual(tx.counters, TranscriberCounters())
+        XCTAssertFalse(sink.lines.contains { $0.hasPrefix("transcriber.ready") }, "opened is not ready")
+
+        conn.socket.push(#"{"type":"session.created","session":{"id":"s1"}}"#)
+        conn.socket.push(#"{"type":"session.updated","session":{"id":"s1"}}"#)
+        conn.socket.push(#"{"type":"transcription_session.updated"}"#)
+        let ready = await eventually { sink.lines.contains("transcriber.ready speaker=me model=gpt-live-transcribe") }
+        XCTAssertTrue(ready)
+        XCTAssertEqual(sink.lines.filter { $0.hasPrefix("transcriber.ready") }.count, 1, "once per session")
+
+        for _ in 0..<3 { try await tx.sendAudio(Data([1, 2])) }
+        try await tx.commit(refT: 1)
+        try await tx.commit(refT: 2)
+        conn.socket.push(#"{"type":"input_audio_buffer.committed","item_id":"a"}"#)
+        conn.socket.push(#"{"type":"input_audio_buffer.committed","item_id":"b"}"#)
+        conn.socket.push(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"a","transcript":"private words"}"#)
+        conn.socket.push(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"b","transcript":"  "}"#)
+        let counted = await eventually { tx.counters.completions == 2 }
+        XCTAssertTrue(counted)
+        var expected = TranscriberCounters()
+        expected.appends = 3; expected.commits = 2; expected.acks = 2; expected.completions = 2; expected.emptyCompletions = 1
+        XCTAssertEqual(tx.counters, expected)
+        XCTAssertEqual(CoachLogEvent.transcriberCounts(speaker: .me, counters: tx.counters).rendered,
+                       "transcriber.counts speaker=me appends=3 commits=2 acks=2 completions=2 empty=1")
+        for line in sink.lines { XCTAssertFalse(line.contains("private") || line.contains("words"), line) }
+        await tx.close()
+    }
+
     func testBilledMeterRoundsEachSegmentUpAndPrefersApiSeconds() {
         var c = CostTracker(prices: config.gpt.pricesUsd, budget: nil)
         c.addAudio(seconds: 0.5, speaker: .me)
@@ -557,14 +595,41 @@ final class GptLayerTests: XCTestCase {
         let stopped = await eventually { await !layer.snapshot().enabled }
         XCTAssertTrue(stopped)
         await layer.close()
-        XCTAssertTrue(sink.lines.contains("transcriber.connected speaker=me model=gpt-live-transcribe"), "\(sink.lines)")
-        XCTAssertTrue(sink.lines.contains("captions.segments me=0 others=1"), "the first segment is logged as a count")
+        XCTAssertTrue(sink.lines.contains("transcriber.opened speaker=me model=gpt-live-transcribe"), "\(sink.lines)")
         XCTAssertTrue(sink.lines.contains("gpt.stopped reason=error"))
-        XCTAssertTrue(sink.lines.contains { $0.hasPrefix("captions.segments") && $0.contains("others=1") }, "counted again on close")
+        XCTAssertTrue(sink.lines.contains("transcriber.counts speaker=me appends=0 commits=0 acks=0 completions=0 empty=0"), "counted on close")
         XCTAssertTrue(sink.lines.contains("transcriber.disconnected speaker=me"))
         for line in sink.lines {
             for word in ["salaries", "budget", "sentence", "think"] { XCTAssertFalse(line.contains(word), line) }
         }
+    }
+
+    /// Per-speaker counters go to the log every ten seconds of audio time, whether or not anything happened.
+    func testTranscriberCountersAreLoggedOnATimeCadence() async {
+        let sink = CaptureSink()
+        CoachLog.install(sink)
+        defer { CoachLog.install(nil) }
+        let layer = makeLayer(judge: FakeJudge())
+        func counts() -> [String] { sink.lines.filter { $0.hasPrefix("transcriber.counts") } }
+        for t in [1.0, 4.0, 9.9] {
+            clock.set(t)
+            layer.feed(me: z, meVad: GptFrames.quiet, others: z, othersVad: GptFrames.quiet, meRunS: 0)
+            _ = await layer.snapshot()
+        }
+        await layer.close()
+        XCTAssertEqual(counts().count, 2, "only the close line so far (me and others): \(counts())")
+
+        sink.reset()
+        let layer2 = makeLayer(judge: FakeJudge())
+        for t in [1.0, 5.0, 11.5, 12.0, 21.6] {
+            clock.set(t)
+            layer2.feed(me: z, meVad: GptFrames.quiet, others: z, othersVad: GptFrames.quiet, meRunS: 0)
+            _ = await layer2.snapshot()
+        }
+        let got = await eventually { counts().count >= 4 }
+        XCTAssertTrue(got, "two lines per ten seconds: \(counts())")
+        XCTAssertEqual(counts().count, 4)
+        await layer2.close()
     }
 
     /// A transcriber's error event is logged by its type and code, never its message.

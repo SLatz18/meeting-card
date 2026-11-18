@@ -79,6 +79,7 @@ final class CoachController: NSObject {
     var keyProblem: KeyCheck?
     /// The coach card, made the first time it shows.
     private(set) var coachCard: CoachCardPresenter?
+    private var lastCaptionsState: CoachLogEvent?
     private var nudges = CoachNudgeHold()
     private var nudgeTimer: Timer?
     /// Shows the headphones-in-call-mode tip on the card at most once per call.
@@ -410,10 +411,20 @@ final class CoachController: NSObject {
         let chip = card == nil ? self.chip : nil
         for c in visibleCards() { c.setCoach(chip) }
         transcript.sync(keyUsable: transcriptKeyUsable)
+        logCaptionsState()
         if let reason = service?.gptStopped { transcript.gptStopped(reason) }
         updateCoachCard(card)
         updateStatusItem()
         settingsWindow?.refresh()
+    }
+
+    /// The captions and saving settings, with whether they can run, logged when any of them changes.
+    private func logCaptionsState() {
+        let event = CoachLogEvent.captionsState(captions: transcript.captionsOn, saving: transcript.savingOn,
+                                                keyUsable: transcriptKeyUsable, inCall: transcript.live.inCall)
+        guard event != lastCaptionsState else { return }
+        lastCaptionsState = event
+        CoachLog.record(event)
     }
 
     /// What the coach card shows now, or nil while the coach isn't on for a call.

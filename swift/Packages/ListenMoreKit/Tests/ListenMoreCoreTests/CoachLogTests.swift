@@ -8,6 +8,7 @@ final class CaptureSink: CoachLogSink, @unchecked Sendable {
     var entries: [CoachLogEntry] { lock.withLock { _entries } }
     var lines: [String] { entries.map(\.event.rendered) }
     func write(_ entry: CoachLogEntry) { lock.withLock { _entries.append(entry) } }
+    func reset() { lock.withLock { _entries.removeAll() } }
 }
 
 /// The coach diagnostics: what an event can say, the redaction of its labels, and the file's size,
@@ -50,13 +51,16 @@ final class CoachLogTests: XCTestCase {
             .detectCheck(DetectionCheck(micApp: nil, callAudio: false, result: .notMet, reason: .inputDeviceIdle)),
             .detectCheck(DetectionCheck(micApp: hostile, callAudio: false, result: .notMet, reason: .appNotAllowed, permission: .notGranted)),
             .permission(.microphone, .granted), .permission(.screenRecording, .denied),
-            .transcriberConnected(speaker: .me, model: LogToken("gpt-live-transcribe")),
+            .transcriberOpened(speaker: .me, model: LogToken("gpt-live-transcribe")),
+            .transcriberReady(speaker: .others, model: LogToken("gpt-live-transcribe")),
+            .transcriberCounts(speaker: .me, counters: TranscriberCounters()),
             .transcriberDisconnected(speaker: .others),
             .transcriberError(speaker: .others, model: LogToken("gpt-live-transcribe"), httpStatus: 401, code: LogToken("invalid_request_error/bad_key")),
             .transcriberError(speaker: nil, model: LogToken("gpt-live-transcribe"), httpStatus: nil, code: LogToken("URLError-1011")),
             .transcriberTransport(httpStatus: 403, urlErrorCode: -1011, closeCode: -1),
             .transcriberTransport(httpStatus: nil, urlErrorCode: nil, closeCode: 1006),
-            .captionSegments(me: 3, others: 12),
+            .captionsReceived(seconds: 10, final: 3, partial: 12),
+            .captionsState(captions: true, saving: false, keyUsable: true, inCall: false),
             .gptLayer(enabled: true, reason: .keyPresent), .gptLayer(enabled: false, reason: .noKey), .gptLayer(enabled: false, reason: .keyRejected),
             .gptLayer(enabled: false, reason: .noTransports),
             .gptStopped(reason: .error), .gptStopped(reason: .budgetCap),
@@ -91,7 +95,15 @@ final class CoachLogTests: XCTestCase {
         XCTAssertEqual(CoachLogEvent.callAudioSilent(source: .call, seconds: 15, kind: .digitalSilence, buffers: 750).rendered,
                        "callAudio.silent source=call seconds=15 kind=digitalSilence buffers=750")
         XCTAssertEqual(CoachLogEvent.fallbackEngaged(stage: .processTap).rendered, "callAudio.fallbackEngaged stage=processTap")
-        XCTAssertEqual(CoachLogEvent.captionSegments(me: 1, others: 0).rendered, "captions.segments me=1 others=0")
+        XCTAssertEqual(CoachLogEvent.captionsReceived(seconds: 10, final: 1, partial: 0).rendered, "captions.received seconds=10 final=1 partial=0")
+        XCTAssertEqual(CoachLogEvent.captionsState(captions: true, saving: false, keyUsable: true, inCall: false).rendered,
+                       "captions.state captions=true saving=false keyUsable=true inCall=false")
+        XCTAssertEqual(CoachLogEvent.transcriberOpened(speaker: .me, model: LogToken("m")).rendered, "transcriber.opened speaker=me model=m")
+        XCTAssertEqual(CoachLogEvent.transcriberReady(speaker: .others, model: LogToken("m")).rendered, "transcriber.ready speaker=others model=m")
+        var c = TranscriberCounters()
+        c.appends = 500; c.commits = 4; c.acks = 4; c.completions = 3; c.emptyCompletions = 1
+        XCTAssertEqual(CoachLogEvent.transcriberCounts(speaker: .me, counters: c).rendered,
+                       "transcriber.counts speaker=me appends=500 commits=4 acks=4 completions=3 empty=1")
         XCTAssertEqual(CoachLogEvent.sessionStarted(reason: .audio, bundleId: LogToken("us.zoom.xos")).rendered,
                        "session.started reason=audio app=us.zoom.xos")
         XCTAssertEqual(CoachLogEvent.callDetected(bundleId: nil).rendered, "call.detected", "no app, no field")
