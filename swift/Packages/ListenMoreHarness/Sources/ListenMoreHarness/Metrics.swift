@@ -125,14 +125,23 @@ public enum Scoring {
     /// speech end (its commit less the VAD hangover, with 0.3 s / 0.6 s of VAD slack), the one holding
     /// the largest share of the segment's words; ties go to the line ending nearest that point. nil
     /// under half. Uses audio timing, not the stream, so audio on the wrong transcriber shows as wrong.
-    public static func line(for seg: TranscribedSegment, lines: [PlacedLine], hangover: Double) -> PlacedLine? {
+    /// On equal share, a line in `preferring` (one that could be heard) wins.
+    public static func line(for seg: TranscribedSegment, lines: [PlacedLine], hangover: Double,
+                            preferring: Set<String> = []) -> PlacedLine? {
         let words = Set(ScriptText.tokens(seg.text))
         guard !words.isEmpty else { return nil }
         let end = seg.committedAt - hangover
         var best: (line: PlacedLine, score: Double)?
         for p in lines where p.start - 0.3 <= end && end <= p.end + 0.6 {
             let score = Double(Set(ScriptText.tokens(p.line.text)).intersection(words).count) / Double(words.count)
-            if let b = best, score < b.score || (score == b.score && abs(end - p.end) >= abs(end - b.line.end)) { continue }
+            if let b = best {
+                if score < b.score { continue }
+                if score == b.score {
+                    let (pPref, bPref) = (preferring.contains(p.line.id), preferring.contains(b.line.line.id))
+                    if bPref && !pPref { continue }
+                    if pPref == bPref && abs(end - p.end) >= abs(end - b.line.end) { continue }
+                }
+            }
             best = (p, score)
         }
         guard let b = best, b.score >= 0.5 else { return nil }
@@ -142,7 +151,7 @@ public enum Scoring {
     static func hangover(_ r: RunRecord) -> Double { Double(r.config.vad.hangoverMs) / 1000 }
 
     /// Lines whose audio could reach a transcriber at all: not spoken wholly inside a Pause, and for
-    /// You not wholly inside a Mute. A segment can only hold one of these, whatever its socket.
+    /// You not wholly inside a Mute. A segment should only hold one of these, whatever its socket.
     static func reachableLines(_ r: RunRecord) -> [PlacedLine] {
         let mutes = r.appliedWindows(.mute, .unmute)
         let pauses = r.appliedWindows(.pause, .resume)
@@ -191,37 +200,46 @@ public enum Scoring {
         var used = Set<Int>()
         func norm(_ s: String) -> String { ScriptText.tokens(s).joined(separator: " ") }
         var mismatches: [String] = []
-        let reachable = reachableLines(r)
+        // Every line is a candidate, so a transcript of a line nobody should have heard (You's speech
+        // while muted, anything while paused) is caught; on equal share a line that could be heard wins,
+        // since lines can share words (mute-unmute's muted reply quotes Them).
+        let reachable = Set(reachableLines(r).map(\.line.id))
         for seg in r.sockets.segments where !seg.text.trimmingCharacters(in: .whitespaces).isEmpty {
-            guard let p = line(for: seg, lines: reachable, hangover: hang) else {
+            guard let p = line(for: seg, lines: r.timeline.lines, hangover: hang, preferring: reachable) else {
                 unmatched += 1
                 continue
             }
             total += 1
             let expected = p.line.voice.speaker
             let stream: Speaker = seg.stream == .mic ? .me : .others
-            var ok = stream == expected
+            var problems: [String] = []
+            if !reachable.contains(p.line.id) { problems.append("a line spoken while muted or paused reached a transcriber") }
+            if stream != expected { problems.append("wrong stream") }
             let text = norm(seg.text)
             if let i = finals.indices.first(where: { !used.contains($0) && norm(finals[$0].text) == text
                 && finals[$0].t >= seg.transcribedAt - 0.05 && finals[$0].t <= seg.transcribedAt + 3 }) {
                 used.insert(i)
                 let c = finals[i]
-                ok = ok && c.speaker == expected
+                if c.speaker != expected { problems.append("caption speaker \(c.speaker.rawValue)") }
                 if let view = r.captionViews.first(where: { abs($0.t - c.t) < 1e-9 }),
                    let row = view.rows.last(where: { norm($0.text).contains(text) }) {
-                    ok = ok && row.label == expectedLabel(expected, at: c.t, in: r)
+                    let want = expectedLabel(expected, at: c.t, in: r)
+                    if row.label != want { problems.append("labelled \(row.label), not \(want)") }
+                } else {
+                    problems.append("its caption is missing from the caption feed")
                 }
                 if p.line.voice == .themB { themBSpeakers.append(c.speaker) }
             } else {
                 uncaptioned += 1
                 if p.line.voice == .themB { themBSpeakers.append(stream) }
             }
-            if ok {
+            if problems.isEmpty {
                 correct += 1
             } else {
                 let words = ScriptText.tokens(seg.text).prefix(6).joined(separator: " ")
-                mismatches.append(String(format: "%@ segment ending %.1f s (\"%@…\") holds %@ (%@)", seg.stream == .mic ? "mic" : "call",
-                                         seg.committedAt - hang, words, p.line.id, p.line.voice.rawValue))
+                mismatches.append(String(format: "%@ segment ending %.1f s (\"%@…\") holds %@ (%@): %@", seg.stream == .mic ? "mic" : "call",
+                                         seg.committedAt - hang, words, p.line.id, p.line.voice.rawValue,
+                                         problems.joined(separator: ", ")))
             }
         }
         let multi: MultiThem
