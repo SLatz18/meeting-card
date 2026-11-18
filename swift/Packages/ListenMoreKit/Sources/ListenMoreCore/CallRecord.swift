@@ -118,6 +118,13 @@ public enum CallSpool {
     public static let fileExtension = "spool"
     static let version = 1
 
+    /// The call a spool belongs to, from its file name.
+    public static func callId(of url: URL) -> String? {
+        guard isSpool(url) else { return nil }
+        let name = url.deletingPathExtension().lastPathComponent
+        return String(name.dropFirst(prefix.count))
+    }
+
     public static func url(callId: String, in folder: URL) -> URL {
         folder.appendingPathComponent("\(prefix)\(callId).\(fileExtension)")
     }
@@ -144,7 +151,10 @@ public enum CallSpool {
         var dailyStyle: String?
         /// The device and process writing the spool, so recovery leaves a live call alone.
         var dev: String?
+        var boot: String?
         var pid: Int32?
+        /// The writing process's start time (`ProcessIdentity.startTime`).
+        var pst: String?
         // begin, note and written: the note's file name in the folder
         var note: String?
         // info
@@ -175,14 +185,16 @@ public enum CallSpool {
         }
     }
 
-    static func begin(_ r: CallRecord, device: String, pid: Int32) -> Record {
+    static func begin(_ r: CallRecord, identity: ProcessIdentity) -> Record {
         var b = Record(.begin, t: 0)
         b.v = version
         b.id = r.callId
         b.start = r.start.timeIntervalSince1970
         b.tags = r.tags
-        b.dev = device
-        b.pid = pid
+        b.dev = identity.device
+        b.boot = identity.boot
+        b.pid = identity.pid
+        b.pst = identity.startTime(identity.pid)
         b.title = r.info.title
         b.app = r.info.app
         b.participants = r.info.participants
@@ -259,7 +271,9 @@ public enum CallSpool {
         public var dailyPath: String?
         public var dailyStyle: DailyNoteOptions.Style?
         public var device: String?
+        public var boot: String?
         public var pid: Int32?
+        public var startTime: String?
     }
 
     /// A call ID safe in a file name and a marker: 1–64 letters, digits, `-` or `_`.
@@ -285,7 +299,7 @@ public enum CallSpool {
                 out = Replay(record: CallRecord(callId: id, start: Date(timeIntervalSince1970: start), info: info, tags: rec.tags ?? []),
                              labels: defaults, noteName: note, hashes: [], ended: false,
                              dailyPath: rec.daily, dailyStyle: rec.dailyStyle.flatMap(DailyNoteOptions.Style.init(rawValue:)),
-                             device: rec.dev, pid: rec.pid)
+                             device: rec.dev, boot: rec.boot, pid: rec.pid, startTime: rec.pst)
                 if let h = rec.h { out?.hashes.append(h) }
                 continue
             }

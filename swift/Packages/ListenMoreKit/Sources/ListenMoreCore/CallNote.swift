@@ -92,7 +92,7 @@ public enum NoteFileName {
     public static func sanitize(_ s: String) -> String {
         var out = ""
         for ch in s.precomposedStringWithCanonicalMapping {
-            let control = ch.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) }
+            let control = ch.unicodeScalars.contains { isControl($0) || CharacterSet.newlines.contains($0) }
             if ch == ".", out.last == "." { continue }
             out.append(control || unsafe.contains(ch) ? " " : ch)
         }
@@ -111,7 +111,7 @@ public enum NoteFileName {
     public static func isPlainNoteName(_ s: String) -> Bool {
         s.hasSuffix(".\(fileExtension)") && s.count > fileExtension.count + 1 && !s.hasPrefix(".") && !s.contains("..")
             && !s.contains("/") && !s.contains("\\") && s.utf8.count <= 255
-            && !s.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+            && !s.unicodeScalars.contains(where: isControl)
     }
 
     /// Names the pattern could have made: its date and time tokens in order, anything between, and an
@@ -126,6 +126,12 @@ public enum NoteFileName {
         }
         re += #".*\.md$"#
         return name.range(of: re, options: .regularExpression) != nil
+    }
+
+    /// Control and format characters, except the zero-width non-joiner and joiner that some scripts
+    /// (Persian, Indic) and emoji sequences need. Bidirectional overrides stay out.
+    static func isControl(_ u: Unicode.Scalar) -> Bool {
+        u != "\u{200C}" && u != "\u{200D}" && CharacterSet.controlCharacters.contains(u)
     }
 
     static func trimDotsAndSpaces(_ s: String) -> String {
@@ -198,6 +204,9 @@ public enum CallNote {
     public static let callProperty = "meetingcard-call"
     public static let statusProperty = "transcript-status"
     public static let recoveredProperty = "recovered"
+    /// MeetingCard's last write of a finished note, in whole seconds since 1970: the same instant in
+    /// every time zone (`start`, `end` and `recovered` are local times, as Obsidian shows them).
+    public static let savedProperty = "meetingcard-saved"
     static let dateTimeFormat = "yyyy-MM-dd'T'HH:mm:ss"
     public static let defaultTag = "meeting/transcript"
 
@@ -273,6 +282,9 @@ public enum CallNote {
         out += "coach-cues: \(r.cues.count)\n"
         out += "\(statusProperty): \(status.rawValue)\n"
         out += "\(callProperty): \(yaml(r.callId))\n"
+        if status != .inProgress, let saved = recoveredAt ?? r.end.map({ r.start.addingTimeInterval($0) }) {
+            out += "\(savedProperty): \(Int64(saved.timeIntervalSince1970.rounded(.down)))\n"
+        }
         out += "---\n"
         return out
     }
@@ -293,7 +305,7 @@ public enum CallNote {
             case "\r": out += "\\r"
             case "\t": out += "\\t"
             default:
-                if CharacterSet.controlCharacters.contains(u) {
+                if NoteFileName.isControl(u) {
                     out += String(format: "\\u%04X", u.value)
                 } else {
                     out.unicodeScalars.append(u)

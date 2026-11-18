@@ -189,13 +189,20 @@ final class TranscriptDurabilityTests: XCTestCase {
         try lines.joined().write(to: spool(id), atomically: false, encoding: .utf8)
     }
 
-    func beginRecord(_ id: String, note: String, daily: String? = nil, device: String = TranscriptRecorder.thisDevice,
-                     pid: Int32? = nil) -> String {
-        var b = CallSpool.begin(CallRecord(callId: id, start: start), device: device, pid: 0)
+    /// This test's machine: one device and boot, and a running process 4242 that started at "t1".
+    static let here = ProcessIdentity(device: "this-mac", boot: "boot-1", pid: getpid(),
+                                      startTime: { $0 == 4242 ? "t1" : ($0 == getpid() ? "self" : nil) })
+
+    func beginRecord(_ id: String, note: String, daily: String? = nil, device: String? = "this-mac", boot: String? = "boot-1",
+                     pid: Int32? = nil, startTime: String? = nil) -> String {
+        var b = CallSpool.begin(CallRecord(callId: id, start: start), identity: Self.here)
         b.note = note
         b.daily = daily
         b.dailyStyle = daily == nil ? nil : DailyNoteOptions.Style.link.rawValue
+        b.dev = device
+        b.boot = boot
         b.pid = pid
+        b.pst = startTime
         return b.encoded()
     }
 
@@ -206,7 +213,7 @@ final class TranscriptDurabilityTests: XCTestCase {
         try writeSpool("moved", [beginRecord("moved", note: "2026-01-31 0905 Call.md"), line(1, "kept"),
                                  CallSpool.note("../../escaped2.md", t: 1).encoded()])
         try writeSpool("badid", [beginRecord("../x", note: "a.md")])
-        let written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc)
+        let written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, identity: Self.here)
         XCTAssertEqual(written.map(\.lastPathComponent), ["2026-01-31 0905 Call.md"], "an unsafe name in a note record is skipped")
         for escaped in ["escaped.md", "escaped2.md", "Vault/escaped.md", "Vault/escaped2.md", "x.md"] {
             XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(escaped).path), escaped)
@@ -224,7 +231,7 @@ final class TranscriptDurabilityTests: XCTestCase {
         try writeSpool("abs", [injected, line(1, "a")])
         try writeSpool("rel", [beginRecord("rel", note: "rel.md", daily: "../profile.md"), line(1, "b")])
         try writeSpool("ok", [beginRecord("ok", note: "2026-01-31 0905 Sync.md", daily: "Daily/2026-01-31.md"), line(1, "c")])
-        let written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc)
+        let written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, identity: Self.here)
         XCTAssertEqual(Set(written.map(\.lastPathComponent)), ["abs.md", "rel.md", "2026-01-31 0905 Sync.md"], "the notes are recovered")
         XCTAssertEqual(try read(profile), "keep\n", "an absolute or climbing daily path outside the vault is refused")
         XCTAssertEqual(try read(root.appendingPathComponent("Vault/Daily/2026-01-31.md")),
@@ -233,15 +240,43 @@ final class TranscriptDurabilityTests: XCTestCase {
 
     func testRecoveryLeavesASpoolThatIsStillBeingWritten() throws {
         try writeSpool("other", [beginRecord("other", note: "other.md", device: "another-mac"), line(1, "o")])
-        try writeSpool("live", [beginRecord("live", note: "live.md", pid: 4242), line(1, "l")])
-        try writeSpool("dead", [beginRecord("dead", note: "dead.md", pid: 4343), line(1, "d")])
-        let alive: (Int32) -> Bool = { $0 == 4242 }
-        var written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, isAlive: alive)
-        XCTAssertEqual(written.map(\.lastPathComponent), ["dead.md"], "another device's fresh spool and a running process's are left")
+        try writeSpool("live", [beginRecord("live", note: "live.md", pid: 4242, startTime: "t1"), line(1, "l")])
+        try writeSpool("reused", [beginRecord("reused", note: "reused.md", pid: 4242, startTime: "t0"), line(1, "r")])
+        try writeSpool("rebooted", [beginRecord("rebooted", note: "rebooted.md", boot: "boot-0", pid: 4242, startTime: "t1"), line(1, "b")])
+        try writeSpool("gone", [beginRecord("gone", note: "gone.md", pid: 4343, startTime: "t1"), line(1, "g")])
+        try writeSpool("old", [beginRecord("old", note: "old.md", boot: nil, pid: 4242), line(1, "x")])
+        var written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, identity: Self.here)
+        XCTAssertEqual(Set(written.map(\.lastPathComponent)), ["reused.md", "rebooted.md", "gone.md"],
+                       "a reused PID, a reboot and a process that's gone are crashes")
+        XCTAssertEqual(TranscriptMaintenance.unfinished(folder: folder, store: FileTranscriptStore()), 3,
+                       "another device's fresh spool, the live one, and one without a start time whose PID runs")
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7 * 3600)], ofItemAtPath: spool("other").path)
-        written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, isAlive: alive)
+        written = TranscriptMaintenance.recover(folder: folder, store: FileTranscriptStore(), timeZone: utc, identity: Self.here)
         XCTAssertEqual(written.map(\.lastPathComponent), ["other.md"], "idle for hours: that device isn't coming back for it")
         XCTAssertTrue(FileManager.default.fileExists(atPath: spool("live").path))
+    }
+
+    func testUpkeepReportsWhatItHadToLeave() throws {
+        try writeSpool("other", [beginRecord("other", note: "other.md", device: "another-mac"), line(1, "o")])
+        let r = TranscriptRecorder(store: FileTranscriptStore(), timeZone: utc, identity: Self.here)
+        var left: Int?
+        r.maintain(folder: folder, retentionDays: nil) { left = $0 }
+        XCTAssertEqual(left, 1)
+    }
+
+    func testThisMachinesIdentity() throws {
+        let me = ProcessIdentity.current
+        XCTAssertNotNil(me.startTime(me.pid), "this process has a start time")
+        XCTAssertEqual(me.startTime(me.pid), me.startTime(me.pid), "and it's stable")
+        XCTAssertNil(me.startTime(Int32.max - 1), "no such process")
+        if let device = me.device {
+            XCTAssertEqual(device.count, 16)
+            XCTAssertTrue(device.allSatisfy(\.isHexDigit), "a hash, never the machine's own ID or name")
+            XCTAssertEqual(ProcessIdentity.machineDevice(), device, "stable")
+        }
+        #if os(Linux) || os(macOS)
+        XCTAssertNotNil(me.boot)
+        #endif
     }
 
     /// Forwards to the real store, but someone else's file appears at the first name just before the note is created.
@@ -363,12 +398,12 @@ final class TranscriptDurabilityTests: XCTestCase {
         let viaLink = root.appendingPathComponent("Link", isDirectory: true)
         try FileManager.default.createSymbolicLink(at: viaLink, withDestinationURL: root.appendingPathComponent("Vault"))
         let currentByOtherPath = viaLink.appendingPathComponent("Meetings/\(current.lastPathComponent)")
-        let removed = TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 30, timeZone: utc, keep: [currentByOtherPath])
+        let removed = TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 30, keep: [currentByOtherPath])
         XCTAssertEqual(Set(removed.map(\.lastPathComponent)), [old.lastPathComponent, recoveredOld.lastPathComponent])
         for kept in [recent, editedSameDay, editedSinceCutoff, recoveredEdited, inProgress, foreign, otherName, current, sub] {
             XCTAssertTrue(store.exists(kept), kept.lastPathComponent)
         }
-        XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 0, timeZone: utc), [], "0: off")
+        XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: 0), [], "0: off")
     }
 
     /// The reviewer's case: a summary written an hour after the call, the note now 40 days old.
@@ -382,11 +417,39 @@ final class TranscriptDurabilityTests: XCTestCase {
         try FileTranscriptStore().write(try read(note).replacingOccurrences(of: "_Summary placeholder: add yours after the call._",
                                                                               with: "We agreed on the plan."), to: note)
         try FileManager.default.setAttributes([.modificationDate: start.addingTimeInterval(3660)], ofItemAtPath: note.path)
-        XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: FileTranscriptStore(), olderThanDays: 30, timeZone: utc), [])
+        XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: FileTranscriptStore(), olderThanDays: 30), [])
         XCTAssertTrue(try read(note).contains("We agreed on the plan."))
         try FileManager.default.setAttributes([.modificationDate: start.addingTimeInterval(61)], ofItemAtPath: note.path)
-        XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: FileTranscriptStore(), olderThanDays: 30, timeZone: utc)
+        XCTAssertEqual(TranscriptMaintenance.prune(folder: folder, store: FileTranscriptStore(), olderThanDays: 30)
                         .map(\.lastPathComponent), [note.lastPathComponent], "unchanged since the call: removed")
+    }
+
+    /// `meetingcard-saved` is seconds since 1970, so a time zone change (travel, or two Macs in two
+    /// zones sharing a vault) can't make an edited note look untouched.
+    func testRetentionIsTheSameInEveryTimeZone() throws {
+        let london = TimeZone(identifier: "Europe/London")!, newYork = TimeZone(identifier: "America/New_York")!
+        let saved = NSTimeZone.default
+        defer { NSTimeZone.default = saved }
+        for (written, pruned) in [(london, newYork), (newYork, london)] {
+            try? FileManager.default.removeItem(at: folder)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            NSTimeZone.default = written
+            let start = Date(timeIntervalSinceNow: -40 * 86_400)
+            var r = CallRecord(callId: "tz", start: start)
+            r.end = 60
+            let text = CallNote.render(r, labels: SpeakerLabels(), status: .complete, timeZone: written)
+            let edited = folder.appendingPathComponent(NoteFileName.base(pattern: NoteFileName.defaultPattern, start: start,
+                                                                        info: CallInfo(title: "edited"), timeZone: written) + ".md")
+            let untouched = folder.appendingPathComponent(NoteFileName.base(pattern: NoteFileName.defaultPattern, start: start,
+                                                                           info: CallInfo(title: "untouched"), timeZone: written) + ".md")
+            for url in [edited, untouched] { try FileTranscriptStore().write(text, to: url) }
+            try FileManager.default.setAttributes([.modificationDate: start.addingTimeInterval(60 + 3600)], ofItemAtPath: edited.path)
+            try FileManager.default.setAttributes([.modificationDate: start.addingTimeInterval(61)], ofItemAtPath: untouched.path)
+            NSTimeZone.default = pruned
+            let removed = TranscriptMaintenance.prune(folder: folder, store: FileTranscriptStore(), olderThanDays: 30)
+            XCTAssertEqual(removed.map(\.lastPathComponent), [untouched.lastPathComponent], "\(written.identifier) → \(pruned.identifier)")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: edited.path), "edited an hour after the call: kept")
+        }
     }
 
     // MARK: daily note

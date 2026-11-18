@@ -46,6 +46,16 @@ final class NoteFileNameTests: XCTestCase {
         }
     }
 
+    /// Joiners some scripts and emoji need stay; other format characters (a bidi override) don't.
+    func testZeroWidthJoinersAreKept() {
+        XCTAssertEqual(name("\u{1F469}\u{200D}\u{1F4BB} Sync", pattern: "{title}"), "\u{1F469}\u{200D}\u{1F4BB} Sync")
+        XCTAssertEqual(NoteFileName.sanitize("\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0645}"),
+                       "\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0645}")
+        XCTAssertEqual(NoteFileName.sanitize("a\u{202E}b"), "a b")
+        XCTAssertTrue(NoteFileName.isPlainNoteName("\u{1F469}\u{200D}\u{1F4BB}.md"))
+        XCTAssertEqual(CallNote.yaml("a\u{200D}b"), "\"a\u{200D}b\"")
+    }
+
     func testRunsOfDotsBecomeOne() {
         XCTAssertEqual(NoteFileName.sanitize("v1..2...3"), "v1.2.3", "a name never holds `..`")
     }
@@ -126,6 +136,7 @@ final class CallNoteTests: XCTestCase {
         coach-cues: 1
         transcript-status: complete
         meetingcard-call: "call1"
+        meetingcard-saved: 1769852240
         ---
 
         ## Summary

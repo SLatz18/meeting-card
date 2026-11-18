@@ -151,7 +151,8 @@ private func posixRename(_ from: String, _ to: String) -> Int32 {
 
 /// Renames only if nothing is at `to` (errno EEXIST otherwise): RENAME_EXCL on Apple platforms, a
 /// hard link then unlink elsewhere or where the volume lacks RENAME_EXCL. A volume with neither
-/// (FAT, exFAT) gets a check then a plain rename, which leaves a short race.
+/// (FAT, exFAT, some network shares) claims the name with an empty file created exclusively, then
+/// renames over its own placeholder.
 private func posixRenameExclusive(_ from: String, _ to: String) -> Int32 {
     #if canImport(Darwin)
     if renamex_np(from, to, UInt32(RENAME_EXCL)) == 0 { return 0 }
@@ -162,11 +163,14 @@ private func posixRenameExclusive(_ from: String, _ to: String) -> Int32 {
         return 0
     }
     guard errno == EPERM || errno == ENOTSUP || errno == EOPNOTSUPP || errno == EMLINK else { return -1 }
-    if access(to, F_OK) == 0 {
-        errno = EEXIST
-        return -1
-    }
-    return posixRename(from, to)
+    let placeholder = open(to, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
+    guard placeholder >= 0 else { return -1 }
+    _ = close(placeholder)
+    if posixRename(from, to) == 0 { return 0 }
+    let e = errno
+    _ = unlink(to)
+    errno = e
+    return -1
 }
 
 private func posixWriteAll(_ fd: Int32, _ data: Data) throws {

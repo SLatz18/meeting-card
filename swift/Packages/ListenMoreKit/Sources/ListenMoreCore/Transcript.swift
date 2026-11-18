@@ -141,8 +141,8 @@ public final class TranscriptRecorder {
 
     public let store: TranscriptStore
     public let wording: NoteWording
-    /// Names this device in each spool, so recovery on another Mac sharing the folder leaves a live call alone.
-    public let device: String
+    /// Names this machine, boot and process in each spool, so recovery leaves a live call alone.
+    public let identity: ProcessIdentity
     private let timeZone: TimeZone
     private let io: TranscriptIO
     private let newCallId: () -> String
@@ -159,26 +159,19 @@ public final class TranscriptRecorder {
     private var reserved: Set<String> = []
 
     public init(store: TranscriptStore, timeZone: TimeZone = .current, wording: NoteWording = NoteWording(),
-                io: TranscriptIO = .inline, device: String = TranscriptRecorder.thisDevice,
+                io: TranscriptIO = .inline, identity: ProcessIdentity = .current,
                 newCallId: @escaping () -> String = TranscriptRecorder.randomCallId) {
         self.store = store
         self.timeZone = timeZone
         self.wording = wording
         self.io = io
-        self.device = device
+        self.identity = identity
         self.newCallId = newCallId
     }
 
     public static func randomCallId() -> String {
         "c" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(16)
     }
-
-    /// A hash of the host name: tells devices apart without writing the name.
-    public static let thisDevice: String = {
-        var buf = [CChar](repeating: 0, count: 256)
-        let host = gethostname(&buf, buf.count - 1) == 0 ? String(cString: buf) : ""
-        return String(noteHash("meetingcard-device:" + host).prefix(12))
-    }()
 
     public var isSaving: Bool {
         if case .saving = state { return true }
@@ -207,7 +200,7 @@ public final class TranscriptRecorder {
         lastURL = first
         lastSink = sink
         let text = render(.inProgress)
-        var spoolBegin = CallSpool.begin(r, device: device, pid: getpid())
+        var spoolBegin = CallSpool.begin(r, identity: identity)
         spoolBegin.h = noteHash(text)
         let plan = NoteSink.Start(begin: spoolBegin, text: text, daily: options.dailyNote, start: start,
                                   title: info.title ?? wording.untitled, timeZone: timeZone)
@@ -302,18 +295,22 @@ public final class TranscriptRecorder {
 
     /// Recovery and retention for `folder`, queued behind this recorder's writes so they never race
     /// a call being saved: the current call's spool and note are left alone. `retentionDays` nil: off.
+    /// The clock is read when the work runs (`now` only for tests). `done` gets, on the main queue,
+    /// how many calls are still unfinished (spools recovery had to leave).
     public func maintain(folder: URL, retentionDays: Int?, pattern: String = NoteFileName.defaultPattern,
-                         labels: SpeakerLabels = SpeakerLabels(), now: Date = Date()) {
+                         labels: SpeakerLabels = SpeakerLabels(), now: Date? = nil, done: ((Int) -> Void)? = nil) {
         let skip: Set<String> = record.map { [$0.callId] } ?? []
         let keep: Set<URL> = lastURL.map { [$0] } ?? []
-        let store = store, wording = wording, timeZone = timeZone, device = device
+        let store = store, wording = wording, timeZone = timeZone, identity = identity, io = io
         io.run {
+            let clock = now ?? Date()
             TranscriptMaintenance.recover(folder: folder, store: store, labels: labels, wording: wording, timeZone: timeZone,
-                                          now: now, skip: skip, device: device)
+                                          now: clock, skip: skip, identity: identity)
             if let days = retentionDays {
-                TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: days, pattern: pattern, now: now,
-                                            timeZone: timeZone, keep: keep)
+                TranscriptMaintenance.prune(folder: folder, store: store, olderThanDays: days, pattern: pattern, now: clock, keep: keep)
             }
+            let left = TranscriptMaintenance.unfinished(folder: folder, store: store, skip: skip)
+            if let done { io.back { done(left) } }
         }
     }
 
@@ -558,15 +555,11 @@ public enum TranscriptMaintenance {
     /// Retention reads at most this much of a note: its properties.
     static let propertiesBytes = 4096
 
-    /// Whether a process (another app identity sharing the folder) is still running.
-    public static func processIsAlive(_ pid: Int32) -> Bool {
-        kill(pid, 0) == 0 || errno == EPERM
-    }
-
     /// Finishes each call whose spool is still in `folder`: an unfinished call gets an app-quit gap at
     /// its last event and `recovered` status, and every note recovery writes gets a `recovered` time.
-    /// Left alone: the calls in `skip`, a spool another running process on this device is writing,
-    /// and one from another device unless idle for `otherDeviceIdle`. Names come from the spool only
+    /// Left alone: the calls in `skip`, a spool another running process on this device is writing
+    /// (same boot, same PID and start time), and one from another device unless idle for
+    /// `otherDeviceIdle`. Names come from the spool only
     /// if plain (`CallSpool.replay`), and the daily note is found again through `DailyNote.url`. The
     /// note is rewritten only if it still holds what the recorder wrote; otherwise the recovered note
     /// goes beside it, and it never replaces a file. A note removed after it reached disk stays
@@ -574,8 +567,7 @@ public enum TranscriptMaintenance {
     @discardableResult
     public static func recover(folder: URL, store: TranscriptStore, labels: SpeakerLabels = SpeakerLabels(),
                                wording: NoteWording = NoteWording(), timeZone: TimeZone = .current,
-                               now: Date = Date(), skip: Set<String> = [], device: String = TranscriptRecorder.thisDevice,
-                               isAlive: (Int32) -> Bool = TranscriptMaintenance.processIsAlive) -> [URL] {
+                               now: Date = Date(), skip: Set<String> = [], identity: ProcessIdentity = .current) -> [URL] {
         for url in store.contents(of: folder) where url.lastPathComponent.hasPrefix(".")
             && url.lastPathComponent.hasSuffix(FileTranscriptStore.tempSuffix) {
             if let m = store.modified(url), now.timeIntervalSince(m) < 3600 { continue }
@@ -589,9 +581,9 @@ public enum TranscriptMaintenance {
                 continue
             }
             guard !skip.contains(replay.record.callId) else { continue }
-            if let other = replay.device, other != device {
+            if let other = replay.device, let mine = identity.device, other != mine {
                 guard let m = store.modified(spool), now.timeIntervalSince(m) > otherDeviceIdle else { continue }
-            } else if let pid = replay.pid, pid != getpid(), isAlive(pid) {
+            } else if identity.mayBeWriting(boot: replay.boot, pid: replay.pid, startTime: replay.startTime) {
                 continue
             }
             var r = replay.record
@@ -647,28 +639,36 @@ public enum TranscriptMaintenance {
         return written
     }
 
-    /// Retention: removes notes this app wrote in `folder` whose call started more than `days` days
-    /// before `now` and that nobody changed after MeetingCard's last write (the call's `end`, or
-    /// `recovered`, plus `writeSlack`). Looks only at names `pattern` could have made, directly in
-    /// `folder`, reads only their properties, and never removes a note still in progress. Returns
-    /// the notes removed.
+    /// Calls whose spool is still in `folder` (other than those in `skip`): what recovery had to leave.
+    public static func unfinished(folder: URL, store: TranscriptStore, skip: Set<String> = []) -> Int {
+        store.contents(of: folder).filter { url in
+            guard let id = CallSpool.callId(of: url), !skip.contains(id), let text = store.read(url) else { return false }
+            return CallSpool.replay(text) != nil
+        }.count
+    }
+
+    /// Retention: removes notes this app wrote in `folder` whose last write by MeetingCard was more
+    /// than `days` days before `now` and that nobody changed since (by more than `writeSlack`). That
+    /// time is `meetingcard-saved`, in seconds since 1970, so it reads the same in any time zone; a
+    /// note without it (still in progress, or not finished) is never removed. Looks only at names
+    /// `pattern` could have made, directly in `folder`, and reads only their properties. Returns the
+    /// notes removed.
     @discardableResult
     public static func prune(folder: URL, store: TranscriptStore, olderThanDays days: Int, pattern: String = NoteFileName.defaultPattern,
-                             now: Date = Date(), timeZone: TimeZone = .current, keep: Set<URL> = []) -> [URL] {
+                             now: Date = Date(), keep: Set<URL> = []) -> [URL] {
         guard days > 0 else { return [] }
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
         // A listing can name the same file by another path (macOS: /private/var for /var).
         func key(_ u: URL) -> String { u.standardizedFileURL.resolvingSymlinksInPath().path }
         let kept = Set(keep.map(key))
-        func date(_ s: String?) -> Date? { s.flatMap { TranscriptFormat.parse($0, CallNote.dateTimeFormat, timeZone) } }
         var removed: [URL] = []
         for url in store.contents(of: folder) where url.pathExtension == NoteFileName.fileExtension
             && !url.lastPathComponent.hasPrefix(".") && NoteFileName.matches(url.lastPathComponent, pattern: pattern)
             && !kept.contains(key(url)) {
             guard let m = store.modified(url), m < cutoff, let text = store.head(url, bytes: propertiesBytes) else { continue }
             let props = CallNote.properties(text)
-            guard props[CallNote.callProperty] != nil, let start = date(props["start"]), start < cutoff,
-                  let lastWrite = date(props[CallNote.recoveredProperty]) ?? date(props["end"]),
+            guard props[CallNote.callProperty] != nil, let saved = props[CallNote.savedProperty].flatMap(Double.init),
+                  saved.isFinite, case let lastWrite = Date(timeIntervalSince1970: saved), lastWrite < cutoff,
                   m <= lastWrite.addingTimeInterval(writeSlack) else { continue }
             do {
                 try store.remove(url)
