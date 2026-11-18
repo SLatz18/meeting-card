@@ -158,6 +158,8 @@ public struct RunRecord: @unchecked Sendable {
     public var engineIngests: [MeteredEngine.Ingest] = []
     public var engineStarts: [Double] = []
     public var engineStops: [Double] = []
+    /// Cues the engine's own policy held back (cooldowns, the closing-phrase quiet), in scenario time.
+    public var engineHolds: [MeteredEngine.Hold] = []
     public var sockets = SocketStats()
     public var micOfferedWhileMuted = 0
     public var micMuteCalls: [Bool] = []
@@ -367,6 +369,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.engineIngests = engine.ingests.map { MeteredEngine.Ingest(t: $0.t - origin, stream: $0.stream, samples: $0.samples) }
         record.engineStarts = engine.starts.map { $0 - origin }
         record.engineStops = engine.stops.map { $0 - origin }
+        record.engineHolds = engine.holds.map { MeteredEngine.Hold(t: $0.t - origin, type: $0.type, why: $0.why) }
         record.engineMicMutes = engine.micMutes.map { ($0.t - origin, $0.muted) }
         record.storePrepared = store.prepared
         record.storeWritten = store.written

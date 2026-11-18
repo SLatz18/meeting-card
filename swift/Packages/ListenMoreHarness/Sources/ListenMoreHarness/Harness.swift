@@ -24,11 +24,13 @@ public struct HarnessOptions {
     public var engineOverrides: [String: Any]
     /// Test hook: controls the runner skips (a broken Mute or Pause).
     public var ignoredControls: Set<ControlKind>
+    /// Test hook: the offline judge answers not_listening to requests whose transcript has this text.
+    public var offlineNotListeningOn: String?
 
     public init(mode: Mode = .offline, scenarios: [Scenario] = Scenarios.all, outputDirectory: URL,
                 environment: [String: String] = ProcessInfo.processInfo.environment, liveBackend: LiveBackend? = nil,
                 ttsModel: String = "gpt-4o-mini-tts", offlineVoices: OfflineVoices = .synthetic, judge: Bool? = nil,
-                engineOverrides: [String: Any] = [:], ignoredControls: Set<ControlKind> = []) {
+                engineOverrides: [String: Any] = [:], ignoredControls: Set<ControlKind> = [], offlineNotListeningOn: String? = nil) {
         self.mode = mode
         self.scenarios = scenarios
         self.outputDirectory = outputDirectory
@@ -39,6 +41,7 @@ public struct HarnessOptions {
         self.judge = judge
         self.engineOverrides = engineOverrides
         self.ignoredControls = ignoredControls
+        self.offlineNotListeningOn = offlineNotListeningOn
     }
 
     public var judgeOn: Bool { judge ?? (mode == .offline) }
@@ -112,7 +115,7 @@ public enum Harness {
                 var services: RunServices
                 switch o.mode {
                 case .offline:
-                    services = try offlineServices(scenario, config: config, voices: o.offlineVoices)
+                    services = try offlineServices(scenario, config: config, voices: o.offlineVoices, notListeningOn: o.offlineNotListeningOn)
                 case .live:
                     let built = try await liveServices(scenario, config: config, key: liveKey!, options: o, cache: &clipCache, cost: &cost)
                     services = built.services
@@ -162,11 +165,12 @@ public enum Harness {
         try writer.write("cost-log.jsonl", cost.map(\.json).joined(separator: "\n") + "\n")
     }
 
-    static func offlineServices(_ scenario: Scenario, config: ListenMoreConfig, voices: OfflineVoices) throws -> RunServices {
+    static func offlineServices(_ scenario: Scenario, config: ListenMoreConfig, voices: OfflineVoices,
+                                notListeningOn: String? = nil) throws -> RunServices {
         let clock = HarnessClock(.simulated)
         let sr = config.audio.sampleRate
         let server = ScriptedRealtime(clock: clock, sampleRate: sr)
-        let judge = StubJudgeHTTP()
+        let judge = StubJudgeHTTP(notListeningOn: notListeningOn)
         var clips: [String: [Float]]
         var shapes: [String: ClipShape]
         switch voices {

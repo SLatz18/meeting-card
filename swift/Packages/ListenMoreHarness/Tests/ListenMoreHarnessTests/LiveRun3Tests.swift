@@ -51,3 +51,32 @@ final class LiveRun3Tests: XCTestCase {
         XCTAssertTrue(back.contains("Them's longest pause 0.60 s (28.56-29.16) (a new utterance from 1.00 s)"), back)
     }
 }
+
+/// Fixes from the fourth live run (0390f5e on the box).
+@MainActor
+final class LiveRun4Tests: XCTestCase {
+    /// A judged not_listening on You's reply, then You cut in 8 s later: the engine raises the interrupt
+    /// and its cue policy holds it for the global cooldown. The report names the hold.
+    static let judgedThenCutIn = Scenario(
+        name: "judged-then-cut-in",
+        summary: "a judged not_listening, then a cut-in inside the global cooldown",
+        lines: [
+            Line("a1", .themA, "Let me walk you through the plan for the release next week.", .at(0.5)),
+            Line("y1", .you, "Okay, I see what you mean about the plan.", .after("a1", gap: 1.0)),
+            Line("a2", .themA, "The first step is the database move and then the services follow one at a time over the weekend.", .after("y1", gap: 1.0)),
+            Line("y2", .you, "Sorry to cut in. I think the services should go first because they are smaller.", .beforeEnd("a2", lead: 4.0)),
+        ])
+
+    func testHeldCueIsNamedInTheDiagnostics() async throws {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: out) }
+        let summary = try await Harness.run(HarnessOptions(mode: .offline, scenarios: [Self.judgedThenCutIn], outputDirectory: out,
+                                                           environment: [:], offlineNotListeningOn: "what you mean"))
+        let r = try XCTUnwrap(summary.results.first)
+        XCTAssertEqual(r.cues.falseCues.map(\.type), [.notListening], "offline, the judge's cue isn't tolerated")
+        XCTAssertEqual(r.cues.missed.map(\.type), [.interrupt])
+        let held = r.diagnostics.first { $0.hasPrefix("missed interrupt: the engine raised it") }
+        XCTAssertNotNil(held, "\(r.diagnostics)")
+        XCTAssertTrue(held?.contains("held it (global cooldown); last cue shown: not_listening at") ?? false, held ?? "")
+    }
+}
