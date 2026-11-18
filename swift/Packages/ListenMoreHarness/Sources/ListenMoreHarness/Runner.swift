@@ -82,7 +82,7 @@ public struct RunServices: @unchecked Sendable {
     /// What the engine runs with: `config` unless a test simulates an engine regression.
     public var engineConfig: ListenMoreConfig
     /// Test hook: controls the runner records but doesn't perform (a broken Mute or Pause).
-    public var ignoredControls: Set<ControlKind> = []
+    var ignoredControls: Set<ControlKind> = []
     /// The not_listening judge is on (off: `Harness.judgeOff`, 0 judge calls).
     public var judgeOn = true
     /// The audio has pauses inside lines (live TTS, espeak).
@@ -97,9 +97,9 @@ public struct RunServices: @unchecked Sendable {
     public var shapes: [String: ClipShape]
     /// Offline lockstep: how long the runner waits for the engine or the caption feed to catch up with a
     /// frame before it counts a barrier timeout. Tests shorten it.
-    public var barrierTimeoutS = 10.0
+    var barrierTimeoutS = 10.0
     /// Test hook: the transcript store under the counting wrapper (default: the file store).
-    public var transcriptStore: TranscriptStore?
+    var transcriptStore: TranscriptStore?
 }
 
 public struct CaptionRecord: Sendable {
@@ -188,8 +188,11 @@ public struct RunRecord: @unchecked Sendable {
     /// The recorder's last file before teardown (nil when nothing was ever written).
     public var recorderLastURL: URL?
     public var barrierTimeouts = 0
-    /// Of those, the waits for a final transcript to reach the caption feed.
+    /// `barrierTimeouts` split by wait: for the engine to ingest a call frame, for a final transcript to reach
+    /// the caption feed, and the engine's own wait on the GPT layer. They add up to `barrierTimeouts`.
+    public var callBarrierTimeouts = 0
     public var finalsBarrierTimeouts = 0
+    public var engineBarrierTimeouts = 0
     public var problems: [String] = []
     /// The same audio replayed through `LocalLayer` afterwards (diagnostics for local cues).
     public var shadow: ShadowTrace?
@@ -341,6 +344,7 @@ public final class ScenarioRun: CoachSessionDelegate {
                     expectedCallFrames += 1
                     if !(await engine.callIngests.wait(atLeast: expectedCallFrames, timeout: services.barrierTimeoutS)) {
                         record.barrierTimeouts += 1
+                        record.callBarrierTimeouts += 1
                         expectedCallFrames = engine.callIngests.current
                     }
                 }
@@ -388,6 +392,7 @@ public final class ScenarioRun: CoachSessionDelegate {
         record.storeWritten = store.written
         record.transcriptsFolder = transcriptsDir
         record.barrierTimeouts += engine.barrierTimeouts
+        record.engineBarrierTimeouts = engine.barrierTimeouts
         record.sockets = services.sockets?.stats() ?? SocketStats()
         record.micOfferedWhileMuted = mic.offeredWhileMuted
         record.micMuteCalls = mic.muteCalls

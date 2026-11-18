@@ -210,11 +210,80 @@ final class HarnessSafetyChecksTests: XCTestCase {
         }
         let keep = Scenarios.silenceToStop, save = Scenarios.muteUnmute
         XCTAssertTrue(try result(keep, [], check: "keep-nothing"))
-        XCTAssertTrue(try result(keep, ["transcripts"], check: "keep-nothing"), "an empty transcripts folder is allowed")
+        XCTAssertFalse(try result(keep, ["transcripts"], check: "keep-nothing"), "keep-nothing: the run directory is empty")
         XCTAssertFalse(try result(keep, ["transcripts", "transcripts/Call 1.md"], check: "keep-nothing"))
         XCTAssertFalse(try result(keep, ["other"], check: "keep-nothing"))
+        XCTAssertFalse(try result(keep, ["!symlink: transcripts"], check: "keep-nothing"))
+        XCTAssertFalse(try result(keep, ["!unreadable: ."], check: "keep-nothing"))
         XCTAssertTrue(try result(save, ["transcripts", "transcripts/Call 1.md"], check: "transcript stays in the run dir"))
         XCTAssertFalse(try result(save, ["transcripts", "transcripts/Call 1.md", "stray.md"], check: "transcript stays in the run dir"))
+        XCTAssertFalse(try result(save, ["transcripts", "!symlink: transcripts/x"], check: "transcript stays in the run dir"))
+        XCTAssertFalse(try result(save, ["!symlink: transcripts"], check: "transcript stays in the run dir"))
+        XCTAssertFalse(try result(save, ["transcripts", "!unreadable: transcripts/sub"], check: "transcript stays in the run dir"))
+    }
+
+    // MARK: the run directory listing
+
+    func makeTempDir() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    /// A symlink is listed under a marker and never followed, so one named `transcripts` doesn't pass as the
+    /// transcripts folder and what it points at isn't walked.
+    func testASymlinkInTheRunDirectoryIsFlaggedAndNotFollowed() throws {
+        let root = try makeTempDir()
+        let target = try makeTempDir()
+        try "secret".write(to: target.appendingPathComponent("inside.md"), atomically: true, encoding: .utf8)
+        let run = RunDirectory(url: root)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("transcripts"), withDestinationURL: target)
+        XCTAssertEqual(run.entries(), ["!symlink: transcripts"], "listed as a symlink, target not walked")
+
+        let folder = root.appendingPathComponent("real", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("x"), withDestinationURL: target.appendingPathComponent("inside.md"))
+        XCTAssertEqual(run.entries(), ["!symlink: real/x", "!symlink: transcripts", "real"])
+    }
+
+    func testAPlainTreeIsListedRecursively() throws {
+        let root = try makeTempDir()
+        let sub = root.appendingPathComponent("transcripts/deep", isDirectory: true)
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        try "x".write(to: sub.appendingPathComponent("a.md"), atomically: true, encoding: .utf8)
+        try "x".write(to: root.appendingPathComponent(".hidden"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(RunDirectory(url: root).entries(), [".hidden", "transcripts", "transcripts/deep", "transcripts/deep/a.md"])
+    }
+
+    /// A missing run directory is a failure, not an empty one.
+    func testAMissingRunDirectoryDoesNotListAsEmpty() throws {
+        let gone = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-missing-\(UUID().uuidString)")
+        XCTAssertEqual(RunDirectory(url: gone).entries(), ["!unreadable: ."])
+    }
+
+    /// A folder the walk can't list is marked, not skipped (injected lister: works as root too).
+    func testAFolderThatCannotBeListedIsMarked() throws {
+        let root = try makeTempDir()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("transcripts/locked"), withIntermediateDirectories: true)
+        let run = RunDirectory(url: root)
+        let entries = run.entries { path in
+            path.hasSuffix("/locked") ? nil : try? FileManager.default.contentsOfDirectory(atPath: path)
+        }
+        XCTAssertEqual(entries, ["!unreadable: transcripts/locked", "transcripts", "transcripts/locked"])
+    }
+
+    /// The same on the real filesystem, where a permission error needs a user that can't read past a mode 000
+    /// folder: root (the CI container) can, so it skips.
+    func testAnUnreadableFolderOnDiskIsMarked() throws {
+        try XCTSkipIf(geteuid() == 0, "running as root: mode 000 doesn't stop the listing, so a real permission error can't be made (the injected-lister test covers the logic)")
+        let root = try makeTempDir()
+        let locked = root.appendingPathComponent("transcripts/locked", isDirectory: true)
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try "x".write(to: locked.appendingPathComponent("a.md"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+        XCTAssertEqual(RunDirectory(url: root).entries(), ["!unreadable: transcripts/locked", "transcripts", "transcripts/locked"])
     }
 
     // MARK: audio signature (nit)
@@ -259,18 +328,13 @@ final class HarnessSafetyChecksTests: XCTestCase {
         let second = Self.shortScenario("second", saving: false)
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
         let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-blocker-\(UUID().uuidString)")
-        let originalTmp = ProcessInfo.processInfo.environment["TMPDIR"]
         defer {
-            if let originalTmp { setenv("TMPDIR", originalTmp, 1) } else { unsetenv("TMPDIR") }
             try? FileManager.default.removeItem(at: out)
             try? FileManager.default.removeItem(at: blocker)
         }
         var options = HarnessOptions(mode: .offline, scenarios: [first, second], outputDirectory: out, environment: [:])
-        options.afterRun = { scenario, _ in
-            guard scenario.name == "first" else { return }
-            FileManager.default.createFile(atPath: blocker.path, contents: Data())
-            setenv("TMPDIR", blocker.path, 1)
-        }
+        FileManager.default.createFile(atPath: blocker.path, contents: Data())
+        options.runDirectoryParent = { scenario in scenario.name == "first" ? FileManager.default.temporaryDirectory : blocker }
         do {
             _ = try await Harness.run(options)
             XCTFail("the second scenario's run directory cannot be created")
@@ -280,6 +344,35 @@ final class HarnessSafetyChecksTests: XCTestCase {
         let results = try String(contentsOf: out.appendingPathComponent("results.md"), encoding: .utf8)
         XCTAssertTrue(results.contains("INCOMPLETE: second stopped"), results)
         XCTAssertTrue(results.contains("| first |"), results)
+        XCTAssertFalse(results.contains(blocker.path), "no file path in the output files")
+        XCTAssertFalse(results.contains(blocker.lastPathComponent), "no file path in the output files")
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: out.appendingPathComponent("results.json"))) as? [String: Any])
+        XCTAssertEqual(json["incomplete"] as? Bool, true, "results.json says the run is incomplete")
+        XCTAssertEqual((json["scenarios"] as? [Any])?.count, 1)
+    }
+
+    /// A scenario whose config cannot be loaded stops the run the same way, without the config error's detail
+    /// in the output files.
+    @MainActor
+    func testAScenarioConfigThatCannotLoadStillWritesTheOutputs() async throws {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: out) }
+        var options = HarnessOptions(mode: .offline, scenarios: [Self.shortScenario("only", saving: false)], outputDirectory: out, environment: [:])
+        options.engineOverrides = ["gpt": ["store": true]]
+        do {
+            _ = try await Harness.run(options)
+            XCTFail("the engine config is invalid")
+        } catch {
+            XCTAssertEqual(error as? ConfigError, .invalid("gpt.store must be false"))
+        }
+        let names = try FileManager.default.contentsOfDirectory(atPath: out.path).sorted()
+        XCTAssertEqual(names, ["cost-log.jsonl", "results.json", "results.md"])
+        let results = try String(contentsOf: out.appendingPathComponent("results.md"), encoding: .utf8)
+        XCTAssertTrue(results.contains("INCOMPLETE: only stopped: config error (invalid)"), results)
+        XCTAssertFalse(results.contains("gpt.store"), "the config error's detail stays out of the output files")
+        let json = try String(contentsOf: out.appendingPathComponent("results.json"), encoding: .utf8)
+        XCTAssertTrue(json.contains("\"incomplete\" : true"), json)
+        XCTAssertFalse(json.contains("gpt.store"))
     }
 
     @MainActor

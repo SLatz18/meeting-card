@@ -94,8 +94,10 @@ a run sweeps folders a crashed run left behind (dead pid and untouched for five 
 appeared anywhere else (temp dir, the repository, the home folder's top level). The same audit also looks
 in every new file there for the scenario's script text, so a transcript written outside the run directory
 (a keep-nothing run's, or a saving run's copy) fails the persistence check wherever it landed.
-The run directory itself is checked before it is wiped: it may hold only the transcripts folder (empty when
-saving is off), so a file written next to that folder is named too.
+The run directory itself is checked before it is wiped: it must be empty when saving is off, and may hold
+only the transcripts folder (and what is in it) when saving is on, so a file written next to that folder is
+named too. The listing never follows a symlink and never skips a folder it can't read: both are listed with
+a `!` marker that no rule accepts, and a missing run directory counts as unreadable.
 
 For each missed or false interrupt, the report adds a diagnostic: the run's own audio replayed through
 `LocalLayer` with the same Mutes and Pauses, saying whether the local rule raised the cut-in on that

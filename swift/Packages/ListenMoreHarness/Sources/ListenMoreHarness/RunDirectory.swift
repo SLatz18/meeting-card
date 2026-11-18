@@ -10,9 +10,9 @@ import Darwin
 public struct RunDirectory {
     public let url: URL
 
-    public static func create() throws -> RunDirectory {
+    public static func create(in parent: URL = FileManager.default.temporaryDirectory) throws -> RunDirectory {
         let name = "lm-harness-\(getpid())-\(UUID().uuidString)"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: true)
+        let url = parent.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return RunDirectory(url: url)
     }
@@ -55,9 +55,39 @@ public struct RunDirectory {
         pid == getpid() || kill(pid, 0) == 0 || errno == EPERM
     }
 
-    /// Every file and folder in the directory, as paths relative to it, sorted.
+    /// Every entry in the directory, as paths relative to it, sorted, read with `lstat` semantics: a symlink
+    /// is never followed and is listed as `!symlink: <path>`; a folder that can't be read is listed as
+    /// `!unreadable: <path>`, and a run directory that is missing or can't be read as `!unreadable: .`
+    /// (a missing run directory is a failure, not an empty one). No allowlist rule matches a `!` entry.
     public func entries() -> [String] {
-        ((try? FileManager.default.subpathsOfDirectory(atPath: url.path)) ?? []).sorted()
+        entries(contentsOf: { try? FileManager.default.contentsOfDirectory(atPath: $0) })
+    }
+
+    /// `entries()` with the directory lister injected, so the unreadable-folder path is testable as root.
+    func entries(contentsOf list: (String) -> [String]?) -> [String] {
+        let fm = FileManager.default
+        var out: [String] = []
+        func walk(_ rel: String) {
+            let path = rel.isEmpty ? url.path : url.path + "/" + rel
+            guard let names = list(path) else {
+                out.append("!unreadable: " + (rel.isEmpty ? "." : rel))
+                return
+            }
+            for name in names {
+                let child = rel.isEmpty ? name : rel + "/" + name
+                switch (try? fm.attributesOfItem(atPath: path + "/" + name))?[.type] as? FileAttributeType {
+                case .typeDirectory?:
+                    out.append(child)
+                    walk(child)
+                case .typeSymbolicLink?:
+                    out.append("!symlink: " + child)
+                default:
+                    out.append(child)
+                }
+            }
+        }
+        walk("")
+        return out.sorted()
     }
 
     /// Removes the directory; true when it's gone.

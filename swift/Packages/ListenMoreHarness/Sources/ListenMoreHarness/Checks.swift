@@ -90,9 +90,10 @@ public enum Checks {
 
         // Persistence.
         let everFiles = r.transcripts.flatMap(\.files)
-        // The run directory may hold only the transcripts folder (and, saving, what is in it).
+        // Keep-nothing: the run directory is empty. Saving: it holds only the transcripts folder and what is in
+        // it. Entries the listing marks "!" (a symlink, an unreadable folder) match neither rule.
         let strays = r.runDirEntries.filter { e in
-            r.scenario.saving ? !(e == "transcripts" || e.hasPrefix("transcripts/")) : e != "transcripts"
+            r.scenario.saving ? !(e == "transcripts" || e.hasPrefix("transcripts/")) : true
         }
         let strayNote = strays.isEmpty ? "" : "; run dir holds unexpected entries: \(strays.prefix(5).joined(separator: ", "))"
         if !s.saving {
@@ -132,7 +133,8 @@ public enum Checks {
 
         // Scenario-specific. Offline the windows are exact (lockstep). Live, frames already queued when a
         // control was applied still drain: engine frames count from when the engine handled the control;
-        // transcriber traffic and captions half a second after that.
+        // transcriber traffic half a second after that; captions from the control itself for Mute, half a
+        // second after the engine handled it for Pause.
         func window(_ w: ClosedRange<Double>, from marks: [Double], slack: Double = 0) -> ClosedRange<Double> {
             let handled = live ? marks.first { $0 >= w.lowerBound - 0.05 && $0 <= w.upperBound } ?? w.lowerBound : w.lowerBound
             let lo = handled + (live ? slack : 0) + 1e-6

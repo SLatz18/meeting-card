@@ -32,15 +32,22 @@ final class LockstepStallTests: XCTestCase {
         return (record, Date().timeIntervalSince(started))
     }
 
+    func assertCountersAddUp(_ r: RunRecord, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(r.barrierTimeouts, r.callBarrierTimeouts + r.finalsBarrierTimeouts + r.engineBarrierTimeouts,
+                       "call \(r.callBarrierTimeouts) + finals \(r.finalsBarrierTimeouts) + engine \(r.engineBarrierTimeouts)", file: file, line: line)
+    }
+
     func testBaselineHasNoTimeouts() async throws {
         let (record, _) = try await run(dropping: 0)
         XCTAssertEqual(record.barrierTimeouts, 0)
+        assertCountersAddUp(record)
         XCTAssertFalse(record.problems.contains("lockstep stalled"))
     }
 
     func testOneDroppedFinalCostsOneTimeoutNotOnePerFrame() async throws {
         let (record, seconds) = try await run(dropping: 1)
         XCTAssertEqual(record.finalsBarrierTimeouts, 1, "re-baselined after the dropped final")
+        assertCountersAddUp(record)
         XCTAssertFalse(record.problems.contains("lockstep stalled"))
         XCTAssertLessThan(seconds, 60)
         let result = Checks.evaluate(record)
@@ -51,6 +58,9 @@ final class LockstepStallTests: XCTestCase {
         let (record, seconds) = try await run(dropping: 1000)
         XCTAssertGreaterThanOrEqual(record.barrierTimeouts, 5)
         XCTAssertGreaterThanOrEqual(record.finalsBarrierTimeouts, 1)
+        assertCountersAddUp(record)
+        XCTAssertEqual(record.finalsBarrierTimeouts, record.barrierTimeouts - record.callBarrierTimeouts - record.engineBarrierTimeouts,
+                       "finals timeouts are what is left after the call-frame and engine waits")
         XCTAssertTrue(record.problems.contains("lockstep stalled"))
         XCTAssertLessThan(seconds, 60)
         let result = Checks.evaluate(record)
