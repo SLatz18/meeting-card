@@ -13,7 +13,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Toolchain
         run: |
           xcodebuild -version
@@ -142,7 +142,7 @@ jobs:
           for ref in $(grep -oE '\(coaching-display/[^)]+\.png\)' "$doc" | tr -d '()'); do
             test -s "docs/$ref" || { echo "$doc embeds missing docs/$ref"; exit 1; }
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cue-display-snapshots
           path: swift/build/cue-display/
@@ -164,7 +164,7 @@ jobs:
       - name: Package the .app (unsigned build artifact, not notarized)
         working-directory: swift/build/dd/Build/Products/Release
         run: ditto -c -k --keepParent MeetingCardSwift.app "$GITHUB_WORKSPACE/MeetingCardSwift-app.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: MeetingCardSwift-app
           path: MeetingCardSwift-app.zip
@@ -172,11 +172,11 @@ jobs:
         run: |
           ditto swift/build/dd-test/Build/Products/Release/MeetingCardSwift.app "$RUNNER_TEMP/MeetingCardSwift-Test.app"
           ditto -c -k --keepParent "$RUNNER_TEMP/MeetingCardSwift-Test.app" "$GITHUB_WORKSPACE/MeetingCardSwift-Test-app.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: MeetingCardSwift-Test-app
           path: MeetingCardSwift-Test-app.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: sck-probe
@@ -186,7 +186,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: build-logs
           path: swift/build/*.log
@@ -197,10 +197,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: head
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           path: base
@@ -257,13 +257,13 @@ jobs:
             "$RUNNER_TEMP/shots/cards/base" "$RUNNER_TEMP/shots/cards/head" "$RUNNER_TEMP/shots/compare" 12 || rc=$?
           cat "$RUNNER_TEMP/shots/compare/report.md" >> "$GITHUB_STEP_SUMMARY"
           exit $rc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: snapshots
           path: ${{ runner.temp }}/shots/
       # The coach card and pill in each state (light and dark), and the morph and collapse end states.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: coach-card-snapshots
