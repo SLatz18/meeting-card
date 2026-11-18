@@ -47,6 +47,22 @@ final class LocalLayerTests: XCTestCase {
         }
     }
 
+    /// A cut-in fires on the frame its utterance reaches `cut_in_backchannel_max_ms` (1.2 s), wherever
+    /// on the clock it starts.
+    func testCutInFiresAtTheBackchannelLengthAnywhereOnTheClock() throws {
+        XCTAssertEqual(config.local.cutInBackchannelMaxMs, 1200)
+        let mic = Synthetic.track(8, [(3.0, 6.0)], f0: meF0)
+        let call = Synthetic.track(8, [(1.0, 5.5)], f0: othersF0)
+        var off: [Int] = []
+        for k in 0..<200 {
+            let start = k * 137
+            let evs = Synthetic.runLocal(config, mic: mic, call: call, startFrame: start)
+            let cut = try XCTUnwrap(evs.first { $0.kind == .interrupt }, "no interrupt from frame \(start)")
+            if abs(cut.t - cut.onset - 1.2) > 1e-9 { off.append(start) }
+        }
+        XCTAssertEqual(off, [], "the interrupt fired a frame off 1.20 s after onset from these start frames")
+    }
+
     func testCutInNeedsTheOverlapAndThemContinuing() throws {
         let evs = run(8, me: [(3.0, 6.0)], others: [(1.0, 5.5)])
         XCTAssertEqual(kinds(evs), [.interrupt])

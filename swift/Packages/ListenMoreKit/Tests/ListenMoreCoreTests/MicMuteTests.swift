@@ -823,8 +823,9 @@ final class LocalLayerMicMuteTests: XCTestCase {
     }
 
     /// Mute drops the user's turn: talking again after unmute starts a new run, so no monologue spans the gap.
+    /// The new run (from 5.0 s) is 4.0 s long at the end of the clip, so the soft limit sits above that.
     func testMuteDropsTheTurnSoNoMonologueSpansTheGap() {
-        config.local.monologueSoftS = 4
+        config.local.monologueSoftS = 4.5
         config.local.monologueStrongS = 100
         config.local.monologueRelativeMinRuns = 1000
         let me: [(Double, Double)] = [(1.0, 4.0), (5.0, 7.5)]
