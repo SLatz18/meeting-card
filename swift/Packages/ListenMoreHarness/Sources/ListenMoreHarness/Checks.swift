@@ -144,7 +144,9 @@ public enum Checks {
         check("self-pivot", selfPivotOK,
               "candidates \(r.pivotCandidates), posts \(r.selfPivotPosts) (engine \(r.selfPivotEnginePosts)), judge calls \(r.selfPivotEngineJudgeCalls), redirects \(r.selfPivotRedirects), cues \(shown)")
         check("judge store false", r.storeViolations == 0, "\(r.storeViolations) judge requests without store false")
-        let problems = r.problems.filter { $0 != "transcriberClearRejected" }
+        // A scripted call stream is digital silence wherever nobody on the call speaks, which the coach
+        // log's silent-call report (AudioFlowMeter, #45) rightly reports; here that is the script, not a problem.
+        let problems = r.problems.filter { $0 != "transcriberClearRejected" && !$0.hasPrefix("callAudioSilent(") }
         check("session-problems", problems.isEmpty, problems.isEmpty ? "none reported" : problems.joined(separator: ", "))
 
         // Scenario-specific. Offline the windows are exact (lockstep). Live, frames already queued when a
