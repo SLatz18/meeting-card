@@ -120,15 +120,17 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var pivotInvites: [String]
         /// The user's reply starts within this long of their last speech, runs at least
         /// `pivot_reply_min_words`, and is about the user: first-person words are at least
-        /// `pivot_first_person_share` of first- plus second-person words, and a sentence opens with a
-        /// pivot opener or there are at least `pivot_first_person_min_words` first-person words.
+        /// `pivot_first_person_share` of first-person plus `pivot_other_person` words, and a sentence
+        /// opens with a pivot opener or there are at least `pivot_first_person_min_words` first-person
+        /// words. A first sentence with a `pivot_sympathy` phrase makes the reply about them.
         public var pivotReplyMaxStartS: Double
         public var pivotReplyMinWords: Int
         public var pivotOpeners: [String]
         public var pivotFirstPerson: [String]
-        public var pivotSecondPerson: [String]
+        public var pivotOtherPerson: [String]
         public var pivotFirstPersonMinWords: Int
         public var pivotFirstPersonShare: Double
+        public var pivotSympathy: [String]
         /// A sentence or clause starting with one of these (after any lead-in word) asks a question.
         public var pivotQuestionOpeners: [String]
         /// Words skipped at the start of a sentence or clause before an opener is matched ("oh nice,").

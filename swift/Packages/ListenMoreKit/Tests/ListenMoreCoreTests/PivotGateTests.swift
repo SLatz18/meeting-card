@@ -16,6 +16,9 @@ enum PivotLines {
     static let engaged = "We just got engaged last weekend and I am still so excited about it."
     static let rememberAboutThem = "Oh no, I remember you said he had surgery last spring, that sounds really hard on your whole family, sending all of you good thoughts."
     static let meTooMidSentence = "That is wonderful news, congratulations to you both, your sister told me too and she was so thrilled for you."
+    static let commiseration = "Oh no, I am so sorry to hear that, I hope he gets better soon, I will be thinking of him and I am here if I can help."
+    static let sympathyThenStory = "I am so sorry to hear that, I had the same thing with my knee last year and I was on crutches for a month."
+    static let aboutThirdPerson = "My week was busy, I had my brother over and he and his kids stayed with us, they loved the park."
     static let brief = "Me too, same here."
     static let release = "The release is scheduled for Thursday and the test plan is signed off."
     static let releaseReply = "Great, I will update the checklist and send the release notes to the team after lunch, then I will close my tickets."
@@ -184,6 +187,22 @@ final class PivotGateTests: XCTestCase {
 
     func testMeTooInsideASentenceIsNone() {
         assertNoCandidate(pivot(reply: PivotLines.meTooMidSentence, share: PivotLines.engaged))
+    }
+
+    // MARK: about them
+
+    func testCommiserationIsNone() {
+        assertNoCandidate(pivot(reply: PivotLines.commiseration, share: PivotLines.worried))
+    }
+
+    /// Mostly first person, but it leads with sympathy for them.
+    func testASympathyLedReplyIsNone() {
+        assertNoCandidate(pivot(reply: PivotLines.sympathyThenStory, share: PivotLines.worried))
+    }
+
+    /// Three first-person words, but as many about someone else (he, his, they).
+    func testAReplyAsMuchAboutSomeoneElseIsNone() {
+        assertNoCandidate(pivot(reply: PivotLines.aboutThirdPerson))
     }
 
     /// At these frames the raw differences of frame times land a hair past 5 s (2, 11888) or short of
