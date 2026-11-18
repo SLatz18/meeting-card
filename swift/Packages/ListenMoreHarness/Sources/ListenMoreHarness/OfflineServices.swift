@@ -224,18 +224,24 @@ final class ScriptedSocket: WebSocketConnection, @unchecked Sendable {
     }
 }
 
-/// Offline judge endpoint: every Responses call answers `none` (no not_listening cue), with token usage.
+/// Offline judge endpoint: every Responses call answers `none` (no not_listening cue), with token usage;
+/// with `notListeningOn`, a request whose transcript has that text gets `not_listening`.
 public final class StubJudgeHTTP: HTTPTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls = 0
+    private let notListeningOn: String?
 
-    public init() {}
+    public init(notListeningOn: String? = nil) {
+        self.notListeningOn = notListeningOn
+    }
 
     public var calls: Int { lock.withLock { _calls } }
 
     public func post(url: URL, headers: [String: String], body: Data, timeout: TimeInterval) async throws -> (status: Int, body: Data) {
         lock.withLock { _calls += 1 }
-        let inner = #"{"cue":"none","confidence":0.9,"short_reason":"stub"}"#
+        let flagged = notListeningOn.map { String(decoding: body, as: UTF8.self).contains($0) } ?? false
+        let inner = flagged ? #"{"cue":"not_listening","confidence":0.9,"short_reason":"stub"}"#
+                            : #"{"cue":"none","confidence":0.9,"short_reason":"stub"}"#
         let reply: [String: Any] = [
             "output": [["type": "message", "content": [["type": "output_text", "text": inner]]]],
             "usage": ["input_tokens": 400, "input_tokens_details": ["cached_tokens": 0], "output_tokens": 20],

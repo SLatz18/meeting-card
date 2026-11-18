@@ -19,7 +19,9 @@ public struct ScenarioResult: Sendable {
     public var billedSeconds: Double
     public var lastMeter: CostReading?
     public var judgeCalls: Int
-    /// For each missed or false interrupt: what the shadow local layer saw on the same audio.
+    /// For each missed cue the engine's own policy held, when and why; for each missed or false
+    /// interrupt, what the shadow local layer saw on the same audio; after each Unmute, You's and Them's
+    /// longest pauses in the first words back.
     public var diagnostics: [String] = []
 
     public var passed: Bool { checks.allSatisfy(\.passed) }
@@ -216,6 +218,14 @@ public enum Checks {
         }
 
         var diagnostics: [String] = []
+        for e in match.missed {
+            for h in r.engineHolds where h.type == e.type && e.window.contains(h.t) {
+                let shown = r.cues.last { $0.t <= h.t }
+                diagnostics.append(String(format: "missed %@: the engine raised it at %.2f s and its cue policy held it (%@)%@", e.type.rawValue, h.t,
+                                          Self.holdReason(h.why),
+                                          shown.map { String(format: "; last cue shown: %@ at %.2f s", $0.type.rawValue, $0.t) } ?? ""))
+            }
+        }
         if let shadow = r.shadow {
             for e in match.missed where e.type == .interrupt {
                 diagnostics.append("missed interrupt (\(e.reason)): " + shadow.explainCutIn(around: e.window, config: r.config))
@@ -223,10 +233,22 @@ public enum Checks {
             for c in match.falseCues where c.type == .interrupt {
                 diagnostics.append(String(format: "false interrupt at %.2f s: ", c.t) + shadow.explainCutIn(around: (c.t - 1.5)...c.t, config: r.config))
             }
+            for unmute in r.applied where unmute.kind == .unmute {
+                diagnostics.append(shadow.explainFirstWordsBack(unmute: unmute.t, config: r.config))
+            }
         }
         return ScenarioResult(scenario: s.name, summary: s.summary, mode: r.mode, transcription: tx, speakers: sp, cues: match,
                               checks: checks, billedSeconds: r.sockets.billedSeconds, lastMeter: r.meters.last, judgeCalls: r.judgeCalls,
                               diagnostics: diagnostics)
+    }
+
+    static func holdReason(_ why: CuePolicy.HoldReason) -> String {
+        switch why {
+        case .global: return "global cooldown"
+        case .type: return "same-type cooldown"
+        case .closing: return "quiet after a closing phrase"
+        case .onScreen: return "the last cue still on screen"
+        }
     }
 
     static func fmt(_ x: Double) -> String { String(format: "%.1f", x) }

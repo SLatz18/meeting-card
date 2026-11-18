@@ -70,6 +70,48 @@ final class CoachPipelineTests: XCTestCase {
         XCTAssertEqual(verdict(ev, at: 5.5, done), .drop)
     }
 
+    /// The judge-on mute-unmute take of the box run at 0390f5e, y5's cut-in on a5 (raw voicing from its
+    /// shadow trace: You onsets 38.00, 38.62 and 40.02 s; Them quiet 35.86-36.26, 36.94-37.14 and
+    /// 40.02-40.36 s), with the judge's not_listening on y4 landing at 33.64 s. The local layer raises the
+    /// interrupt at 39.20 s, as the shadow did. After a judged cue a local interrupt answers only to its
+    /// own cooldown, so it shows 5.56 s after the verdict; a verdict still on screen (`on_screen_s`,
+    /// 4.5 s) holds it, and the cut-in is dropped, not shown when the verdict clears.
+    func testLiveTakeJudgedNotListeningLeavesTheCutInToItsOwnCooldown() throws {
+        let them: [(Double, Double)] = [(34.6, 35.86), (36.26, 36.94), (37.14, 40.02), (40.36, 42.0)]
+        let you: [(Double, Double)] = [(38.00, 38.24), (38.62, 39.64), (40.02, 44.0)]
+        let mic = Synthetic.track(45, you, f0: 120), call = Synthetic.track(45, them, f0: 210)
+        func replay(verdictAt: Double?) -> (cues: [Cue], held: [CuePolicy.Hold]) {
+            let gpt = StubPipelineGpt()
+            let p = CoachPipeline(config: config, gpt: gpt)
+            let hop = config.frameSamples
+            var cues: [Cue] = []
+            var pending = verdictAt
+            for i in 0..<(mic.count / hop) {
+                let t = Double(i + 1) * config.frameS
+                if let v = pending, t >= v {
+                    gpt.queued.append(.offer(label: "not_listening", t: t, refT: v - 1, confidence: 0.9))
+                    pending = nil
+                }
+                cues += p.process(t: t, mic: mic[(i * hop)..<((i + 1) * hop)], call: call[(i * hop)..<((i + 1) * hop)])
+            }
+            return (cues, p.policy.held)
+        }
+        XCTAssertEqual(config.cues.globalCooldownS, 20)
+        XCTAssertEqual(config.cues.onScreenS, 4.5)
+        let alone = replay(verdictAt: nil)
+        XCTAssertEqual(alone.cues.map(\.type), [.interrupt])
+        XCTAssertEqual(alone.cues.first?.t ?? 0, 39.20, accuracy: 0.01, "the shadow's time")
+        let judged = replay(verdictAt: 33.64)
+        XCTAssertEqual(judged.cues.map(\.type), [.notListening, .interrupt])
+        XCTAssertEqual(judged.cues.last?.t ?? 0, 39.20, accuracy: 0.01)
+        XCTAssertEqual(judged.held.filter { $0.type == .interrupt }, [])
+        XCTAssertEqual(replay(verdictAt: 34.70).cues.map(\.type), [.notListening, .interrupt], "4.5 s after the verdict it shows")
+        let onScreen = replay(verdictAt: 34.72)
+        XCTAssertEqual(onScreen.cues.map(\.type), [.notListening], "the verdict is still on screen")
+        XCTAssertEqual(onScreen.held.filter { $0.type == .interrupt }.map(\.why), [.onScreen])
+        XCTAssertEqual(replay(verdictAt: 19.0).cues.map(\.type), [.notListening, .interrupt])
+    }
+
     // MARK: pipeline
 
     let silence = [Float](repeating: 0, count: 480)

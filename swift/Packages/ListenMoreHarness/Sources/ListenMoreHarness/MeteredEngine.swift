@@ -12,6 +12,13 @@ public final class MeteredEngine: CoachEngine, @unchecked Sendable {
         public var samples: Int
     }
 
+    /// A cue the engine's own policy held back, at run-clock time (engine time from its start).
+    public struct Hold: Sendable {
+        public var t: Double
+        public var type: CueType
+        public var why: CuePolicy.HoldReason
+    }
+
     public let inner: LocalCoachEngine
     private let clock: HarnessClock
     private let lockstep: Bool
@@ -20,6 +27,7 @@ public final class MeteredEngine: CoachEngine, @unchecked Sendable {
     private var _starts: [Double] = []
     private var _stops: [Double] = []
     private var _micMutes: [(t: Double, muted: Bool)] = []
+    private var _holds: [Hold] = []
     private var _barrierTimeouts = 0
     /// Call frames the engine has finished (and, offline, the GPT layer has caught up on).
     public let callIngests = AsyncCounter()
@@ -41,9 +49,11 @@ public final class MeteredEngine: CoachEngine, @unchecked Sendable {
     public var starts: [Double] { lock.withLock { _starts } }
     public var stops: [Double] { lock.withLock { _stops } }
     public var micMutes: [(t: Double, muted: Bool)] { lock.withLock { _micMutes } }
+    public var holds: [Hold] { lock.withLock { _holds } }
     public var barrierTimeouts: Int { lock.withLock { _barrierTimeouts } }
 
     public func start(config: ListenMoreConfig, apiKey: APIKey?) {
+        collectHolds()
         inner.start(config: config, apiKey: apiKey)
         let t = clock.now()
         lock.withLock { _starts.append(t) }
@@ -65,9 +75,20 @@ public final class MeteredEngine: CoachEngine, @unchecked Sendable {
     }
 
     public func stop() {
+        collectHolds()
         inner.stop()
         let t = clock.now()
         lock.withLock { _stops.append(t) }
+    }
+
+    /// The running engine's holds, before a stop or restart drops its policy. On the engine queue.
+    private func collectHolds() {
+        guard inner.isRunning else { return }
+        let held = inner.cueHolds
+        lock.withLock {
+            let start = _starts.last ?? 0
+            _holds += held.map { Hold(t: start + $0.t, type: $0.type, why: $0.why) }
+        }
     }
 
     /// Runs on the session's engine queue, which stays blocked until the GPT layer's loop has answered

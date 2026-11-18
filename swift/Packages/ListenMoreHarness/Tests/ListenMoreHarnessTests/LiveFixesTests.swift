@@ -74,7 +74,8 @@ final class LiveFixesTests: XCTestCase {
         XCTAssertEqual(e.window.upperBound, y2.end + 0.2 + CueOracle.liveTranscriptAllowanceS, accuracy: 1e-9)
     }
 
-    /// Judge failures are classified by status and OpenAI's error code, or the thrown error's type.
+    /// Judge failures are classified by status and OpenAI's error code, or the thrown error's type. The
+    /// regional-host redirect (401 incorrect_hostname, then a retry on the named host) is counted apart.
     func testJudgeFailureClasses() async throws {
         final class Replies: HTTPTransport, @unchecked Sendable {
             var n = 0
@@ -93,7 +94,8 @@ final class LiveFixesTests: XCTestCase {
         do { _ = try await http.post(url: url, headers: [:], body: Data(), timeout: 1) } catch {}
         _ = try await http.post(url: url, headers: [:], body: Data(), timeout: 1)
         XCTAssertEqual(http.calls, 3)
-        XCTAssertEqual(http.failures, ["HTTP 401 incorrect_hostname", "URLError \(URLError.Code.timedOut.rawValue)"])
+        XCTAssertEqual(http.failures, ["URLError \(URLError.Code.timedOut.rawValue)"])
+        XCTAssertEqual(http.hostRedirects, 1)
         XCTAssertEqual(http.tokens.input, 10)
         XCTAssertEqual(MeteredHTTP.failureClass(status: 500, root: ["error": ["code": "contains a space"]]), "HTTP 500", "only identifier-like codes")
     }

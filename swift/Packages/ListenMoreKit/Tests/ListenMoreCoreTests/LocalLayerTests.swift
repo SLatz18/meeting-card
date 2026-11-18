@@ -89,6 +89,31 @@ final class LocalLayerTests: XCTestCase {
         XCTAssertFalse(cut.trailing)
     }
 
+    /// The pause scenario's live miss (judge on, after Resume): You start 0.24 s into a 0.46 s pause of
+    /// theirs, so the opening overlap can't build and one long sentence never cuts in. Broken into two
+    /// sentences, the second onset lands while they talk and cuts in.
+    func testCutInStartingInTheirPauseNeedsASecondOnset() throws {
+        let them: [(Double, Double)] = [(1.0, 4.2), (4.66, 9.2)]
+        XCTAssertEqual(kinds(run(10, me: [(4.44, 7.4)], others: them)), [])
+        let cut = try XCTUnwrap(run(10, me: [(4.44, 5.4), (5.85, 8.0)], others: them).first { $0.kind == .interrupt })
+        XCTAssertEqual(cut.onset, 5.85, accuracy: 0.05)
+    }
+
+    /// cost-cap's judge-on take at 0390f5e (raw voicing from its shadow trace), which missed its
+    /// interrupt after the budget cap: Them's a2 breathes about once a second (quiet 9.64-9.90,
+    /// 11.46-11.90, 12.52-12.74, 13.66-14.00 and 14.64-14.86 s, and 0.14 s after 13.08 s). You start at
+    /// 11.60 s inside one of those breaths and again at 13.08 s, 0.58 s before the next: neither opening
+    /// overlap builds, so the local layer raises nothing, cap or no cap. With Them talking straight
+    /// through, the same You cuts in.
+    func testCostCapLiveTakeThemBreathsLeaveNoCutIn() {
+        let breaths: [(Double, Double)] = [(8.3, 9.64), (9.90, 11.46), (11.90, 12.52), (12.74, 13.30), (13.44, 13.66),
+                                           (14.00, 14.64), (14.86, 15.6)]
+        let you: [(Double, Double)] = [(11.60, 12.72), (13.08, 17.4)]
+        XCTAssertEqual(kinds(run(18, me: you, others: breaths)), [])
+        let straight = run(18, me: you, others: [(8.3, 15.6)]).filter { $0.kind == .interrupt }
+        XCTAssertEqual(straight.first?.onset ?? 0, 11.60, accuracy: 0.05, "the first onset cuts in")
+    }
+
     func testBackchannelIsNotACutIn() {
         XCTAssertEqual(kinds(run(7, me: [(3.0, 3.6)], others: [(1.0, 6.0)])), [])
     }

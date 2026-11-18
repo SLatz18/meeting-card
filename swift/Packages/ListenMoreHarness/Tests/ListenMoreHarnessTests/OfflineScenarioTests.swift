@@ -45,6 +45,15 @@ final class OfflineScenarioTests: XCTestCase {
         XCTAssertEqual(r.checks.filter { $0.name.hasPrefix("muted:") || $0.name.hasPrefix("unmute") }.count, 5)
     }
 
+    /// Every run with an Unmute reports the first words back's pauses, whether or not a cue went wrong.
+    func testFirstWordsBackDiagnosticsAfterUnmute() async throws {
+        let r = try await run(Scenarios.muteUnmute)
+        let lines = r.diagnostics.filter { $0.hasPrefix("first words back after Unmute") }
+        XCTAssertEqual(lines.count, 1, "\(r.diagnostics)")
+        XCTAssertTrue(lines.first?.contains("You's longest pause") ?? false, "\(lines)")
+        XCTAssertTrue(lines.first?.contains("Them's longest pause") ?? false, "\(lines)")
+    }
+
     func testPause() async throws {
         let r = try await run(Scenarios.pause)
         XCTAssertEqual(cues(r), ["interrupt", "interrupt"], "one before Pause, one after Resume")

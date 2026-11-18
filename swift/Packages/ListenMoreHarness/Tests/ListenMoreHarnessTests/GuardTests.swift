@@ -62,6 +62,79 @@ final class GuardTests: XCTestCase {
         XCTAssertEqual(Set(OpenAITTS.voices.values), ["alloy", "coral", "onyx"], "stock TTS voices only")
     }
 
+    /// Every cut-in the oracle expects starts in an unpunctuated stretch of Them's line: a TTS take
+    /// pauses at a comma for 0.2-0.4 s, past the 0.16 s a cut-in's opening overlap allows, so a cut-in
+    /// there may or may not count. Checked from 0.3 s before You start to the end of Them's line at a
+    /// fast 3.4 words/s.
+    func testExpectedCutInsStartInUnpunctuatedThemSpeech() throws {
+        let config = try ListenMoreConfig.builtIn()
+        var bad: [String] = []
+        var checked: [String] = []
+        for s in Scenarios.all {
+            let t = try Timeline.realize(s, shapes: SyntheticVoice.shapes(s))
+            let expected = CueOracle.expected(t, config: config, facts: .init(keyless: s.keyless, gptStopT: nil, mode: .offline)).cues
+            for e in expected where e.type == .interrupt {
+                guard let ids = e.cutIn, let you = t.line(ids.you), let them = t.line(ids.them) else {
+                    bad.append("\(s.name): an expected interrupt without its lines")
+                    continue
+                }
+                checked.append("\(s.name)/\(ids.you)")
+                let tail = them.line.words.suffix(Int(((them.end - you.start + 0.3) * 3.4).rounded(.up)))
+                if tail.dropLast().contains(where: { $0.last.map { ",;:.?!".contains($0) } ?? false }) {
+                    bad.append("\(s.name)/\(ids.you) over \(ids.them): …\(tail.joined(separator: " "))")
+                }
+            }
+        }
+        XCTAssertEqual(bad, [])
+        XCTAssertEqual(checked.sorted(), ["cost-cap/y2", "interruption/y3", "mute-unmute/y5", "no-key/y3", "pause/y1", "pause/y3"])
+    }
+
+    /// The cue policy shows one cue at a time and holds every cue for `global_cooldown_s` after the
+    /// last, except a local interrupt after a judged cue, which only waits while the verdict is on
+    /// screen (`on_screen_s`). The judge may say not_listening on any You line after a Them turn (live,
+    /// judge on), so no expected cue may start within that hold of a verdict on an earlier You line: it
+    /// could be held by design, and the scenario would test the judge instead of its rule. From 2.6 to
+    /// a fast 3.4 words/s.
+    func testExpectedCuesAreClearOfEarlierJudgeVerdictsCooldown() throws {
+        let config = try ListenMoreConfig.builtIn()
+        var bad: [String] = []
+        for wordsPerS in [2.6, 3.0, 3.4] {
+            for s in Scenarios.all {
+                let shapes = Dictionary(uniqueKeysWithValues: s.lines.map { line -> (String, ClipShape) in
+                    let voiced = line.seconds ?? Double(line.words.count) / wordsPerS
+                    return (line.id, ClipShape(lead: 0, voiced: voiced, total: voiced))
+                })
+                let t = try Timeline.realize(s, shapes: shapes)
+                let (expected, tolerated) = CueOracle.expected(t, config: config,
+                                                               facts: .init(keyless: s.keyless, gptStopT: nil, mode: .live, judgeOn: true))
+                for e in expected where !e.optional {
+                    guard let line = e.line.flatMap({ t.line($0) }) else {
+                        bad.append("\(s.name): an expected \(e.type.rawValue) without its You line")
+                        continue
+                    }
+                    for v in tolerated where v.type == .notListening {
+                        guard let earlier = v.line.flatMap({ t.line($0) }), earlier.start < line.start else { continue }
+                        let clear = v.window.upperBound + (e.type == .interrupt ? config.cues.onScreenS : config.cues.globalCooldownS)
+                        if e.window.lowerBound < clear {
+                            bad.append(String(format: "%@ at %.1f words/s: %@ on %@ from %.1f s, a verdict on %@ until %.1f s holds cues to %.1f s",
+                                              s.name, wordsPerS, e.type.rawValue, line.line.id, e.window.lowerBound, earlier.line.id,
+                                              v.window.upperBound, clear))
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(bad, [])
+    }
+
+    /// The policy's `on_screen_s` is how long the coach card holds a nudge (`CardStyle.Coach.nudgeHold`).
+    func testOnScreenHoldMatchesTheCardsNudgeHold() throws {
+        let theme = try String(contentsOf: Self.repoURL.appendingPathComponent("swift/Core/Theme.swift"), encoding: .utf8)
+        let decl = try XCTUnwrap(theme.split(separator: "\n").first { $0.contains("static let nudgeHold: TimeInterval =") })
+        let value = try XCTUnwrap(Double(decl.split(separator: "=").last?.trimmingCharacters(in: .whitespaces) ?? ""))
+        XCTAssertEqual(try ListenMoreConfig.builtIn().cues.onScreenS, value)
+    }
+
     func testKeyIsRefusedInArguments() {
         let env = [Harness.keyVariable: "sk-test-0123456789abcdef"]
         XCTAssertThrowsError(try Harness.checkArguments(["--live", "sk-proj-abcdefghijklmnop"], environment: [:]))

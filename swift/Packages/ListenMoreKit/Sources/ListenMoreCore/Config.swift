@@ -176,6 +176,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var cooldownS: Double
         /// After any cue.
         public var globalCooldownS: Double
+        /// How long a shown cue stays on screen (the coach card's nudge hold); no other cue shows meanwhile.
+        public var onScreenS: Double
         /// Candidates raised at the same moment are tried in this order (cue type raw values).
         public var priority: [String]
         public var fadeS: Double

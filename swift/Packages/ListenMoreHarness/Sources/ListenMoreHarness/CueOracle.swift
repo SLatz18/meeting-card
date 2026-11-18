@@ -11,6 +11,10 @@ public struct ExpectedCue: Sendable {
     public var reason: String
     /// Another cue the rules allow instead, in its own window.
     public var alternative: (type: CueType, window: ClosedRange<Double>)?
+    /// A cut-in: the You line that cuts in and the Them line it cuts in on.
+    public var cutIn: (you: String, them: String)? = nil
+    /// The You line the cue is about (the cut-in, the reply that misses the question, the run's first line).
+    public var line: String? = nil
 
     public func accepts(_ c: CueRecord) -> Bool {
         if c.type == type && (level == nil || c.level == level) && window.contains(c.t) { return true }
@@ -24,6 +28,8 @@ public struct Tolerance: Sendable {
     public var type: CueType
     public var window: ClosedRange<Double>
     public var reason: String
+    /// A judge verdict: the You line it is on.
+    public var line: String? = nil
 
     public func covers(_ c: CueRecord) -> Bool { c.type == type && window.contains(c.t) }
 }
@@ -110,7 +116,7 @@ public enum CueOracle {
         if live && facts.judgeOn && !facts.keyless && !c.cues.disabledTypes.contains(.notListening) {
             for u in you where heard(u) && them.contains(where: { $0.end <= u.start && $0.end > u.start - 30 }) {
                 tolerated.append(Tolerance(type: .notListening, window: u.start...(u.end + hang + allowance + c.gpt.judgeTimeoutS),
-                                           reason: "judge verdict on \(u.line.id)"))
+                                           reason: "judge verdict on \(u.line.id)", line: u.line.id))
             }
         }
 
@@ -133,6 +139,8 @@ public enum CueOracle {
                 let window = live ? (u.start + 0.6)...(fire + 2.0) : (fire - 0.25)...(fire + 0.5)
                 var e = ExpectedCue(type: .interrupt, level: nil, window: window, optional: false,
                                     reason: "\(u.line.id) cuts in on \(th.line.id): overlap \(fmt(overlap)) s, they continue \(fmt(othersAfter)) s")
+                e.cutIn = (u.line.id, th.line.id)
+                e.line = u.line.id
                 // The cut-in needs Them to keep talking until its opening overlap (cut_in_min_overlap_ms of
                 // both speaking) has built up: LocalLayer drops it when Them's speech stops for longer than
                 // `cutInMaxOthersGapS` before then. Where Them's own audio pauses longer in that span (word
@@ -157,6 +165,7 @@ public enum CueOracle {
         // for monologue_others_floor_ms), reset by Mute and by Pause (a new engine).
         var prior: [Double] = []
         var runStart: Double?
+        var runLine: String?
         var runEnd = 0.0
         func closeRun() {
             guard let s = runStart else { return }
@@ -180,7 +189,8 @@ public enum CueOracle {
                 cands.append(ExpectedCue(type: .monologue, level: level,
                                          window: live ? (at - 1.5)...(at + 2.0) : (at - 0.3)...(at + 0.6),
                                          optional: length < threshold + edge,
-                                         reason: "run from \(fmt(s)) s lasts \(fmt(length)) s; \(level.rawValue) at \(fmt(threshold)) s"))
+                                         reason: "run from \(fmt(s)) s lasts \(fmt(length)) s; \(level.rawValue) at \(fmt(threshold)) s",
+                                         line: runLine))
             }
             prior.append(length)
             runStart = nil
@@ -197,7 +207,10 @@ public enum CueOracle {
             }
             if let p = previous, resumes.contains(where: { $0 > p && $0 <= u.start }) { prior.removeAll() }
             previous = u.start
-            if runStart == nil { runStart = u.start }
+            if runStart == nil {
+                runStart = u.start
+                runLine = u.line.id
+            }
             runEnd = max(runEnd, u.end)
         }
         closeRun()
@@ -241,7 +254,8 @@ public enum CueOracle {
             }
             if inside(pauses, window.lowerBound) || window.lowerBound >= captureEnd { continue }
             cands.append(ExpectedCue(type: .missedQuestion, level: .soft, window: window, optional: false,
-                                     reason: "\(r.line.id) doesn't take up \(q.line.id)'s question (\(shared.count) shared words, \(words) words)"))
+                                     reason: "\(r.line.id) doesn't take up \(q.line.id)'s question (\(shared.count) shared words, \(words) words)",
+                                     line: r.line.id))
         }
 
         // Cue policy: one at a time, cooldowns, the closing-phrase quiet.
