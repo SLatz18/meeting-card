@@ -86,6 +86,9 @@ final class CaptionFeedViewTests: XCTestCase {
     /// footnote and saving label stay out of it (the card's status line carries the saving badge).
     func testCardLayoutFillsTheCoachCardCaptionsArea() throws {
         let area = Theme.Captions.cardArea
+        // The first render in a process on newer macOS can differ from every later one by 1 level of
+        // antialiasing on some pixels, so the render the exact comparison below starts from is a warm one.
+        _ = CaptionFeedSnapshot.cardImage(Self.demo(), dark: false, scale: 2)
         var shots: [Bool: CGImage] = [:]
         for dark in [false, true] {
             let img = try XCTUnwrap(CaptionFeedSnapshot.cardImage(Self.demo(), dark: dark, scale: 2))
