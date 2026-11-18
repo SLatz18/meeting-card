@@ -112,10 +112,13 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         /// Self-pivot gate (`PivotGate`, shadow counters only). Their turn shares something personal: at
         /// least `pivot_share_min_words`, a share marker, and a share word (a feeling, a life event or a
         /// personal topic; not `heat_personal`, whose small talk such as the weather isn't a share),
-        /// with no invitation for the user to share and no question at its end.
+        /// with no invitation for the user to share and no question at its end. The share is in their
+        /// last line, followed in it only by short sentences, with no `pivot_move_on` or
+        /// `update_handoff_phrases` phrase from the share on: moving on to the agenda ends it.
         public var pivotShareMinWords: Int
         public var pivotShareMarkers: [String]
         public var pivotShareWords: [String]
+        public var pivotMoveOn: [String]
         /// Phrases that hand the floor to the other person, anywhere in a turn (with `question_open_invites`):
         /// in their turn an invitation to share, in the user's reply a question back.
         public var pivotInvites: [String]

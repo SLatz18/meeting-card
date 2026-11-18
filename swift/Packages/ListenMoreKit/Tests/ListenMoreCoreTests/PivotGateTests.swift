@@ -377,15 +377,58 @@ final class PivotGateTests: XCTestCase {
 
     // MARK: group calls (every voice on the call stream is "them")
 
-    /// One of them shares, another adds a line; the user answers 5.5 s after the share but 1.5 s after
-    /// the second voice: the window counts from their last speech, and both lines are their turn.
-    func testAnotherVoiceAfterTheShareJoinsTheirTurn() throws {
+    /// One voice's plain line, then another voice shares; the user answers 7.5 s after the first line
+    /// but 1 s after the share: the window counts from their last speech, whoever spoke.
+    func testAShareFromAnotherVoiceCountsFromItsEnd() throws {
         var s = PivotScript()
-        s.them(PivotLines.share, 0.5, 5.5)
-        s.them("Wow, congratulations, that is huge news!", 8.0, 9.5)
+        s.them(PivotLines.release, 0.5, 3.5)
+        s.them(PivotLines.share, 5.0, 10.0)
         s.you(PivotLines.pivot, 11.0, 17.0)
         let c = try XCTUnwrap(run(s, until: 30).candidates.first)
-        XCTAssertEqual(c.themEnd, 9.5, accuracy: 1e-9)
+        XCTAssertEqual(c.themEnd, 10.0, accuracy: 1e-9)
+    }
+
+    /// Any line after the share, from any voice, ends it; even a reaction (a known recall limit).
+    func testAnotherVoiceReactingAfterTheShareEndsIt() {
+        var s = PivotScript()
+        s.them(PivotLines.share, 0.5, 5.5)
+        s.them("Wow, congratulations, that is huge news!", 6.0, 7.5)
+        s.you(PivotLines.pivot, 8.0, 14.0)
+        assertNoCandidate(s)
+    }
+
+    /// After small talk, someone moves on to the agenda and the user gives a work update.
+    func testMovingOnToTheAgendaEndsTheShare() {
+        let update = "Sure, yesterday I finished my part of the migration and today I am on my code reviews, then I will pick up my next ticket."
+        let lake = "I just got back from a week at the lake with the kids and I was so relaxed."
+        var standup = PivotScript()
+        standup.them(lake, 0.5, 5.5)
+        standup.them("Great, let's start the standup. Sam, you go first.", 6.5, 9.0)
+        standup.you(update, 9.5, 15.5)
+        assertNoCandidate(standup)
+
+        var dashboard = PivotScript()
+        dashboard.them("I just got back from my sister's wedding and I was so emotional the whole day.", 0.5, 5.5)
+        dashboard.them("Okay, let's look at the release dashboard now.", 6.5, 8.5)
+        dashboard.you("Sure, I updated my numbers this morning and I think my part of the dashboard is ready, I will share my screen now.", 9.0, 15.0)
+        assertNoCandidate(dashboard)
+
+        var deck = PivotScript()
+        deck.them(PivotLines.share, 0.5, 5.5)
+        deck.them("Nice. Can we get the numbers for the board deck by Friday", 6.0, 8.0)
+        deck.you("Sure, I will pull my numbers tonight, I already have most of my slides done and I just need to check the totals.", 8.5, 14.5)
+        assertNoCandidate(deck)
+
+        var oneLine = PivotScript()
+        oneLine.them("\(lake) Great, let's start the standup, you go first.", 0.5, 8.0)
+        oneLine.you(update, 8.5, 14.5)
+        assertNoCandidate(oneLine)
+    }
+
+    /// In the share's own line, a short sentence after it keeps the share; a longer one moves on.
+    func testOnlyAShortSentenceMayFollowTheShare() {
+        XCTAssertEqual(run(pivot(share: "\(PivotLines.share) It was amazing."), until: 30).counters.candidates, 1)
+        assertNoCandidate(pivot(share: "\(PivotLines.share) Anyway, the migration is done and all of the tests passed this morning."))
     }
 
     func testAnotherVoiceInvitingTheUserIsNone() {

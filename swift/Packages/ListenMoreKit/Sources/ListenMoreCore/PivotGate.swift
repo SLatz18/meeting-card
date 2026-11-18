@@ -7,7 +7,11 @@ import Foundation
 /// 1. Their turn has at least `pivot_share_min_words`, a share marker ("i just", "we finally") and a
 ///    share word (a feeling, a life event or a personal topic), no invitation to share (`pivot_invites`,
 ///    `question_open_invites`) and no question at its end. An invitation the user answered with less
-///    than `pivot_reply_min_words` (a backchannel) still holds for their next turn.
+///    than `pivot_reply_min_words` (a backchannel) still holds for their next turn. The share has to
+///    be what the user answers: in their last line, followed in it only by sentences shorter than
+///    `pivot_share_min_words` ("it was amazing."), and with no move-on or agenda language from the
+///    share on (`pivot_move_on`, `update_handoff_phrases`: "let's", "next item", "you go first").
+///    Another line after it, from any voice, ends the share.
 /// 2. The user starts within `pivot_reply_max_start_s` of their last speech and says at least
 ///    `pivot_reply_min_words` about themselves: first-person words make up `pivot_first_person_share`
 ///    of the person words (`pivot_other_person` counts you, he, she, they and the like against it),
@@ -28,9 +32,10 @@ import Foundation
 ///
 /// Group calls: "they" are every voice on the call stream (the engine has no diarization), so one of
 /// them can share and another speak next. Their turn is all of the stream's speech since the user's
-/// last reply, from any voice; the reply window counts from its last speech, whoever spoke; any
-/// voice's invitation in that turn, or question at its end (one of them asking another), holds the
-/// candidate back; and any voice starting to talk while the user is quiet ends the user's turn.
+/// last reply, from any voice; the reply window counts from its last speech, whoever spoke; the share
+/// has to be in that turn's last line, so another voice speaking after it (moving on to the standup,
+/// asking someone, or even just "wow, congrats") ends it; any voice's invitation in the turn holds
+/// the candidate back; and any voice starting to talk while the user is quiet ends the user's turn.
 ///
 /// The counters, the re-arm and the cap are per engine run, not per call: Pause and the call app's
 /// mute stop the engine, and the next start builds a new `GptCore` with a new gate. A count for the
@@ -92,6 +97,7 @@ final class PivotGate {
     private static let keepS = 120.0
     private let x: ListenMoreConfig.Text
     private let invites: [String]
+    private let moveOn: [String]
     private let leadIns: [String]
     private let tags: [[String]]
     private let firstPerson: Set<String>
@@ -118,6 +124,7 @@ final class PivotGate {
     init(config: ListenMoreConfig) {
         x = config.text
         invites = x.pivotInvites + x.questionOpenInvites
+        moveOn = x.pivotMoveOn + x.updateHandoffPhrases
         leadIns = x.pivotLeadIns.filter { !$0.isEmpty }
         tags = x.pivotTagQuestions.map(TextRules.tokens).filter { !$0.isEmpty }
         firstPerson = Set(x.pivotFirstPerson)
@@ -271,7 +278,11 @@ final class PivotGate {
               lines.contains(where: { has($0.text, x.pivotShareMarkers) }),
               lines.contains(where: { has($0.text, x.pivotShareWords) }) else { return false }
         let last = lines.last.map(\.text) ?? ""
-        let lastSentence = TextRules.sentences(last).last ?? ""
+        let sentences = TextRules.sentences(last)
+        guard let at = sentences.lastIndex(where: { has($0, x.pivotShareMarkers) || has($0, x.pivotShareWords) }),
+              !sentences[at...].contains(where: { has($0, moveOn) }),
+              sentences[(at + 1)...].allSatisfy({ TextRules.tokens($0).count < x.pivotShareMinWords }) else { return false }
+        let lastSentence = sentences.last ?? ""
         return !asks(lastSentence) && !endsWithTag(lastSentence) && !(pieces(last).last.map(asks) ?? false)
     }
 
