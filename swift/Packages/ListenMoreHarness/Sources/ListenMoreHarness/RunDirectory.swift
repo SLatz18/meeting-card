@@ -1,13 +1,46 @@
 import Foundation
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
 
 /// A run's private temp directory (mode 0700): the only place a scenario may write, wiped at the end.
+/// Named `lm-harness-<pid>-<uuid>`, so a later run can tell a folder left by a crash from a live one.
 public struct RunDirectory {
     public let url: URL
 
     public static func create() throws -> RunDirectory {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lm-harness-\(UUID().uuidString)", isDirectory: true)
+        let name = "lm-harness-\(getpid())-\(UUID().uuidString)"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return RunDirectory(url: url)
+    }
+
+    /// Removes run folders whose harness process is gone (a crash skipped their wipe). Only names in
+    /// the exact `lm-harness-<pid>-<uuid>` form are touched; a folder of a running harness is kept.
+    /// Returns how many were removed.
+    @discardableResult
+    public static func sweepStale(in dir: URL = FileManager.default.temporaryDirectory) -> Int {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return 0 }
+        var removed = 0
+        for name in names {
+            guard let pid = ownerPid(name), !processAlive(pid) else { continue }
+            if (try? fm.removeItem(at: dir.appendingPathComponent(name))) != nil { removed += 1 }
+        }
+        return removed
+    }
+
+    /// The pid in a run folder's name, or nil if the name isn't a run folder's.
+    static func ownerPid(_ name: String) -> Int32? {
+        guard let m = name.range(of: #"^lm-harness-([0-9]{1,10})-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$"#,
+                                 options: .regularExpression), m == name.startIndex..<name.endIndex else { return nil }
+        return Int32(name.dropFirst("lm-harness-".count).prefix { $0.isNumber })
+    }
+
+    static func processAlive(_ pid: Int32) -> Bool {
+        pid == getpid() || kill(pid, 0) == 0 || errno == EPERM
     }
 
     /// Removes the directory; true when it's gone.

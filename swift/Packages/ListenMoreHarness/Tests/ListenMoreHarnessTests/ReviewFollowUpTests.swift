@@ -64,4 +64,26 @@ final class ReviewFollowUpTests: XCTestCase {
         }
         XCTAssertTrue(results.allSatisfy { $0 })
     }
+
+    /// Run folders left by a crashed harness are removed; a live harness's folder and anything else are kept.
+    func testSweepRemovesOnlyDeadRunFolders() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("lm-sweep-test-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/true")
+        try p.run()
+        p.waitUntilExit()
+        let dead = "lm-harness-\(p.processIdentifier)-\(UUID().uuidString)"
+        let alive = "lm-harness-\(getpid())-\(UUID().uuidString)"
+        for name in [dead, alive, "lm-harness-out", "lm-harness-test-\(UUID().uuidString)", "lm-harness-12x-\(UUID().uuidString)"] {
+            try fm.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+        XCTAssertEqual(RunDirectory.sweepStale(in: root), 1)
+        let left = Set(try fm.contentsOfDirectory(atPath: root.path))
+        XCTAssertFalse(left.contains(dead))
+        XCTAssertTrue(left.contains(alive))
+        XCTAssertTrue(left.contains("lm-harness-out"), "the default output folder is never swept")
+        XCTAssertEqual(left.count, 4)
+    }
 }

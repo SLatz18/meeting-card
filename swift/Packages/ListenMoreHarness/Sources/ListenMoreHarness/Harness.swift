@@ -89,6 +89,8 @@ public enum Harness {
         if o.mode == .offline && o.offlineVoices == .espeak && EspeakVoice.executable == nil {
             throw HarnessError.script("--voices espeak needs espeak-ng installed")
         }
+        let swept = RunDirectory.sweepStale()
+        if swept > 0 { log("removed \(swept) run folder(s) left by an earlier run that didn't finish") }
         let writer = try OutputWriter(directory: o.outputDirectory, secrets: liveKey.map { [$0.value] } ?? [])
         let runOverrides: [String: Any] = o.judgeOn ? [:] : judgeOff
         let base = runOverrides.isEmpty ? try ListenMoreConfig.builtIn() : try ListenMoreConfig.load(overrides: runOverrides)
