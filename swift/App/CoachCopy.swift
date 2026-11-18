@@ -58,13 +58,19 @@ enum CoachCopy {
     static let typeSafeKeySavedPlaceholder = "TypeSafe key saved in your Keychain"
     static let typeSafeKeyMissing = "Nothing is judged until you add a TypeSafe API key. The transcript rules and on-device cues still run."
 
-    /// Not tied to one provider: the judge was told to use an address MeetingCard won't send your key to.
-    static let judgeUntrustedHost = "The AI provider pointed to an address MeetingCard won't use"
+    /// The judge was told to use an address that isn't on the allowed list (`JudgeFailure.untrustedHost`). Not tied
+    /// to one provider; shown whole, not inside the TypeSafe-style note below.
+    static let judgeUntrustedHost = "AI cues are off for this call. The AI provider sent a web address that isn't on the allowed list. Captions keep running."
+    /// DRAFT (placeholder, pending copy review): the regional address was on the allowed list and was used, and it
+    /// didn't work (`JudgeFailure.hostRejected`).
+    static let judgeHostRejected = "AI cues are off for this call. The AI provider's regional address didn't work. Captions keep running."
 
     /// Why judging stopped: the failure's kind and status code only, never key text.
     static func judgeStopped(_ failure: JudgeFailure) -> String {
         let why: String, advice: String
         switch failure.kind {
+        case .untrustedHost: return judgeUntrustedHost
+        case .hostRejected: return judgeHostRejected
         case .auth: (why, advice) = ("TypeSafe didn't accept the key", " Check the key and save it again.")
         case .balance: (why, advice) = ("TypeSafe reports no balance left on the account", "")
         case .rateLimited: (why, advice) = ("TypeSafe is limiting requests right now", "")
@@ -73,7 +79,6 @@ enum CoachCopy {
         case .timeout: (why, advice) = ("TypeSafe didn't answer in time", "")
         case .unreachable: (why, advice) = ("Couldn't reach TypeSafe", "")
         case .badReply: (why, advice) = ("TypeSafe's reply couldn't be read", "")
-        case .untrustedHost: (why, advice) = (CoachCopy.judgeUntrustedHost, "")
         }
         var code = ""
         if case .http(let status) = failure { code = " (HTTP \(status))" }

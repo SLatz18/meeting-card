@@ -135,14 +135,35 @@ final class CoachWiringTests: XCTestCase {
         XCTAssertTrue(try read("App/CoachController.swift").contains("var judgeStopped: JudgeFailure? { previewJudgeStop ?? service?.judgeStopped }"))
     }
 
-    /// A judge told to use an address MeetingCard won't send the key to stops with its own generic note: not
-    /// TypeSafe's wording, not a key or HTTP status.
-    func testUntrustedHostStopHasItsOwnGenericCopy() throws {
+    /// Each redirect-path stop reason has its own copy key, and the note returns that key's text whole (not
+    /// inside the TypeSafe-style wrapper). The reason-to-key mapping is read from the `judgeStopped` switch; the
+    /// text from each key's declaration.
+    func testRedirectStopReasonsMapToTheirOwnCopyKeys() throws {
         let copy = try read("App/CoachCopy.swift")
-        let line = "static let judgeUntrustedHost = \"The AI provider pointed to an address MeetingCard won't use\""
-        XCTAssertTrue(copy.contains(line))
-        XCTAssertFalse(line.contains("TypeSafe") || line.contains("key"))
-        XCTAssertTrue(copy.contains("case .untrustedHost: (why, advice) = (CoachCopy.judgeUntrustedHost, \"\")"))
+        let body = try XCTUnwrap(copy.components(separatedBy: "static func judgeStopped(_ failure: JudgeFailure) -> String {").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first)
+        let mapping = try NSRegularExpression(pattern: #"case \.(\w+): return (\w+)\b"#)
+        var keyForReason: [String: String] = [:]
+        for m in mapping.matches(in: body, range: NSRange(body.startIndex..., in: body)) {
+            keyForReason[String(body[Range(m.range(at: 1), in: body)!])] = String(body[Range(m.range(at: 2), in: body)!])
+        }
+        XCTAssertEqual(keyForReason["untrustedHost"], "judgeUntrustedHost")
+        XCTAssertEqual(keyForReason["hostRejected"], "judgeHostRejected")
+        XCTAssertNotEqual(keyForReason["untrustedHost"], keyForReason["hostRejected"], "separate reasons, separate copy")
+
+        let declaration = try NSRegularExpression(pattern: #"static let (\w+) = "([^"\n]*)""#)
+        var text: [String: String] = [:]
+        for m in declaration.matches(in: copy, range: NSRange(copy.startIndex..., in: copy)) {
+            text[String(copy[Range(m.range(at: 1), in: copy)!])] = String(copy[Range(m.range(at: 2), in: copy)!])
+        }
+        XCTAssertEqual(text["judgeUntrustedHost"],
+                       "AI cues are off for this call. The AI provider sent a web address that isn't on the allowed list. Captions keep running.")
+        XCTAssertEqual(text["judgeHostRejected"],
+                       "AI cues are off for this call. The AI provider's regional address didn't work. Captions keep running.")
+        for key in ["judgeUntrustedHost", "judgeHostRejected"] {
+            let line = try XCTUnwrap(text[key])
+            XCTAssertFalse(line.contains("TypeSafe") || line.contains("HTTP") || line.lowercased().contains("key"), key)
+        }
     }
 
     /// Local-only: turning on never waits for or requires a key; a stored key is checked afterwards.
