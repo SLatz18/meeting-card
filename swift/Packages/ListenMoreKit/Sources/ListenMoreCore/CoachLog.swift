@@ -362,6 +362,9 @@ public enum CoachLog {
             case .budgetExhausted: return (nil, LogToken.constant("budgetExhausted"))
             // The 401 was the first host's; this error is about the retry on the regional host, so no status is claimed.
             case .hostRejected: return (nil, LogToken.constant("hostRejected"))
+            case .untrustedHost: return (nil, LogToken.constant("untrustedHost"))
+            case .redirectToSameHost: return (nil, LogToken.constant("redirectToSameHost"))
+            case .resendRefused: return (nil, LogToken.constant("resendRefused"))
             }
         }
         if let u = error as? URLError { return (nil, LogToken.serverCode("URLError\(u.code.rawValue)")) }
