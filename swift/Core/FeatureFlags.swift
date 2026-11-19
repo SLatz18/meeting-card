@@ -9,9 +9,10 @@ import Foundation
 ///
 /// The raw value is the flag's id; its UserDefaults key is `flag.<id>`.
 ///
-/// A flag is read from the injected `UserDefaults` (the app's own domain, `.standard`): a stored Bool
-/// wins, and a missing key (or a stored value that is not a Bool) reads the flag's `defaultValue`.
-/// Nothing writes it and there is no Settings row.
+/// A flag is read from the injected `UserDefaults` (the app's own domain, `.standard`): a stored boolean
+/// (or a 0/1 number) wins, and anything else, a missing key or any other stored value (including the
+/// string YES), reads the flag's `defaultValue`. Set it with `defaults write ... -bool`. Nothing writes
+/// it and there is no Settings row.
 public enum FeatureFlag: String, CaseIterable, Sendable {
     /// Ties the call coach to the call's own window instead of the call app's largest window (the glow's
     /// display, and Zoom staying in a meeting while its home window is in front). Off: the largest-window rule.
@@ -56,8 +57,8 @@ public struct FeatureFlags {
         }
     }
 
-    /// A stored Bool, else `defaultValue`. `bool(forKey:)` would read a missing key as false and so
-    /// could never express a default-true flag. Internal so a test can exercise a default-true key
+    /// A stored boolean (or 0/1 number), else `defaultValue`. `bool(forKey:)` would read a missing key as
+    /// false, and the string YES as true, so it could neither express a default-true flag nor ignore YES. Internal so a test can exercise a default-true key
     /// without a default-true flag in the registry.
     static func read(_ defaults: UserDefaults, key: String, defaultValue: Bool) -> Bool {
         defaults.object(forKey: key) as? Bool ?? defaultValue
