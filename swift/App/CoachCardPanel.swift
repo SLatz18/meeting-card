@@ -3,13 +3,13 @@ import MeetingCardCore
 import QuartzCore
 
 /// The coach card's window. Every coach state (the card, the pill, the morph from the reminder
-/// card, nudges) draws in this one panel, and screen shares always leave it out: its `sharingType`
-/// can't be set to anything but `.none`.
+/// card, nudges, the captions) draws in this one panel. Captures leave it out (`sharingType` `.none`)
+/// unless "Show Coach in Screenshots" is on; that setting alone changes it, through `SharingRegistry`.
 final class CoachCardPanel: NSPanel {
     static func make() -> CoachCardPanel {
         let p = CoachCardPanel(contentRect: NSRect(origin: .zero, size: CoachFullCardView.size),
                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        p.sharingType = .none
+        p.sharing = .excluded
         p.isFloatingPanel = true
         p.level = .statusBar
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -26,11 +26,6 @@ final class CoachCardPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-
-    override var sharingType: NSWindow.SharingType {
-        get { super.sharingType }
-        set { super.sharingType = .none }
-    }
 }
 
 final class CoachRootView: NSView {
