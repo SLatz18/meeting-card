@@ -25,6 +25,7 @@ final class CoachController: NSObject {
         static let callControls = "coach.callControls"
         static let judgeProvider = "coach.judgeProvider"
         static let cardPosition = "coach.cardPosition"
+        static let showInScreenshots = "coach.showInScreenshots"
     }
 
     /// MeetingCard's choices on top of the coach's generic config: not_listening nudges are off by default.
@@ -34,6 +35,8 @@ final class CoachController: NSObject {
     static let keychainService = AppIdentity.current.keychainService
 
     let defaults: UserDefaults
+    /// Keeps the coach card's window in step with "Show Coach in Screenshots".
+    let sharingRegistry: SharingRegistry
     let config: ListenMoreConfig
     let keychain: KeychainStore
     /// The TypeSafe key: whatever service the OpenAI key uses, in its own account.
@@ -89,6 +92,7 @@ final class CoachController: NSObject {
     init(defaults: UserDefaults = .standard, keychain: KeychainStore = KeychainStore(service: CoachController.keychainService),
          showsStatusItem: Bool = true, transcriptStore: TranscriptStore = FileTranscriptStore()) throws {
         self.defaults = defaults
+        sharingRegistry = SharingRegistry(showInScreenshots: defaults.bool(forKey: Keys.showInScreenshots))
         self.keychain = keychain
         typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
@@ -113,6 +117,15 @@ final class CoachController: NSObject {
     var onboarded: Bool { defaults.bool(forKey: Keys.onboarded) }
     var callControlsOn: Bool { defaults.bool(forKey: Keys.callControls) }
     var hasKey: Bool { keychain.hasKey }
+    /// Off by default: the coach card and captions stay out of screenshots and screen recordings.
+    var showInScreenshots: Bool { defaults.bool(forKey: Keys.showInScreenshots) }
+
+    /// Applies at once to the coach card's window (registry) and to reminder cards carrying the chip (refresh).
+    func setShowInScreenshots(_ on: Bool) {
+        defaults.set(on, forKey: Keys.showInScreenshots)
+        sharingRegistry.set(showInScreenshots: on)
+        refresh()
+    }
     /// GPT cues can run: a key is stored and OpenAI hasn't rejected it.
     var gptAvailable: Bool { keyStored && !keyGate.rejected }
     /// Captions and transcripts read the GPT cues' transcription: the coach is on with a usable key.
@@ -392,7 +405,7 @@ final class CoachController: NSObject {
     func refresh() {
         let card = coachCardState()
         let chip = card == nil ? self.chip : nil
-        for c in visibleCards() { c.setCoach(chip) }
+        for c in visibleCards() { c.setCoach(chip, showInScreenshots: showInScreenshots) }
         transcript.sync(keyUsable: transcriptKeyUsable)
         if let reason = service?.gptStopped { transcript.gptStopped(reason) }
         updateCoachCard(card)
@@ -448,6 +461,7 @@ final class CoachController: NSObject {
                                      resize: { [weak self] in self?.toggleMinimized() },
                                      dismissCallModeTip: { [weak self] in self?.dismissCallModeTip() })
         p.callScreen = { [weak self] in self?.service?.glowScreen }
+        sharingRegistry.register(p.panel)
         return p
     }
 

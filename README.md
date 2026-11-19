@@ -64,6 +64,7 @@ Ad-hoc is fine for trying it out. A stable self-signed identity is nicer for dai
 - Quit: choose **Quit** in the coach menu (the menu bar icon), or press ⌘Q while its Settings window is in front.
 - Stop launching at login: System Settings > General > Login Items, switch MeetingCardSwift off. The app never re-enables itself.
 - Log: `~/Library/Logs/MeetingCardSwift.log`. It records event ids, start times, counts and skip reasons, never titles, descriptions or attendees. It **does** record the meeting link a card offers and the link opened on Join, which can include a Zoom passcode, so redact links before sharing log lines.
+- Screenshots: Settings has **Show Coach in Screenshots**, off by default and saved. Off, the coach card and its captions stay out of screenshots and screen recordings; on, they can be captured (and so can show in a screen share), and the change applies to windows already open. The cue glow stays out either way. No extra permission is involved.
 
 ## Try it without a calendar
 

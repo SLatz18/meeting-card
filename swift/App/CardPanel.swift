@@ -484,9 +484,9 @@ final class Card: CardHandle {
     }
 
     /// Coach state changed: rebuild in place (same path as a live update). While the chip shows,
-    /// the card asks to be left out of screen shares, like the glow.
-    func setCoach(_ c: CoachChip?) {
-        panel.sharingType = c == nil ? .readOnly : .none
+    /// the card asks to be left out of screen shares, like the glow, unless "Show Coach in Screenshots" is on.
+    func setCoach(_ c: CoachChip?, showInScreenshots: Bool = CoachSurface.showInScreenshotsDefault) {
+        panel.sharingType = SharingRegistry.reminderCardSharing(chipShown: c != nil, showInScreenshots: showInScreenshots).windowSharingType
         guard c != coach else { return }
         coach = c
         refresh(ev, now: now)

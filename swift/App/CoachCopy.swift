@@ -24,6 +24,8 @@ enum CoachCopy {
     static let coachListening = "Coach on, listening"
     static let coachMuted = "Coach paused while you're muted in Zoom"
     static let chipMuted = "Muted in Zoom"
+    static let screenshotsToggle = "Show Coach in Screenshots"
+    static let screenshotsHelp = "Lets screenshots and screen recordings capture the coach card and its captions. Off by default, so the card stays out of captures. The cue glow stays out either way."
     static let callControlsToggle = "Use Zoom/Meet controls"
     static let callControlsHelp = "Stops the coach a few seconds after you leave a Zoom call or close a Meet tab, and pauses it while you're muted in Zoom. Reads only Zoom's meeting controls and whether a Meet tab is open: never titles, names, chat or other tabs. Lets the Mute in Zoom button on the coach card mute your Zoom mic. Off by default."
     static let requestAccess = "Request access"
