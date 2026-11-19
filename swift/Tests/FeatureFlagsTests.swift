@@ -70,6 +70,30 @@ final class FeatureFlagsTests: XCTestCase {
         }
     }
 
+    /// A default-true flag with no stored key reads true; a stored false still wins. `bool(forKey:)` read the
+    /// missing key as false. No registered flag defaults on, so this drives the read with a test-local key.
+    func testADefaultTrueFlagWithAMissingKeyReadsTrue() {
+        let key = "flag.testLocalDefaultTrue"
+        XCTAssertNil(defaults.object(forKey: key))
+        XCTAssertTrue(FeatureFlags.read(defaults, key: key, defaultValue: true), "missing key: the default")
+        XCTAssertFalse(FeatureFlags.read(defaults, key: key, defaultValue: false))
+        defaults.set(false, forKey: key)
+        XCTAssertFalse(FeatureFlags.read(defaults, key: key, defaultValue: true), "a stored false wins over a true default")
+        defaults.set(true, forKey: key)
+        XCTAssertTrue(FeatureFlags.read(defaults, key: key, defaultValue: false), "a stored true wins over a false default")
+        defaults.set("yes", forKey: key)
+        XCTAssertTrue(FeatureFlags.read(defaults, key: key, defaultValue: true), "a stored value that is not a Bool is no answer: the default")
+        XCTAssertFalse(FeatureFlags.read(defaults, key: key, defaultValue: false))
+    }
+
+    /// The registry's own read goes through the same path as the test-local key above.
+    func testRegisteredFlagsReadTheirDefaultWhenTheKeyIsMissing() {
+        for flag in FeatureFlag.allCases {
+            XCTAssertNil(defaults.object(forKey: flag.defaultsKey))
+            XCTAssertEqual(FeatureFlags(defaults: defaults).isEnabled(flag), flag.defaultValue)
+        }
+    }
+
     /// The helper passes for a gate that reads its flags and is inert while every flag is off.
     func testAllOffHelperAcceptsAnInertGate() {
         assertAllOffMatchesMain({ flags in
