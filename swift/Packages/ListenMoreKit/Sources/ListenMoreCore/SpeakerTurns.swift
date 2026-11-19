@@ -1,5 +1,34 @@
 import Foundation
 
+/// Cluster numbers belong to the logical call, not to the capture run (which can pause or mute).
+final class SpeakerCallClusters: @unchecked Sendable {
+    let embedder: any SpeakerEmbedder
+    private let lock = NSLock()
+    private var clusters = SpeakerClusters()
+    private var capture: UUID?
+
+    init(embedder: any SpeakerEmbedder) { self.embedder = embedder }
+
+    func openCapture() -> UUID {
+        lock.withLock {
+            let id = UUID()
+            capture = id
+            return id
+        }
+    }
+
+    func closeCapture() { lock.withLock { capture = nil } }
+
+    func admits(_ id: UUID) -> Bool { lock.withLock { capture == id } }
+
+    func assign(_ embedding: SpeakerEmbedding, capture id: UUID) -> (number: Int, centroid: SpeakerEmbedding)? {
+        lock.withLock {
+            guard capture == id else { return nil }
+            return clusters.assign(embedding)
+        }
+    }
+}
+
 /// Runs on the transcription event loop, using the same call frames and VAD offsets as commits.
 struct SpeakerTurns {
     struct Attribution {
@@ -14,6 +43,7 @@ struct SpeakerTurns {
     private var preRoll: [(raw: Bool, samples: [Float])] = []
     private var voiced: [Float] = []
     private var clusters = SpeakerClusters()
+    var call: (clusters: SpeakerCallClusters, capture: UUID)?
     private var turns: [(TimeInterval, Attribution)] = []
 
     init(embedder: any SpeakerEmbedder, config: ListenMoreConfig) {
@@ -38,8 +68,16 @@ struct SpeakerTurns {
         voiced.removeAll()
         let rate = sampleRate, embedder = embedder
         guard audio.count >= rate / 2 else { return }
+        if let call, !call.clusters.admits(call.capture) { return }
         let embedding = await Task.detached(priority: .utility) { embedder.embed(audio, sampleRate: rate) }.value
-        guard let embedding, let match = clusters.assign(embedding) else { return }
+        guard let embedding else { return }
+        let match: (number: Int, centroid: SpeakerEmbedding)?
+        if let call {
+            match = call.clusters.assign(embedding, capture: call.capture)
+        } else {
+            match = clusters.assign(embedding)
+        }
+        guard let match else { return }
         turns.append((offset, Attribution(speaker: .other(match.number), centroid: match.centroid)))
         if turns.count > 128 { turns.removeFirst() }
     }

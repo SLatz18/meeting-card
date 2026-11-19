@@ -475,6 +475,7 @@ public final class GptLayer: @unchecked Sendable {
 
     enum Command {
         case start
+        case speakerCapture(SpeakerCallClusters, UUID)
         case frame(me: [Float], meVad: VadState, others: [Float], othersVad: VadState, meRunS: Double)
         case local(LocalEvent)
         case micMuted(Bool)
@@ -617,6 +618,8 @@ public final class GptLayer: @unchecked Sendable {
             } catch {
                 core.fail("realtime connect: \(GptError.safe(error))")
             }
+        case let .speakerCapture(call, capture):
+            speakerTurns?.call = (call, capture)
         case let .frame(me, meVad, others, othersVad, meRunS):
             core.setMeRun(meRunS)
             await perform(core.feed(.me, frame: me, vad: meVad, now: now()))
@@ -679,6 +682,10 @@ public final class GptLayer: @unchecked Sendable {
             onJudgeStopped?(failure)
         }
         return false
+    }
+
+    func useSpeakerClusters(_ call: SpeakerCallClusters, capture: UUID) {
+        inbox.yield(.speakerCapture(call, capture))
     }
 
     private func turnSpeaker(_ stream: Speaker, refT: TimeInterval) -> Speaker {

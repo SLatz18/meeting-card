@@ -107,6 +107,41 @@ final class SpeakerTests: XCTestCase {
         }
     }
 
+    func testResumingCaptureKeepsSpeakerNumbersEvenIfTheSpeakersSwitchOrder() async throws {
+        let config = try TestConfig.load()
+        let call = SpeakerCallClusters(embedder: SignEmbedder())
+        let rate = config.audio.sampleRate
+        func say(_ sample: Float, offset: TimeInterval, turns: inout SpeakerTurns) async -> Speaker? {
+            await turns.observe(Array(repeating: sample, count: rate), vad: GptFrames.vad(raw: true, onset: offset - 1))
+            await turns.observe([], vad: GptFrames.vad(raw: false, offset: offset))
+            return turns.attribution(at: offset, announce: false)?.speaker
+        }
+
+        let firstCapture = call.openCapture()
+        var first = SpeakerTurns(embedder: call.embedder, config: config)
+        first.call = (call, firstCapture)
+        let firstA = await say(0.3, offset: 1, turns: &first)
+        let firstB = await say(-0.3, offset: 3, turns: &first)
+        XCTAssertEqual(firstA, .other(1))
+        XCTAssertEqual(firstB, .other(2))
+
+        call.closeCapture()
+        XCTAssertFalse(call.admits(firstCapture))
+        var resumed = SpeakerTurns(embedder: call.embedder, config: config)
+        resumed.call = (call, call.openCapture())
+        let resumedB = await say(-0.3, offset: 1, turns: &resumed)
+        let resumedA = await say(0.3, offset: 3, turns: &resumed)
+        XCTAssertEqual(resumedB, firstB, "resuming resets audio offsets but not the speaker identities")
+        XCTAssertEqual(resumedA, firstA)
+        XCTAssertNil(call.assign(try embedding([0, 1]), capture: firstCapture), "stale inference cannot write to the resumed call")
+
+        let newCall = SpeakerCallClusters(embedder: call.embedder)
+        var next = SpeakerTurns(embedder: newCall.embedder, config: config)
+        next.call = (newCall, newCall.openCapture())
+        let nextB = await say(-0.3, offset: 1, turns: &next)
+        XCTAssertEqual(nextB, .other(1), "only a new call starts numbering over")
+    }
+
     func testCallVadLabelsPartialsAndFinalsUsingTheirCommitOffset() async throws {
         let config = try TestConfig.load()
         let box = CaptionFeedTests.CaptionBox()

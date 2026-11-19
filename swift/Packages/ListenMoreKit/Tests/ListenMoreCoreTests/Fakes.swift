@@ -141,6 +141,7 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
     private var _startedWithKey: [Bool] = []
     private var _ingested: [AudioStream: Int] = [:]
     private var _stops = 0
+    private var _endedCalls = 0
     private var _micMutes: [Bool] = []
 
     var delegate: CoachEngineDelegate? {
@@ -151,6 +152,7 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
     var startedWithKey: [Bool] { lock.withLock { _startedWithKey } }
     var ingested: [AudioStream: Int] { lock.withLock { _ingested } }
     var stops: Int { lock.withLock { _stops } }
+    var endedCalls: Int { lock.withLock { _endedCalls } }
     /// Every `setMicMuted` call, in order.
     var micMutes: [Bool] { lock.withLock { _micMutes } }
 
@@ -175,6 +177,8 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
             _stops += 1
         }
     }
+
+    func endCall() { lock.withLock { _endedCalls += 1 } }
 
     func emit(_ s: CueSuggestion) {
         delegate?.engine(self, didSuggest: s)
