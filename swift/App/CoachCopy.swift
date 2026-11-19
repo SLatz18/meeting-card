@@ -9,6 +9,10 @@ enum CoachCopy {
     static let keyLabel = "OpenAI API key"
     static let keyPlaceholder = "sk-\u{2026}"
     static let keySavedPlaceholder = "Saved in your Keychain"
+    static let keySavedNote = "Key saved."
+    static let keySavedNextCallNote = "Key saved. It will be used from your next call."
+    static let keyRemovedNote = "Key removed."
+    static let keyRemovedThisCallNote = "Key removed. The call in progress keeps using it until the call ends."
     static let keyHelp = "Call audio goes to OpenAI on this key, only while the coach is on. The key is stored in your Keychain."
     static let keyEmpty = "No key saved. Call coach runs its on-device cues; add a key for GPT cues."
     static let keyRejected = "OpenAI didn't accept this key. Check it and try again."
@@ -33,6 +37,9 @@ enum CoachCopy {
         guard !parts.isEmpty else { return nil }
         return "Allow MeetingCard under \(parts.joined(separator: " and ")) in System Settings > Privacy & Security. Until then the coach goes by audio activity."
     }
+    static let menuVersion = "Version"
+    static let menuVersionUnknown = "unknown"
+    static let menuQuit = "Quit"
     static let menuOff = "Call coach: off"
     static let menuWaiting = "Coach on, waiting for a call"
     static let menuGptOffNoKey = "GPT cues off: no API key"

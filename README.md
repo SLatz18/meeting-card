@@ -61,7 +61,7 @@ Ad-hoc is fine for trying it out. A stable self-signed identity is nicer for dai
 ## Run, quit, turn off
 
 - Start: `open ~/Applications/MeetingCardSwift.app`. The first run from `~/Applications` registers it as a login item.
-- Quit: `pkill -f MeetingCardSwift.app/Contents/MacOS/MeetingCardSwift`.
+- Quit: choose **Quit** in the coach menu (the menu bar icon), or press ⌘Q while its Settings window is in front.
 - Stop launching at login: System Settings > General > Login Items, switch MeetingCardSwift off. The app never re-enables itself.
 - Log: `~/Library/Logs/MeetingCardSwift.log`. It records event ids, start times, counts and skip reasons, never titles, descriptions or attendees. It **does** record the meeting link a card offers and the link opened on Join, which can include a Zoom passcode, so redact links before sharing log lines.
 
