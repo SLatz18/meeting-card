@@ -81,7 +81,7 @@ final class CoachWiringTests: XCTestCase {
             XCTAssertFalse(text.contains(".typesafe\"") || text.contains("scoped(\"typesafe"), "\(file) builds a TypeSafe service string")
         }
         XCTAssertTrue(src.contains("LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,"))
-        XCTAssertTrue(src.contains("judgeProvider: { Self.storedJudgeProvider(defaults) })"))
+        XCTAssertTrue(src.contains("judgeProvider: { Self.storedJudgeProvider(defaults) }"))
         XCTAssertTrue(src.contains("keys: keyGate, callState: callControls, engine: engine"))
         let kitDefaults = try read("Packages/ListenMoreKit/Sources/ListenMoreCore/DefaultConfig.swift")
         XCTAssertTrue(kitDefaults.contains("\"provider\": \"gpt\""), "GPT stays the default judge")
