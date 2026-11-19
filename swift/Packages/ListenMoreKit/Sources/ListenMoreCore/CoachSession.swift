@@ -141,6 +141,9 @@ public final class CoachSession {
         bridge.session = self
     }
 
+    /// Runs after each poll (the host re-resolves the call's window here, as windows change).
+    public var onTick: (() -> Void)?
+
     /// The trigger's indicator, with Listening shown as Mic off while the user is muted. Pause and the
     /// call app's mute hold all capture, so they show over it.
     public var indicator: CoachIndicator {
@@ -296,6 +299,7 @@ public final class CoachSession {
         let micChanged = syncMic()
         if actions.isEmpty && (captureChanged || micChanged || indicator != before) { changed() }
         checkCallFallback()
+        onTick?()
     }
 
     private func apply(_ actions: [TriggerAction]) {

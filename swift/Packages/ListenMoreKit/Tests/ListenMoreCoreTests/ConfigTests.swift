@@ -16,6 +16,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.trigger.startAfterS, 3)
         XCTAssertEqual(c.trigger.stopAfterS, 30)
         XCTAssertEqual(c.trigger.endedStopAfterS, 3)
+        XCTAssertEqual(c.trigger.callWindowLookbackS, 60)
         XCTAssertEqual(c.trigger.excludeBundleIds, ["com.listenmore.mac"])
         XCTAssertNil(DefaultConfig.json.range(of: #"sk-[A-Za-z0-9_-]{10,}"#, options: .regularExpression))
     }
@@ -47,6 +48,7 @@ final class ConfigTests: XCTestCase {
         }
         XCTAssertThrowsError(try ListenMoreConfig.load(overrides: ["trigger": ["stop_after_s": -1]]))
         XCTAssertThrowsError(try ListenMoreConfig.load(overrides: ["trigger": ["ended_stop_after_s": 0]]))
+        XCTAssertThrowsError(try ListenMoreConfig.load(overrides: ["trigger": ["call_window_lookback_s": 0]]))
         XCTAssertThrowsError(try ListenMoreConfig.load(overrides: ["trigger": ["ended_stop_after_s": 31]]),
                              "the ended stop is never slower than the Core Audio stop")
     }

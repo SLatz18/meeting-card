@@ -226,6 +226,9 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var stopAfterS: Double
         /// Stop delay once an app-level call-state provider reports the call ended.
         public var endedStopAfterS: Double
+        /// The call's window is the one that appeared no earlier than this before the session
+        /// started (`CallWindowSelector`), so a call app's home window never counts.
+        public var callWindowLookbackS: Double
         /// Never trigger on these, in any mode (the host adds its own bundle ID).
         public var excludeBundleIds: [String]
     }
@@ -291,7 +294,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         guard gpt.store == false else { throw ConfigError.invalid("gpt.store must be false") }
         try judge.typesafe.validate()
         guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,
-              trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS else { throw ConfigError.invalid("bad trigger timing") }
+              trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS,
+              trigger.callWindowLookbackS > 0 else { throw ConfigError.invalid("bad trigger timing") }
     }
 
     public static func jsonObject(_ data: Data) throws -> [String: Any] {

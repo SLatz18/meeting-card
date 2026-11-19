@@ -27,9 +27,13 @@ public final class CoachService: CoachSessionDelegate {
     /// The display the host's window is on (glow fallback) and the window to order the glow behind.
     public var fallbackScreen: () -> NSRect? = { nil }
     public var hostWindowNumber: () -> Int? = { nil }
+    /// The call's window (glow display, "is the meeting window still there"); re-resolved each poll.
+    public let callWindows: CallWindowTracker
     /// Display for a session's app: the one place the call's window is chosen, for the glow and (through
-    /// `glowScreen`) the host's coach card. Injectable for tests.
-    var locateScreen: (String?, NSRect?) -> NSRect? = { CallDisplayLocator.screen(appKey: $0, fallback: $1) }
+    /// `glowScreen`) the host's coach card. `init` points it at `callWindows`. Injectable for tests.
+    var locateScreen: (String?, NSRect?) -> NSRect? = { _, fallback in fallback }
+    /// The attached displays' frames (Cocoa, the primary first); injectable for tests.
+    var screenFrames: () -> [NSRect] = { NSScreen.screens.map(\.frame) }
     public var onChange: (() -> Void)?
     /// A cue was shown (after the glow started).
     public var onCue: ((Cue) -> Void)?
@@ -50,6 +54,7 @@ public final class CoachService: CoachSessionDelegate {
     ///   - ownBundleId / excludedBundleIds: never trigger on these (plus the config's `trigger.exclude_bundle_ids`).
     ///   - callState: optional app-level call state; an `ended` report stops in `trigger.ended_stop_after_s`
     ///     instead of the Core Audio `trigger.stop_after_s`.
+    ///   - callWindows: where the call's window is tracked (shared with a `CallControlsProvider.live`).
     public init(config: ListenMoreConfig, glowStyle: GlowStyle, enabled: Bool, anyApp: Bool,
                 allowlist: [String]? = nil,
                 ownBundleId: String? = Bundle.main.bundleIdentifier, excludedBundleIds: [String] = [],
@@ -58,7 +63,7 @@ public final class CoachService: CoachSessionDelegate {
                 callState: CallStateProvider? = nil,
                 mic: MicSource = MicCapture(), call: CallSource? = nil,
                 engine: CoachEngine = LocalCoachEngine(transports: .urlSession()),
-                glow: GlowOverlayController? = nil) {
+                glow: GlowOverlayController? = nil, callWindows: CallWindowTracker? = nil) {
         self.config = config
         self.mic = mic
         self.anyApp = anyApp
@@ -67,12 +72,27 @@ public final class CoachService: CoachSessionDelegate {
         self.excludedBundleIds = excludedBundleIds
         let glow = glow ?? GlowOverlayController(style: glowStyle)
         self.glow = glow
+        let callWindows = callWindows ?? CallWindowTracker(config: config)
+        self.callWindows = callWindows
         let settings = TriggerSettings(config: config, anyApp: anyApp, ownPid: getpid(), ownBundleId: ownBundleId,
                                        excludedBundleIds: excludedBundleIds, allowlist: allowlist)
         session = CoachSession(config: config, engine: engine, mic: mic, call: call ?? CallCapture(config: config),
                                signal: AudioActivitySignal(provider: provider), keys: keys, renderer: glow,
                                settings: settings, enabled: enabled, callState: callState)
         session.delegate = self
+        let hints = callState as? CallControlsProvider
+        let browserKeys = Set(config.captureTargets.filter { $0.kind == .browser }.map { $0.bundleId.lowercased() })
+        let zoomKeys = Set(config.captureTargets.filter { $0.kind == .zoom }.map { $0.bundleId.lowercased() })
+        session.onTick = { [weak self] in
+            guard let self else { return }
+            let s = self.session.session
+            let keys = Set(self.session.trigger.settings.allowlist.map { $0.lowercased() } + [s?.appKey].compactMap { $0 })
+            self.callWindows.update(session: s.flatMap { s in s.appKey.map { (appKey: $0, startedAt: s.startedAt) } }, appKeys: keys,
+                                    browserKeys: browserKeys, alwaysOnKeys: zoomKeys, hints: hints?.windowHints ?? [:])
+        }
+        locateScreen = { [weak self] appKey, fallback in
+            CallDisplayLocator.screen(callWindow: callWindows.target(appKey: appKey), fallback: fallback, screens: self?.screenFrames())
+        }
         glow.placement = { [weak self] in
             guard let self else { return .init(screen: nil) }
             let screen = self.locateScreen(self.session.session?.appKey, self.fallbackScreen())
@@ -105,6 +125,7 @@ public final class CoachService: CoachSessionDelegate {
     public func setEnabled(_ on: Bool) {
         session.setEnabled(on)
         on ? session.startPolling() : session.stopPolling()
+        if !on { callWindows.reset() }
     }
 
     public func setAnyApp(_ on: Bool) {
