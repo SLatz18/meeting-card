@@ -244,7 +244,7 @@ final class CoachServiceTests: XCTestCase {
         let s = activeZoomService(fake)
         fake.windows = [Self.homeWindow, Self.meetingWindow]  // the meeting window opens during the call
         RunLoop.main.run(until: Date().addingTimeInterval(1.2))
-        XCTAssertEqual(s.callWindows.target(appKey: "us.zoom.xos"), Self.meetingWindow.bounds)
+        XCTAssertEqual(s.callWindows?.target(appKey: "us.zoom.xos"), Self.meetingWindow.bounds)
         s.session.deliverForTesting(CueSuggestion(type: .interrupt, t: 10, onset: 9.7, source: .local))
         XCTAssertEqual(s.glowScreen, Self.callScreen, "the meeting window's display, from the tracker through locateScreen")
         s.glow.hideAll()
@@ -255,7 +255,7 @@ final class CoachServiceTests: XCTestCase {
         let fake = FakeWindows()
         fake.windows = [Self.homeWindow]
         let s = activeZoomService(fake)
-        XCTAssertNil(s.callWindows.target(appKey: "us.zoom.xos"))
+        XCTAssertNil(s.callWindows?.target(appKey: "us.zoom.xos"))
         s.session.deliverForTesting(CueSuggestion(type: .interrupt, t: 10, onset: 9.7, source: .local))
         XCTAssertEqual(s.glowScreen, Self.cardScreen, "never the home window's display")
         s.glow.hideAll()
@@ -285,12 +285,12 @@ final class CoachServiceTests: XCTestCase {
         s.session.tick()
         XCTAssertTrue(try XCTUnwrap(fake.asked.last).contains("com.google.chrome"), "the hint puts Chrome in the read")
         XCTAssertFalse(try XCTUnwrap(fake.asked.last).contains("company.thebrowser.dia"))
-        XCTAssertEqual(s.callWindows.target(appKey: "com.google.chrome"), chromeWindow.bounds, "bound from the hint")
+        XCTAssertEqual(s.callWindows?.target(appKey: "com.google.chrome"), chromeWindow.bounds, "bound from the hint")
 
         runner.raw = 0
         s.session.tick()
         XCTAssertFalse(try XCTUnwrap(fake.asked.last).contains("com.google.chrome"), "no hint: Chrome is dropped again")
-        XCTAssertNil(s.callWindows.target(appKey: "com.google.chrome"))
+        XCTAssertNil(s.callWindows?.target(appKey: "com.google.chrome"))
         s.setEnabled(false)
     }
 
@@ -310,5 +310,26 @@ final class CoachServiceTests: XCTestCase {
         s.session.tick()
         XCTAssertEqual(fake.asked.last, Set(["us.zoom.xos", slack]), "Slack with an active session is read")
         s.setEnabled(false)
+    }
+
+    // MARK: flag off: no tracker, main's behavior
+
+    /// Without a tracker (the `callWindowBinding` flag off) the service tracks nothing and reads no
+    /// window list per poll: no tick hook, and the glow's display is still the largest-window rule.
+    func testWithoutATrackerTheServiceTracksNothing() {
+        let off = service(enabled: false)
+        XCTAssertNil(off.callWindows)
+        XCTAssertNil(off.session.onTick, "no per-poll window read")
+        let on = service(enabled: false, callWindows: CallWindowTracker(lookbackS: 60, windowSource: { _ in [] }))
+        XCTAssertNotNil(on.callWindows)
+        XCTAssertNotNil(on.session.onTick)
+    }
+
+    /// Flag off: with no session app and nothing on screen, the glow's display is the card's, as on main.
+    func testWithoutATrackerTheGlowUsesTheLargestWindowRule() {
+        let s = service(enabled: false)
+        let fallback = Self.cardScreen
+        XCTAssertEqual(s.locateScreen(nil, fallback), fallback)
+        XCTAssertEqual(s.locateScreen("com.example.notrunning", fallback), fallback)
     }
 }

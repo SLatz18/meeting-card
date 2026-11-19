@@ -68,8 +68,41 @@ public final class CallWindowTracker: @unchecked Sendable {
     }
 }
 
-/// The display for the glow: the one holding the call's window, else the card's display.
+/// The display for the glow, else the card's display: the one holding the call app's largest window
+/// (`screen(appKey:fallback:)`, flag off) or the call's own window (`screen(callWindow:...)`, flag on).
 public enum CallDisplayLocator {
+    // MARK: the largest-window rule (flag off)
+
+    public static func windows() -> [CallDisplay.WindowInfo] {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] else { return [] }
+        var bundleByPid: [pid_t: String?] = [:]
+        return list.compactMap { w in
+            guard let pid = (w[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let layer = (w[kCGWindowLayer as String] as? NSNumber)?.intValue,
+                  let dict = w[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: dict) else { return nil }
+            let bundle: String?
+            if let cached = bundleByPid[pid] {
+                bundle = cached
+            } else {
+                bundle = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+                bundleByPid[pid] = bundle
+            }
+            return CallDisplay.WindowInfo(bundleId: bundle, layer: layer, bounds: bounds)
+        }
+    }
+
+    /// Cocoa frame of the display for the glow; `fallback` is the card's display.
+    public static func screen(appKey: String?, fallback: NSRect?) -> NSRect? {
+        let screens = NSScreen.screens.map(\.frame)
+        let primaryHeight = NSScreen.screens.first?.frame.maxY ?? 0
+        return CallDisplay.screen(appKey: appKey, windows: appKey == nil ? [] : windows(), screens: screens,
+                                  primaryHeight: primaryHeight, fallback: fallback)
+    }
+
+    // MARK: the call window rule (flag on)
+
     /// Cocoa frame of the display for the glow; `fallback` is the card's display. `screens` (Cocoa
     /// frames, the primary first) defaults to the attached displays; tests pass their own.
     public static func screen(callWindow: CGRect?, fallback: NSRect?, screens: [NSRect]? = nil) -> NSRect? {

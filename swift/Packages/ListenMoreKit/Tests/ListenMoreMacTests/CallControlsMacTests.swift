@@ -34,8 +34,10 @@ final class CallControlsMacTests: XCTestCase {
         let id = "com.google.Chrome"
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) != nil else { throw XCTSkip("Chrome not installed") }
         guard NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty else { throw XCTSkip("Chrome is running") }
-        let source = try XCTUnwrap(MeetTabReader.chrome(runner: OSAScriptRunner()).scripts.first)
-        XCTAssertEqual(OSAScriptRunner().run(source, bundleId: id), .count(0))
+        for hints in [false, true] {
+            let source = try XCTUnwrap(MeetTabReader.chrome(runner: OSAScriptRunner(), windowHints: hints).scripts.first)
+            XCTAssertEqual(OSAScriptRunner().run(source, bundleId: id), .count(0), "window hints \(hints)")
+        }
         XCTAssertTrue(NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty, "Chrome was not launched")
     }
 
@@ -81,5 +83,22 @@ final class CallControlsMacTests: XCTestCase {
         let zoom = try XCTUnwrap(p.readers.first as? ZoomControlsReader)
         XCTAssertNotNil(zoom.callWindowPresent)
         XCTAssertNil(zoom.callWindowPresent?() ?? nil, "nothing bound yet")
+    }
+
+    /// Flag off (no tracker): Zoom has no window signal and the Meet scripts are the count-only ones.
+    func testLiveWithoutATrackerIsTheMenuOnlyAndCountOnlyProvider() throws {
+        let p = CallControlsProvider.live(config: try .builtIn())
+        let zoom = try XCTUnwrap(p.readers.first as? ZoomControlsReader)
+        XCTAssertNil(zoom.callWindowPresent)
+        let chrome = try XCTUnwrap(p.readers.compactMap { $0 as? MeetTabReader }.first { $0.bundleId == "com.google.Chrome" })
+        XCTAssertEqual(chrome.scripts, [MeetScript.source(bundleId: "com.google.Chrome", spaces: false)])
+        XCTAssertFalse(chrome.scripts.joined().contains("minimized"))
+    }
+
+    /// Flag on (a tracker): the Meet scripts also report the window holding the meeting.
+    func testLiveWithATrackerAsksMeetForTheWindow() throws {
+        let p = CallControlsProvider.live(config: try .builtIn(), callWindows: CallWindowTracker(lookbackS: 60))
+        let chrome = try XCTUnwrap(p.readers.compactMap { $0 as? MeetTabReader }.first { $0.bundleId == "com.google.Chrome" })
+        XCTAssertEqual(chrome.scripts, [MeetScript.source(bundleId: "com.google.Chrome", spaces: false, windowRank: true)])
     }
 }

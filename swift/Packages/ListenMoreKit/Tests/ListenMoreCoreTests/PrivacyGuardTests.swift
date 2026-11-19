@@ -344,9 +344,11 @@ final class PrivacyGuardTests: XCTestCase {
         }
     }
 
-    /// The call's window is picked from what CGWindowList says without titles (number, owner, layer,
-    /// on-screen, bounds) and from when the window appeared, or from the Meet script's window count:
-    /// never the largest, first or frontmost window, and no Accessibility window reads.
+    /// The call's window (flag on) is picked from what CGWindowList says without titles (number, owner,
+    /// layer, on-screen, bounds) and from when the window appeared, or from the Meet script's window count:
+    /// never the largest, first or frontmost window, and no Accessibility window reads. (Flag off keeps
+    /// main's largest-window rule in `CallDisplay.screen(appKey:...)`, which only the service's default
+    /// `locateScreen` reaches.)
     func testCallWindowSelectionRule() throws {
         let files = ["CallWindows.swift", "CallDisplay.swift", "CallDisplayLocator.swift"]
         let sources = try librarySources().filter { files.contains($0.0) }
@@ -365,8 +367,7 @@ final class PrivacyGuardTests: XCTestCase {
         let selector = code(try XCTUnwrap(sources.first { $0.0 == "CallWindows.swift" }).1)
         XCTAssertFalse(selector.contains("max(by:") || selector.contains("width * "), "never the largest window")
         XCTAssertTrue(selector.contains("firstSeen"), "chosen by when the window appeared")
-        let display = code(try XCTUnwrap(sources.first { $0.0 == "CallDisplay.swift" }).1)
-        XCTAssertFalse(display.contains("appKey") || display.contains("WindowInfo"), "CallDisplay no longer picks an app's window")
+        XCTAssertFalse(selector.contains("WindowInfo") || selector.contains("CallDisplay"), "the call window rule never uses the largest-window rule")
         for (name, text) in try allSources() where name != "CallDisplayLocator.swift" {
             XCTAssertFalse(code(text).contains("CGWindowListCopyWindowInfo"), "\(name) reads the window list")
         }
@@ -374,6 +375,7 @@ final class PrivacyGuardTests: XCTestCase {
         // the Mac tests (`CoachServiceTests`) drive that path from a fake window list.
         let service = code(try XCTUnwrap(try allSources().first { $0.0 == "CoachService.swift" }).1)
         XCTAssertTrue(service.contains("callWindows.target(appKey: appKey)"), "locateScreen is the call window binding")
+        XCTAssertTrue(service.contains("{ CallDisplayLocator.screen(appKey: $0, fallback: $1) }"), "flag off: the largest-window rule, as on main")
         XCTAssertTrue(service.contains("let screen = self.locateScreen(self.session.session?.appKey, self.fallbackScreen())"),
                       "the glow's placement asks locateScreen")
     }

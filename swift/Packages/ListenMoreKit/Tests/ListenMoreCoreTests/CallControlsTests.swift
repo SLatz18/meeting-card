@@ -546,7 +546,18 @@ final class CallControlsTests: XCTestCase {
         XCTAssertEqual(reader.read(), .noCall, "nothing bound: the menu shortcuts decide as before")
     }
 
+    /// A provider whose Meet readers are the window-rank ones (what `live(config:callWindows:)` builds
+    /// with a tracker, flag on).
+    private func hintingProvider() -> CallControlsProvider {
+        let p = CallControlsProvider(readers: [ZoomControlsReader(ax: ax), MeetTabReader.chrome(runner: scripts, windowHints: true),
+                                               MeetTabReader.dia(runner: scripts, windowHints: true)],
+                                     endedHoldS: config.trigger.stopAfterS, clock: { [unowned self] in self.clock })
+        p.isEnabled = true
+        return p
+    }
+
     func testMeetReportsWhichWindowHoldsTheCall() {
+        let provider = hintingProvider()
         scripts.raw[Self.chrome] = 1 + 1000 * 2 + 1_000_000 * 3
         _ = provider.callStates()
         XCTAssertEqual(provider.callStates()["com.google.chrome"], .started)
@@ -559,9 +570,44 @@ final class CallControlsTests: XCTestCase {
         XCTAssertTrue(provider.windowHints.isEmpty)
     }
 
+    /// Flag off: the readers are main's. The count-only script, read as a plain count, and never a hint.
+    func testMeetWithoutWindowHintsIsTheCountOnlyReader() throws {
+        for reader in [MeetTabReader.chrome(runner: scripts), MeetTabReader.dia(runner: scripts)] {
+            for source in reader.scripts {
+                XCTAssertFalse(source.contains("minimized") || source.contains("nVisible") || source.contains("1000000"), source)
+                XCTAssertTrue(source.contains("\t\treturn n\n"), "the script returns the count itself")
+            }
+        }
+        let mainsScript = MeetScript.handler + "\n\nif application id \"com.google.Chrome\" is not running then return 0\n"
+            + "with timeout of 2 seconds\n\ttell application id \"com.google.Chrome\"\n\t\tset n to 0\n\t\trepeat with w in windows\n"
+            + "\t\t\tset n to n + (my countMeetings(URL of (tabs of w whose URL starts with \"https://meet.google.com/\")))\n"
+            + "\t\tend repeat\n\t\treturn n\n\tend tell\nend timeout"
+        XCTAssertEqual(MeetTabReader.chrome(runner: scripts).scripts, [mainsScript], "main's script, character for character")
+        scripts.raw[Self.chrome] = 1 + 1000 * 2 + 1_000_000 * 3     // what the window-rank script would return
+        _ = provider.callStates()
+        XCTAssertEqual(provider.callStates()["com.google.chrome"], .started, "any positive count is a meeting")
+        XCTAssertTrue(provider.windowHints.isEmpty, "no window hint from the count-only reader")
+        scripts.raw[Self.chrome] = 0
+        XCTAssertNil(MeetTabReader.chrome(runner: scripts).windowHint)
+        XCTAssertEqual(MeetTabReader.chrome(runner: scripts).read(), .noCall)
+    }
+
+    /// The window-rank script is only built on request, and differs from the count-only one.
+    func testWindowRankScriptIsOnlyBuiltOnRequest() {
+        for spaces in [false, true] {
+            let counted = MeetScript.source(bundleId: Self.chrome, spaces: spaces)
+            let ranked = MeetScript.source(bundleId: Self.chrome, spaces: spaces, windowRank: true)
+            XCTAssertNotEqual(counted, ranked)
+            XCTAssertTrue(ranked.contains("minimized of w"))
+            XCTAssertFalse(counted.contains("minimized of w"))
+        }
+        XCTAssertEqual(MeetTabReader.chrome(runner: scripts, windowHints: true).scripts,
+                       [MeetScript.source(bundleId: Self.chrome, spaces: false, windowRank: true)])
+    }
+
     func testMeetScriptReadsOnlyMinimizedFromAWindow() throws {
         let re = try NSRegularExpression(pattern: #"\b(\w+) of (w|p)\b"#)
-        for reader in [MeetTabReader.chrome(runner: scripts), MeetTabReader.dia(runner: scripts)] {
+        for reader in [MeetTabReader.chrome(runner: scripts, windowHints: true), MeetTabReader.dia(runner: scripts, windowHints: true)] {
             for source in reader.scripts {
                 let reads = Set(re.matches(in: source, range: NSRange(source.startIndex..., in: source))
                     .map { (source as NSString).substring(with: $0.range(at: 1)) })

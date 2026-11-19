@@ -70,7 +70,7 @@ per call, read back right after; a no-op with a reason (`toggleOff`, `permission
 revoked or unsupported backend reports nothing for its app. `CallControlsPermissions.request...`
 shows the system prompts and is for a host's opt-in toggle only.
 
-`CallWindowSelector` (Core; `CallWindowTracker` in ListenMoreMac) is the call's window for the glow's display and for
+With the host's `callWindowBinding` flag on (a `CallWindowTracker` passed to `CoachService` and `CallControlsProvider.live(config:callWindows:)`; with none, the largest-window rule and the menu-only Zoom reading and count-only Meet scripts are main's), `CallWindowSelector` (Core; `CallWindowTracker` in ListenMoreMac) is the call's window for the glow's display and for
 Zoom's "meeting window still there": the window that appeared with the call (never the app's largest, first or
 frontmost), a floating mini window while it's minimized, or for Meet the browser window the Meet script names. It reads
 CGWindowList numbers, owners, layers, on-screen flags and bounds only (no titles); nothing identified means the host's
