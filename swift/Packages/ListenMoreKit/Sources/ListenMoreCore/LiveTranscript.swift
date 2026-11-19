@@ -38,14 +38,20 @@ public final class LiveTranscript {
     public private(set) var labels: SpeakerLabels
     public private(set) var callStart: Date?
     public private(set) var gptStop: GptStopReason?
+    public private(set) var callSpeakers: [Speaker] = []
+    public let speakerProfiles: SpeakerProfiles?
+    private var detectedVoices: [Speaker: SpeakerEmbedding] = [:]
+    private var matchedProfiles: [Speaker: UUID] = [:]
     private let clock: () -> Date
 
     /// `labels`: the host's wording for You and Them (tags reset at call end, these stay).
     public init(settings: Settings, store: TranscriptStore, captions: CaptionBuffer = CaptionBuffer(),
-                labels: SpeakerLabels = SpeakerLabels(), timeZone: TimeZone = .current, clock: @escaping () -> Date = Date.init) {
+                labels: SpeakerLabels = SpeakerLabels(), timeZone: TimeZone = .current,
+                speakerProfiles: SpeakerProfiles? = nil, clock: @escaping () -> Date = Date.init) {
         self.settings = settings
         self.captions = captions
         self.labels = labels
+        self.speakerProfiles = speakerProfiles
         recorder = TranscriptRecorder(store: store, timeZone: timeZone)
         self.clock = clock
     }
@@ -78,14 +84,36 @@ public final class LiveTranscript {
         gptStop = nil
         captions.clear()
         labels.reset()
+        callSpeakers.removeAll()
+        detectedVoices.removeAll()
+        matchedProfiles.removeAll()
         recorder.end()
     }
 
     public func receive(_ event: CaptionEvent) {
         guard let start = callStart, gptStop == nil, settings.keyUsable else { return }
+        switch event {
+        case let .speakerEmbedding(speaker, embedding):
+            guard let speakerProfiles, speakerProfiles.isEnabled, case .other = speaker else { return }
+            detectedVoices[speaker] = embedding
+            if matchedProfiles[speaker] == nil,
+               let match = speakerProfiles.match(embedding, excluding: Set(matchedProfiles.values)) {
+                matchedProfiles[speaker] = match.id
+                refreshVoiceProfiles()
+            }
+            return
+        case let .partial(speaker, _, _), let .final(speaker, _, _):
+            if case .other = speaker, !callSpeakers.contains(speaker) {
+                callSpeakers.append(speaker)
+                callSpeakers.sort { a, b in
+                    guard case .other(let left) = a, case .other(let right) = b else { return false }
+                    return left < right
+                }
+            }
+        }
         let offset = clock().timeIntervalSince(start)
         if settings.captions { captions.apply(event, at: offset) }
-        if case let .final(speaker, text) = event {
+        if case let .final(speaker, text, _) = event {
             let said = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !said.isEmpty { recorder.add(TranscriptLine(speaker: speaker, offset: offset, text: said)) }
         }
@@ -120,6 +148,27 @@ public final class LiveTranscript {
         guard inCall else { return }
         labels.rename(speaker, to: tag)
         recorder.relabel(labels)
+    }
+
+    public func canSaveVoice(_ speaker: Speaker) -> Bool {
+        speakerProfiles?.isEnabled == true && matchedProfiles[speaker] == nil && detectedVoices[speaker] != nil
+    }
+
+    public func saveVoice(_ speaker: Speaker, name: String) throws {
+        guard canSaveVoice(speaker), let speakerProfiles, let embedding = detectedVoices[speaker] else { return }
+        let profile = try speakerProfiles.save(name: name, embedding: embedding)
+        matchedProfiles[speaker] = profile.id
+        refreshVoiceProfiles()
+    }
+
+    public func refreshVoiceProfiles() {
+        guard let speakerProfiles else { return }
+        if !speakerProfiles.isEnabled { detectedVoices.removeAll() }
+        let names = Dictionary(speakerProfiles.profiles.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        matchedProfiles = matchedProfiles.filter { names[$0.value] != nil }
+        let before = labels
+        labels.setProfileNames(matchedProfiles.compactMapValues { names[$0] })
+        if labels != before { recorder.relabel(labels) }
     }
 
     @discardableResult

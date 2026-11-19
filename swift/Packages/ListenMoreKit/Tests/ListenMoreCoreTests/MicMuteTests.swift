@@ -368,9 +368,10 @@ final class MicMuteSendsNoMicAudioTests: XCTestCase {
     }
 
     func speakers(_ captions: [CaptionEvent]) -> [Speaker] {
-        captions.map {
+        captions.compactMap {
             switch $0 {
-            case let .partial(s, _, _), let .final(s, _): return s
+            case let .partial(s, _, _), let .final(s, _, _): return s
+            case .speakerEmbedding: return nil
             }
         }
     }

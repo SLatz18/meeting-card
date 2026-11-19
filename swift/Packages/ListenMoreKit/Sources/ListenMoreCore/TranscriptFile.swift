@@ -1,9 +1,9 @@
 import Foundation
 
-/// The coach's only disk writer: the opt-in saved transcript, text only, one Markdown file per call
+/// The coach's only transcript writer: the opt-in saved transcript, text only, one Markdown file per call
 /// in the folder the user chose. Writes go straight to that file (no atomic temp copy elsewhere)
 /// and the file is readable by the user only. Audio has no path here. PrivacyGuardTests checks that
-/// no other coach source writes to disk.
+/// no other coach source writes transcripts to disk.
 public final class FileTranscriptStore: TranscriptStore {
     /// The host picks the folder (MeetingCard: per app identity, or the user's choice).
     public init() {}

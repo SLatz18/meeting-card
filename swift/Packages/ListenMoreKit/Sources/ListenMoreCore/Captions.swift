@@ -5,8 +5,9 @@ import Foundation
 public enum CaptionEvent: Equatable, Sendable {
     /// More text of the turn `item` that is still being transcribed.
     case partial(Speaker, item: String, text: String)
-    /// The final text of the speaker's oldest turn still in progress (turns complete in order).
-    case final(Speaker, text: String)
+    /// The final text of this item, or the speaker's oldest pending turn on the legacy path.
+    case final(Speaker, text: String, item: String? = nil)
+    case speakerEmbedding(Speaker, SpeakerEmbedding)
 }
 
 /// Display labels for the two streams: "You" (the mic) and "Them" (call audio), or the host's own
@@ -18,13 +19,23 @@ public struct SpeakerLabels: Equatable, Sendable {
 
     public let defaults: [Speaker: String]
     private var tags: [Speaker: String] = [:]
+    private var profileNames: [Speaker: String] = [:]
 
     public init(defaults: [Speaker: String] = SpeakerLabels.defaultLabels) {
         self.defaults = defaults
     }
 
     public func label(_ speaker: Speaker) -> String {
-        tags[speaker] ?? defaults[speaker] ?? Self.defaultLabels[speaker] ?? speaker.rawValue
+        tags[speaker] ?? profileNames[speaker] ?? defaultLabel(speaker)
+    }
+
+    public func defaultLabel(_ speaker: Speaker) -> String {
+        if case .other(let number) = speaker { return "Speaker \(number)" }
+        return defaults[speaker] ?? Self.defaultLabels[speaker] ?? speaker.rawValue
+    }
+
+    mutating func setProfileNames(_ names: [Speaker: String]) {
+        profileNames = names
     }
 
     public var isTagged: Bool { !tags.isEmpty }
@@ -33,11 +44,14 @@ public struct SpeakerLabels: Equatable, Sendable {
     /// characters are dropped, and the tag is cut to `maxLength` characters.
     public mutating func rename(_ speaker: Speaker, to tag: String?) {
         let clean = Self.clean(tag ?? "")
-        tags[speaker] = clean.isEmpty || clean == defaults[speaker] ? nil : clean
+        let base: String?
+        if case .other = speaker { base = defaultLabel(speaker) } else { base = defaults[speaker] }
+        tags[speaker] = clean.isEmpty || clean == base ? nil : clean
     }
 
     public mutating func reset() {
         tags.removeAll()
+        profileNames.removeAll()
     }
 
     static func clean(_ s: String) -> String {
@@ -97,10 +111,12 @@ public struct CaptionBuffer: Equatable, Sendable {
                 lines[i].pending.append((item, text))
                 lines[i].updatedAt = t
             }
-        case let .final(speaker, text):
+        case let .final(speaker, text, item):
             let said = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let i = lines.firstIndex(where: { $0.speaker == speaker && !$0.pending.isEmpty }) {
-                lines[i].pending.removeFirst()
+            if let i = lines.firstIndex(where: { line in
+                line.speaker == speaker && line.pending.contains { item == nil || $0.item == item }
+            }), let j = lines[i].pending.firstIndex(where: { item == nil || $0.item == item }) {
+                lines[i].pending.remove(at: j)
                 if !said.isEmpty { lines[i].settled = Self.join(lines[i].settled, said) }
                 lines[i].updatedAt = t
                 if lines[i].text.isEmpty { lines.remove(at: i) }
@@ -109,6 +125,8 @@ public struct CaptionBuffer: Equatable, Sendable {
                 lines[i].settled = Self.join(lines[i].settled, said)
                 lines[i].updatedAt = t
             }
+        case .speakerEmbedding:
+            break
         }
         if lines.count > maxLines { lines.removeFirst(lines.count - maxLines) }
     }

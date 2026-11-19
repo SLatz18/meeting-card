@@ -2,9 +2,21 @@ import Foundation
 
 /// Port of the data types in `listen_more/gpt_layer.py`. Everything here is RAM only; transcript
 /// text and judge reasons are content and must never be logged.
-public enum Speaker: String, CaseIterable, Sendable {
-    case me = "ME"
-    case others = "OTHERS"
+public enum Speaker: Hashable, CaseIterable, Sendable {
+    case me
+    case others
+    case other(Int)
+
+    /// Capture streams, not the per-call identities heard on the call stream.
+    public static let allCases: [Speaker] = [.me, .others]
+
+    public var rawValue: String {
+        switch self {
+        case .me: "ME"
+        case .others: "OTHERS"
+        case .other(let number): "OTHERS (Speaker \(number))"
+        }
+    }
 }
 
 public enum GptJudgeSpec {
@@ -128,9 +140,11 @@ public struct RollingTranscript {
         while let first = lines.first, now - first.t > windowS { lines.removeFirst() }
     }
 
-    public mutating func render(now: TimeInterval) -> String {
+    public mutating func render(now: TimeInterval, privateNames: [String] = []) -> String {
         prune(now: now)
-        return lines.map { "[-\(Self.fixed1(now - $0.t, width: 4))s] \($0.speaker.rawValue): \($0.text)" }.joined(separator: "\n")
+        return lines.map {
+            "[-\(Self.fixed1(now - $0.t, width: 4))s] \($0.speaker.rawValue): \(JudgeRedactor.redactNames($0.text, names: privateNames))"
+        }.joined(separator: "\n")
     }
 
     public mutating func clear() {

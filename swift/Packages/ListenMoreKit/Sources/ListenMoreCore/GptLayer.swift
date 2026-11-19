@@ -223,7 +223,8 @@ public final class GptCore {
     static let minCommitS = 0.1
 
     /// One frame of one stream. The driver performs the returned actions in order.
-    public func feed(_ speaker: Speaker, frame: [Float], vad: VadState, now: TimeInterval) -> [TxAction] {
+    public func feed(_ speaker: Speaker, frame: [Float], vad: VadState, now: TimeInterval,
+                     separateTurns: Bool = false) -> [TxAction] {
         if now > callSeconds { callSeconds = now }
         guard enabled, !(speaker == .me && meMuted) else { return [] }
         if cost.exhausted {
@@ -251,7 +252,7 @@ public final class GptCore {
                 tail[speaker] = []
                 commitRef[speaker] = offset
                 let long = (cost.openS[speaker] ?? 0) >= maxSegment
-                commitDue[speaker] = now + (long ? 0 : commitGap)
+                commitDue[speaker] = now + (long || separateTurns ? 0 : commitGap)
             }
         } else {
             preroll[speaker]?.push(frame[...])
@@ -299,7 +300,7 @@ public final class GptCore {
         let ref = refT >= 0 ? refT : now
         if speaker == .me && meMuted { return (ref, nil) }
         transcript.add(t: now, speaker: speaker, text: text)
-        if speaker == .others {
+        if speaker != .me {
             if text.split(whereSeparator: \.isWhitespace).count >= config.gpt.judgeMinOthersWords { othersSpoke = true }
             return (ref, nil)
         }
@@ -328,39 +329,41 @@ public final class GptCore {
     }
 
     /// The prompt to send, or nil when the budget is spent (the layer stops).
-    public func beginJudge(_ req: JudgeRequest, now: TimeInterval) -> String? {
+    public func beginJudge(_ req: JudgeRequest, now: TimeInterval, privateNames: [String] = []) -> String? {
         if cost.exhausted {
             budgetStop()
             return nil
         }
-        let prompt = buildPrompt(req, now: now)
+        let prompt = buildPrompt(req, now: now, privateNames: privateNames)
         lastJudgeAt = now
         return prompt
     }
 
     /// The input for `kind`, or nil when the budget is spent (the layer stops). The GPT judge gets
     /// `beginJudge(_:now:)`'s prompt; a state-based provider gets only the minimal redacted window.
-    public func beginJudge(_ req: JudgeRequest, now: TimeInterval, for kind: JudgeProviderKind) -> JudgeInput? {
+    public func beginJudge(_ req: JudgeRequest, now: TimeInterval, for kind: JudgeProviderKind,
+                           privateNames: [String] = []) -> JudgeInput? {
         switch kind {
         case .gpt:
-            return beginJudge(req, now: now).map { JudgeInput(prompt: $0, window: []) }
+            return beginJudge(req, now: now, privateNames: privateNames).map { JudgeInput(prompt: $0, window: []) }
         case .typesafe:
             if cost.exhausted {
                 budgetStop()
                 return nil
             }
             lastJudgeAt = now
-            return JudgeInput(prompt: "", window: judgeWindow(now: now))
+            return JudgeInput(prompt: "", window: judgeWindow(now: now, privateNames: privateNames))
         }
     }
 
     /// What a state-based judge sees: at most `max_lines` lines heard in the last `window_s` seconds,
     /// each with its speaker label, seconds ago and redacted text. No prosody, overlaps or trigger.
-    func judgeWindow(now t: TimeInterval) -> [JudgeLine] {
+    func judgeWindow(now t: TimeInterval, privateNames: [String] = []) -> [JudgeLine] {
         let ts = config.judge.typesafe
         transcript.prune(now: t)
         return transcript.lines.filter { t - $0.t <= ts.windowS }.suffix(ts.maxLines).map {
-            JudgeLine(speaker: $0.speaker, secondsAgo: max(0, t - $0.t), text: JudgeRedactor.redact($0.text, names: config.text.userNames))
+            JudgeLine(speaker: $0.speaker, secondsAgo: max(0, t - $0.t),
+                      text: JudgeRedactor.redact($0.text, names: config.text.userNames + privateNames))
         }
     }
 
@@ -434,12 +437,12 @@ public final class GptCore {
         return next
     }
 
-    func buildPrompt(_ req: JudgeRequest, now t: TimeInterval) -> String {
+    func buildPrompt(_ req: JudgeRequest, now t: TimeInterval, privateNames: [String] = []) -> String {
         let p = prosody
         let recent = localRecent.filter { t - $0.0 < 30 }.map { "\($0.1.rawValue)@-\(String(format: "%.1f", t - $0.0))s" }
         return """
         TRANSCRIPT (oldest first):
-        \(transcript.render(now: t))
+        \(transcript.render(now: t, privateNames: privateNames))
 
         LOCAL_FLAGS: prosody_enabled=\(config.local.prosodyEnabled ? "yes" : "no") \
         prosody_flagged=\(p?.flagged == true ? "yes" : "no") loudness_jump_db=\(Self.num(p?.loudnessJumpDb ?? 0)) \
@@ -494,6 +497,8 @@ public final class GptLayer: @unchecked Sendable {
     private let onCommitRejected: (@Sendable (Speaker) -> Void)?
     private let scheduler: GptScheduler
     private let judge: JudgeProvider?
+    private let speakerProfiles: SpeakerProfiles?
+    private var speakerTurns: SpeakerTurns?
     private var transcribers: [Speaker: TranscriptionSession] = [:]
     private let inbox: AsyncStream<Command>.Continuation
     private var loop: Task<Void, Never>?
@@ -512,6 +517,7 @@ public final class GptLayer: @unchecked Sendable {
                 onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil,
                 onClearRejected: (@Sendable (Speaker) -> Void)? = nil,
                 onCommitRejected: (@Sendable (Speaker) -> Void)? = nil,
+                speakerEmbedder: (any SpeakerEmbedder)? = nil, speakerProfiles: SpeakerProfiles? = nil,
                 provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
@@ -527,6 +533,8 @@ public final class GptLayer: @unchecked Sendable {
         self.onCommitRejected = onCommitRejected
         self.judge = provider
         self.scheduler = scheduler
+        self.speakerProfiles = speakerProfiles
+        speakerTurns = speakerEmbedder.map { SpeakerTurns(embedder: $0, config: config) }
         var continuation: AsyncStream<Command>.Continuation!
         let stream = AsyncStream<Command> { continuation = $0 }
         inbox = continuation
@@ -560,13 +568,16 @@ public final class GptLayer: @unchecked Sendable {
                             onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil,
                             onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil,
                             onClearRejected: (@Sendable (Speaker) -> Void)? = nil,
-                            onCommitRejected: (@Sendable (Speaker) -> Void)? = nil) {
+                            onCommitRejected: (@Sendable (Speaker) -> Void)? = nil,
+                            speakerEmbedder: (any SpeakerEmbedder)? = nil, speakerProfiles: SpeakerProfiles? = nil) {
         self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped, onJudgeStopped: onJudgeStopped,
                   onCaption: onCaption, onMeter: onMeter, onClearRejected: onClearRejected, onCommitRejected: onCommitRejected,
+                  speakerEmbedder: speakerEmbedder, speakerProfiles: speakerProfiles,
                   provider: JudgeProviders.make(config: config, openAIKey: key, judgeKey: judgeKey, http: transports.http,
                                                 scheduler: transports.scheduler),
                   scheduler: transports.scheduler) { speaker, onEvent in
-            LiveTranscriber(config: config, key: key, speaker: speaker, connector: transports.webSocket, onEvent: onEvent)
+            LiveTranscriber(config: config, key: key, speaker: speaker, connector: transports.webSocket,
+                            includeTurnIdentity: speaker == .others && speakerEmbedder != nil, onEvent: onEvent)
         }
     }
 
@@ -609,21 +620,23 @@ public final class GptLayer: @unchecked Sendable {
         case let .frame(me, meVad, others, othersVad, meRunS):
             core.setMeRun(meRunS)
             await perform(core.feed(.me, frame: me, vad: meVad, now: now()))
-            await perform(core.feed(.others, frame: others, vad: othersVad, now: now()))
+            if core.enabled { await speakerTurns?.observe(others, vad: othersVad) }
+            await perform(core.feed(.others, frame: others, vad: othersVad, now: now(),
+                                    separateTurns: speakerTurns != nil))
         case .local(let ev):
             core.onLocal(ev)
         case .micMuted(let muted):
             await perform(core.setMeMuted(muted))
         case .transcript(.text(let speaker, let text, let refT)):
-            guard !(speaker == .me && core.meMuted) else { break }
-            let t = now()
-            let r = core.onText(speaker, text: text, refT: refT, now: t)
-            onSegment?(speaker, text, r.refT, t)
-            if core.enabled { onCaption?(.final(speaker, text: text)) }
-            if let req = r.start { schedule(req) }
+            finishText(speaker, text, refT: refT)
+        case .transcript(.turnText(let speaker, let text, let item, let refT)):
+            finishText(speaker, text, refT: refT, item: item)
         case .transcript(.delta(let speaker, let text, let item)):
             guard !(speaker == .me && core.meMuted) else { break }
             if core.enabled { onCaption?(.partial(speaker, item: item, text: text)) }
+        case .transcript(.turnDelta(let speaker, let text, let item, let refT)):
+            guard core.enabled, refT >= 0 else { break }
+            onCaption?(.partial(turnSpeaker(speaker, refT: refT), item: item, text: text))
         case .transcript(.usage(let speaker, let seconds)):
             core.addApiAudio(seconds: seconds, speaker: speaker)
             onMeter?(core.cost.reading)
@@ -648,6 +661,7 @@ public final class GptLayer: @unchecked Sendable {
             tasks.removeAll()
             await closeTranscribers()
             core.clearTranscript()
+            speakerTurns = nil
             c.resume()
             return true
         }
@@ -665,6 +679,24 @@ public final class GptLayer: @unchecked Sendable {
             onJudgeStopped?(failure)
         }
         return false
+    }
+
+    private func turnSpeaker(_ stream: Speaker, refT: TimeInterval) -> Speaker {
+        let announce = speakerProfiles?.isEnabled == true
+        guard stream == .others, refT >= 0,
+              let turn = speakerTurns?.attribution(at: refT, announce: announce) else { return stream }
+        if announce && !turn.announced { onCaption?(.speakerEmbedding(turn.speaker, turn.centroid)) }
+        return turn.speaker
+    }
+
+    private func finishText(_ stream: Speaker, _ text: String, refT: TimeInterval, item: String? = nil) {
+        guard !(stream == .me && core.meMuted) else { return }
+        let t = now()
+        let speaker = item == nil ? stream : turnSpeaker(stream, refT: refT)
+        let r = core.onText(speaker, text: text, refT: refT, now: t)
+        onSegment?(stream, text, r.refT, t)
+        if core.enabled { onCaption?(.final(speaker, text: text, item: item)) }
+        if let req = r.start { schedule(req) }
     }
 
     private func perform(_ actions: [GptCore.TxAction]) async {
@@ -716,7 +748,8 @@ public final class GptLayer: @unchecked Sendable {
     }
 
     private func runJudge(_ req: GptCore.JudgeRequest) {
-        guard let judge, let input = core.beginJudge(req, now: now(), for: judge.kind) else {
+        let names = speakerProfiles?.profiles.map(\.name) ?? []
+        guard let judge, let input = core.beginJudge(req, now: now(), for: judge.kind, privateNames: names) else {
             if let next = core.judgeEnded() { schedule(next) }
             return
         }

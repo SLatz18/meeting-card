@@ -3,8 +3,8 @@ import ListenMoreCore
 
 /// Static guard over the coach sources: the package's library targets plus MeetingCard's
 /// `App/Coach*.swift`. Audio stays in memory in every mode; text stays in memory unless the user
-/// turns on saved transcripts, and then only `TranscriptFile.swift` writes, one file per call in the
-/// chosen folder (the runtime tests below check what reaches disk with saving off and on). Nothing
+/// turns on saved transcripts, and then only `TranscriptFile.swift` writes transcript text.
+/// `SpeakerProfiles.swift` may write only opt-in voice profiles. Nothing
 /// content-like is printed or logged, the key is only touched through KeychainStore, public log
 /// arguments are counters, enums and booleans, and nothing reads window titles.
 final class PrivacyGuardTests: XCTestCase {
@@ -45,22 +45,32 @@ final class PrivacyGuardTests: XCTestCase {
         XCTAssertGreaterThan(try appSources().count, 0)
     }
 
-    /// The one source allowed to touch disk: the opt-in saved transcript (text, in the user's folder).
     static let transcriptWriter = "TranscriptFile.swift"
+    static let profilesWriter = "SpeakerProfiles.swift"
 
     func testNoDiskWritesOrPersistence() throws {
         // Audio and screen content are never written, by any source.
         let neverAnywhere = ["AVAudioFile(forWriting", "AVAssetWriter", "SCRecordingOutput", "SCScreenshotManager",
                              "NSKeyedArchiver", "fopen(", "createFile(", "FileHandle(forWriting"]
-        // Disk writes: only the transcript writer.
+        // Disk writes: only the two opt-in stores.
         let writerOnly = ["write(to:", "createDirectory(", "removeItem(", "moveItem(", "copyItem(", "setAttributes("]
         for (name, text) in try allSources() {
             for f in neverAnywhere { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
-            guard name != Self.transcriptWriter else { continue }
+            guard ![Self.transcriptWriter, Self.profilesWriter].contains(name) else { continue }
             for f in writerOnly { XCTAssertFalse(text.contains(f), "\(name) contains \(f)") }
         }
         // A host app may store coach settings (see testHostDefaultsAreSettingsOnly); the libraries store nothing.
         for (name, text) in try librarySources() { XCTAssertFalse(text.contains("UserDefaults"), name) }
+    }
+
+    func testProfileWriterOnlySerializesNamesAndEmbeddings() throws {
+        let writer = try XCTUnwrap(try librarySources().first { $0.0 == Self.profilesWriter }).1
+        XCTAssertEqual(writer.components(separatedBy: "write(to:").count - 1, 1)
+        XCTAssertTrue(writer.contains("JSONEncoder().encode(next).write(to: file, options: .atomic)"))
+        XCTAssertTrue(writer.contains("guard active else { throw StoreError.disabled }"))
+        for banned in ["TranscriptLine", "CaptionEvent", "samples:", "AVAudio", "pcm", "temporaryDirectory"] {
+            XCTAssertFalse(writer.contains(banned), banned)
+        }
     }
 
     /// The writer takes text only (no audio type can reach it) and writes the file in place: no
@@ -77,7 +87,8 @@ final class PrivacyGuardTests: XCTestCase {
     /// Caption and transcript code never logs: transcript text and keys stay out of every log.
     func testCaptionAndTranscriptSourcesNeverLog() throws {
         let names: Set<String> = ["Captions.swift", "Transcript.swift", Self.transcriptWriter, "LiveTranscript.swift",
-                                  "CoachTranscript.swift", "CoachNotice.swift"]
+                                  "CoachTranscript.swift", "CoachNotice.swift", Self.profilesWriter, "SpeakerTurns.swift",
+                                  "SpeakerEmbedder.swift", "CoreMLSpeakerEmbedder.swift"]
         let sources = try allSources().filter { names.contains($0.0) }
         XCTAssertGreaterThanOrEqual(sources.count, 4)
         for (name, text) in sources {
@@ -118,6 +129,39 @@ final class PrivacyGuardTests: XCTestCase {
         runCall(live)
         XCTAssertEqual(try everything(under: root), [], "captions on, saving off: not even the folder is created")
         XCTAssertFalse(try live.deleteTranscript(), "nothing to delete")
+    }
+
+    func testOnlyExplicitProfileSaveWritesWhenEnabledWithoutTranscriptSaving() throws {
+        let root = try tempRoot()
+        let folder = root.appendingPathComponent("VoiceProfiles")
+        let profiles = SpeakerProfiles(folder: folder)
+        let live = LiveTranscript(settings: .init(captions: true, folder: root, keyUsable: true),
+                                  store: FileTranscriptStore(), speakerProfiles: profiles)
+        let speaker = Speaker.other(1)
+        let embedding = try XCTUnwrap(SpeakerEmbedding(model: "synthetic", values: [1, 2]))
+        live.callStarted()
+        live.receive(.speakerEmbedding(speaker, embedding))
+        live.receive(.final(speaker, text: "Alpha bravo."))
+        XCTAssertThrowsError(try profiles.save(name: "Guest", embedding: embedding))
+        XCTAssertEqual(try everything(under: root), [])
+
+        try profiles.setEnabled(true)
+        live.receive(.speakerEmbedding(speaker, embedding))
+        live.rename(speaker, to: "This call only")
+        XCTAssertEqual(try everything(under: root), [])
+        try live.saveVoice(speaker, name: "Guest")
+        live.callEnded()
+        XCTAssertEqual(try everything(under: root), ["VoiceProfiles", "VoiceProfiles/SpeakerProfiles.json"])
+        let data = try Data(contentsOf: folder.appendingPathComponent("SpeakerProfiles.json"))
+        let rows = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        XCTAssertEqual(rows.count, 1)
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(Set(row.keys), ["id", "name", "embedding"])
+        XCTAssertEqual(row["name"] as? String, "Guest")
+        let stored = try XCTUnwrap(row["embedding"] as? [String: Any])
+        XCTAssertEqual(Set(stored.keys), ["model", "values"])
+        let flags = try FileManager.default.attributesOfItem(atPath: folder.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(flags?.intValue, 0o700)
     }
 
     func testSavingOnWritesOnlyTheOneTranscriptFile() throws {
@@ -205,7 +249,8 @@ final class PrivacyGuardTests: XCTestCase {
     func testHostDefaultsAreSettingsOnly() throws {
         let allowed: Set<String> = ["coach.enabled", "coach.anyApp", "coach.allowlist", "coach.onboarded", "coach.callControls",
                                     "coach.judgeProvider", "coach.cardPosition", "coach.captions", "coach.saveTranscripts",
-                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen", "coach.showInScreenshots"]
+                                    "coach.transcriptFolder", "coach.transcriptNoticeSeen", "coach.showInScreenshots",
+                                    "coach.speakerProfiles"]
         let re = try NSRegularExpression(pattern: #""(coach\.[A-Za-z.]+)""#)
         for (name, text) in try swiftFiles(in: Self.hostAppURL, prefix: "Coach") {
             for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -220,12 +265,17 @@ final class PrivacyGuardTests: XCTestCase {
     /// generate their audio (Synthetic.swift) and use content-free tokens for text.
     func testNoDataFixtures() throws {
         let okNames: Set<String> = ["README.md", ".gitignore", "LICENSE"]
+        let model = "ListenMoreMac/Models/"
+        let bundledModelFiles = Set(["NOTICE.md"] + ["analytics/coremldata.bin", "coremldata.bin", "metadata.json",
+                                                   "model.mil", "weights/weight.bin"].map { "wespeaker_int8.mlmodelc/" + $0 })
         for dir in [Self.sourcesURL, Self.testsURL] {
             let e = try XCTUnwrap(FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil))
             for case let url as URL in e {
                 var isDir: ObjCBool = false
                 guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { continue }
-                let ok = ["swift", "c", "h"].contains(url.pathExtension) || okNames.contains(url.lastPathComponent)
+                let prefix = Self.sourcesURL.appendingPathComponent(model).path + "/"
+                let bundled = url.path.hasPrefix(prefix) && bundledModelFiles.contains(String(url.path.dropFirst(prefix.count)))
+                let ok = bundled || ["swift", "c", "h"].contains(url.pathExtension) || okNames.contains(url.lastPathComponent)
                 XCTAssertTrue(ok, "unexpected data file \(url.lastPathComponent)")
             }
         }

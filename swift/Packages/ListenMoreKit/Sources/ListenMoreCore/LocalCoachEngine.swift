@@ -72,6 +72,8 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     private let participants: Int
     private let judgeKeys: APIKeyProvider?
     private let judgeProvider: (@Sendable () -> JudgeProviderKind?)?
+    private let speakerEmbedder: (@Sendable () -> any SpeakerEmbedder)?
+    private let speakerProfiles: SpeakerProfiles?
     private var config: ListenMoreConfig?
     private var pipeline: CoachPipeline?
     private var aligner: FrameAligner?
@@ -83,12 +85,15 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
     /// the config's `judge.provider` when it returns a value (a host setting; the next call uses it).
     /// `judgeKeys` supplies the TypeSafe key, read at start only while that provider is selected.
     public init(transports: GptTransports? = nil, maxLagMs: Int = 200, participants: Int = 2,
-                judgeKeys: APIKeyProvider? = nil, judgeProvider: (@Sendable () -> JudgeProviderKind?)? = nil) {
+                judgeKeys: APIKeyProvider? = nil, judgeProvider: (@Sendable () -> JudgeProviderKind?)? = nil,
+                speakerEmbedder: (@Sendable () -> any SpeakerEmbedder)? = nil, speakerProfiles: SpeakerProfiles? = nil) {
         self.transports = transports
         self.maxLagMs = maxLagMs
         self.participants = participants
         self.judgeKeys = judgeKeys
         self.judgeProvider = judgeProvider
+        self.speakerEmbedder = speakerEmbedder
+        self.speakerProfiles = speakerProfiles
     }
 
     /// The config a session runs with: `config` with the host's provider pick applied.
@@ -146,7 +151,7 @@ public final class LocalCoachEngine: CoachEngine, @unchecked Sendable {
                                  onCommitRejected: { [weak self] speaker in
                                      guard let self else { return }
                                      self.delegate?.engine(self, commitRejected: speaker)
-                                 })
+                                 }, speakerEmbedder: speakerEmbedder?(), speakerProfiles: speakerProfiles)
             box.layer = layer
             layer.start()
             gpt = layer

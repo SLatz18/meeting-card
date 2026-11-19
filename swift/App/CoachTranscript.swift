@@ -5,7 +5,7 @@ import MeetingCardCore
 /// Live captions and saved transcripts (both off by default; both need a key OpenAI accepts, since
 /// they read the GPT cues' transcription). Takes the coach service's call and caption events into
 /// `LiveTranscript` and publishes what the card shows in `feed` (a `CaptionFeedModel` for
-/// `CaptionFeedView`; no window of its own), and stores four settings in UserDefaults (never call
+/// `CaptionFeedView`; no window of its own), and stores settings in UserDefaults (never call
 /// data). Caption text lives in memory; with saving on, the Kit's `FileTranscriptStore` writes the
 /// call's one Markdown file in the chosen folder.
 @MainActor
@@ -15,6 +15,7 @@ final class CoachTranscript {
         static let saveTranscripts = "coach.saveTranscripts"
         static let transcriptFolder = "coach.transcriptFolder"
         static let noticeSeen = "coach.transcriptNoticeSeen"
+        static let speakerProfiles = "coach.speakerProfiles"
     }
 
     let defaults: UserDefaults
@@ -23,12 +24,31 @@ final class CoachTranscript {
     let feed = CaptionFeedModel()
     /// The per-call cost meter's latest reading (nil until the first billed segment).
     private(set) var meter: CostReading?
+    private(set) var profileLoadFailed = false
 
-    init(defaults: UserDefaults, store: TranscriptStore = FileTranscriptStore()) {
+    init(defaults: UserDefaults, store: TranscriptStore = FileTranscriptStore(), speakerProfiles: SpeakerProfiles? = nil) {
         self.defaults = defaults
         live = LiveTranscript(settings: .init(folder: Self.defaultFolder), store: store,
-                              captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines), labels: Self.speakerLabels)
+                              captions: CaptionBuffer(maxLines: Theme.Captions.visibleLines), labels: Self.speakerLabels,
+                              speakerProfiles: speakerProfiles)
+        if let speakerProfiles, defaults.bool(forKey: Keys.speakerProfiles) {
+            do { try speakerProfiles.setEnabled(true) }
+            catch { profileLoadFailed = true }
+        }
         live.update(settings(keyUsable: false))
+    }
+
+    func setVoiceProfiles(_ enabled: Bool) throws {
+        guard let profiles = live.speakerProfiles else { return }
+        try profiles.setEnabled(enabled)
+        defaults.set(enabled, forKey: Keys.speakerProfiles)
+        profileLoadFailed = false
+        refreshVoiceProfiles()
+    }
+
+    func refreshVoiceProfiles() {
+        live.refreshVoiceProfiles()
+        render()
     }
 
     // MARK: settings
