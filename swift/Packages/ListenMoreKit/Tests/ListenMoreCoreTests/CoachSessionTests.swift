@@ -396,6 +396,43 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertTrue(started, "the engine runs without a key (no GPT layer)")
     }
 
+    /// The key is read once, when capture starts. A key saved while the call runs is not handed to the
+    /// running engine (swapping it would restart the GPT layer and drop the call's state), so Settings
+    /// tells the user it applies from the next call (`KeyNotice.savedForNextCall`).
+    func testKeySavedMidCallIsNotReadUntilCaptureStartsAgain() async {
+        final class MutableKeys: APIKeyProvider, @unchecked Sendable {
+            var key: APIKey?
+            var reads = 0
+            func readKey() throws -> APIKey? { reads += 1; return key }
+        }
+        let keys = MutableKeys()
+        var settings = TriggerSettings(config: config, anyApp: false, ownPid: 1, ownBundleId: "com.example.hostapp")
+        settings.startAfterS = 0
+        settings.stopAfterS = 8
+        let signal = WindowTitleSignal(probe: probe, targets: config.captureTargets, meetTitleRegex: config.meetTitleRegex)
+        let clock = clock
+        let s = CoachSession(config: config, engine: engine, mic: mic, call: call, signal: signal, keys: keys,
+                             renderer: renderer, settings: settings, wallClock: { clock.now() })
+        meetInDia()
+        s.tick()
+        let started = await eventually { self.engine.startedWithKey == [false] }
+        XCTAssertTrue(started)
+        XCTAssertEqual(keys.reads, 1)
+
+        keys.key = APIKey("sk-test-not-real")
+        s.tick()
+        clock.advance(5)
+        s.tick()
+        XCTAssertEqual(keys.reads, 1, "ticks during the call never read the key")
+        XCTAssertEqual(engine.startedWithKey, [false], "the running engine keeps the key it started with")
+
+        s.setPaused(true)
+        s.setPaused(false)
+        let restarted = await eventually { self.engine.startedWithKey == [false, true] }
+        XCTAssertTrue(restarted, "capture starting again reads the key")
+        XCTAssertEqual(keys.reads, 2)
+    }
+
     func testIndicatorOnWhilePrewarmedThenListening() async {
         let (s, provider) = audioSession()
         provider.zoomCall()

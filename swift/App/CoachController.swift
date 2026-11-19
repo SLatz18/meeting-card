@@ -397,7 +397,7 @@ final class CoachController: NSObject {
         if let reason = service?.gptStopped { transcript.gptStopped(reason) }
         updateCoachCard(card)
         updateStatusItem()
-        settingsWindow?.update()
+        settingsWindow?.refresh()
     }
 
     /// What the coach card shows now, or nil while the coach isn't on for a call.
@@ -491,7 +491,26 @@ final class CoachController: NSObject {
         }
         addTranscriptItems(to: menu)
         menu.addItem(feedbackMenuItem())
+        for entry in MenuFooter.entries { menu.addItem(footerItem(entry)) }
         return menu
+    }
+
+    /// The menu's last entries: the disabled version line, then Quit.
+    private func footerItem(_ entry: MenuFooterEntry) -> NSMenuItem {
+        switch entry {
+        case .separator:
+            return .separator()
+        case .version:
+            let title = AppVersion.menuLine(label: CoachCopy.menuVersion, unknown: CoachCopy.menuVersionUnknown,
+                                            infoDictionary: Bundle.main.infoDictionary)
+            let m = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            m.isEnabled = false
+            return m
+        case .quit:
+            let m = NSMenuItem(title: CoachCopy.menuQuit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: MenuFooter.quitKeyEquivalent)
+            m.target = NSApplication.shared
+            return m
+        }
     }
 
     /// The saved transcript's entries: Saving transcript while one is written, Delete Transcript…
