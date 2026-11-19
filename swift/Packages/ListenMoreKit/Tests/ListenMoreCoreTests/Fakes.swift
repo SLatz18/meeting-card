@@ -7,11 +7,14 @@ final class FakeMic: MicSource {
     var started = 0
     var stopped = 0
     var failNext = false
+    /// A failed `start` still keeps the handler, as `RoutedMic` does while it retries the open.
+    var keepsHandlerOnFailedStart = false
     var handler: (@Sendable ([Float]) -> Void)?
 
     func start(sampleRate: Int, handler: @escaping @Sendable ([Float]) -> Void) throws {
         if failNext {
             failNext = false
+            if keepsHandlerOnFailedStart { self.handler = handler }
             throw NSError(domain: "FakeMic", code: 1)
         }
         started += 1
@@ -191,6 +194,10 @@ final class RecordingEngine: CoachEngine, @unchecked Sendable {
 
     func emitMeter(_ r: CostReading) {
         delegate?.engine(self, meter: r)
+    }
+
+    func emitCommitRejected(_ speaker: Speaker) {
+        delegate?.engine(self, commitRejected: speaker)
     }
 }
 

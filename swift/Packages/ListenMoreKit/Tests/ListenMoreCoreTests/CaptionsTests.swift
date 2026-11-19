@@ -155,6 +155,7 @@ final class CaptionFeedTests: XCTestCase {
     func say(_ l: GptLayer, onset: TimeInterval, offset: TimeInterval) {
         let v = GptFrames.voiced, z = GptFrames.silent
         l.feed(me: v, meVad: GptFrames.vad(raw: true, onset: onset), others: z, othersVad: GptFrames.quiet, meRunS: 0)
+        for _ in 0..<5 { l.feed(me: v, meVad: GptFrames.vad(raw: true), others: z, othersVad: GptFrames.quiet, meRunS: 0) }
         l.feed(me: z, meVad: GptFrames.vad(raw: false, offset: offset), others: z, othersVad: GptFrames.quiet, meRunS: 0)
     }
 

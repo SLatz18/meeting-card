@@ -582,12 +582,14 @@ final class TypeSafeLayerTests: XCTestCase {
     }
 
     func utterance(_ layer: GptLayer, _ speaker: Speaker, onset: TimeInterval, offset: TimeInterval) {
-        let on = GptFrames.vad(raw: true, onset: onset), off = GptFrames.vad(raw: false, offset: offset)
+        let on = GptFrames.vad(raw: true, onset: onset), body = GptFrames.vad(raw: true), off = GptFrames.vad(raw: false, offset: offset)
         if speaker == .me {
             layer.feed(me: v, meVad: on, others: z, othersVad: GptFrames.quiet, meRunS: 0)
+            for _ in 0..<5 { layer.feed(me: v, meVad: body, others: z, othersVad: GptFrames.quiet, meRunS: 0) }
             layer.feed(me: z, meVad: off, others: z, othersVad: GptFrames.quiet, meRunS: 0)
         } else {
             layer.feed(me: z, meVad: GptFrames.quiet, others: v, othersVad: on, meRunS: 0)
+            for _ in 0..<5 { layer.feed(me: z, meVad: GptFrames.quiet, others: v, othersVad: body, meRunS: 0) }
             layer.feed(me: z, meVad: GptFrames.quiet, others: z, othersVad: off, meRunS: 0)
         }
     }

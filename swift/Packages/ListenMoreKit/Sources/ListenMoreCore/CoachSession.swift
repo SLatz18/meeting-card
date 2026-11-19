@@ -75,6 +75,8 @@ public final class CoachSession {
         case fallbackEngaged(stage: CaptureStage)
         /// The transcriber refused `input_audio_buffer.clear` after Mute; nothing stopped.
         case transcriberClearRejected
+        /// The server refused one commit of transcription audio; nothing stopped.
+        case transcriberCommitRejected
     }
 
     public let config: ListenMoreConfig
@@ -223,7 +225,6 @@ public final class CoachSession {
         if on {
             micGate.resume()
             if !mic.setMuted(false) {
-                micGate.pause()
                 captureProblem = true
                 delegate?.coachSession(self, didReport: .micUnavailable)
             }
@@ -405,7 +406,7 @@ public final class CoachSession {
                 if gate.admits(gen) && micGate.admits(micGen) { engine.ingest(.mic, samples: samples, time: 0) }
             }
         } catch {
-            micGate.close()
+            // The mic keeps its handler and retries the open, so its gate stays open for the retry.
             captureProblem = true
             delegate?.coachSession(self, didReport: .micUnavailable)
         }
@@ -490,6 +491,11 @@ public final class CoachSession {
     fileprivate func clearRejected() {
         guard isCapturing else { return }
         delegate?.coachSession(self, didReport: .transcriberClearRejected)
+    }
+
+    fileprivate func commitRejected() {
+        guard isCapturing else { return }
+        delegate?.coachSession(self, didReport: .transcriberCommitRejected)
     }
 
     fileprivate func meter(_ reading: CostReading) {
@@ -596,6 +602,12 @@ final class EngineDelegateBridge: CoachEngineDelegate, @unchecked Sendable {
     func engine(_ engine: CoachEngine, clearRejected speaker: Speaker) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated { self.session?.clearRejected() }
+        }
+    }
+
+    func engine(_ engine: CoachEngine, commitRejected speaker: Speaker) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self.session?.commitRejected() }
         }
     }
 }

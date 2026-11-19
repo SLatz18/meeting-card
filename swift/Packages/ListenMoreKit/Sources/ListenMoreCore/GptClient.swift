@@ -23,6 +23,8 @@ public enum TranscriptEvent: Sendable {
     case usage(Speaker, Double)
     /// The server refused this transcriber's `clear` (non-fatal: the layer keeps running).
     case clearRejected(Speaker)
+    /// The server refused one commit (for example as empty): non-fatal, the layer keeps running.
+    case commitRejected(Speaker)
     case error(String)
 }
 
@@ -38,7 +40,10 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
     private let lock = NSLock()
     private var socket: WebSocketConnection?
     private var reader: Task<Void, Never>?
-    private var commitRefs: [TimeInterval] = []
+    /// Commits sent and not yet acknowledged, oldest first: `committed` pops the oldest, and an `error`
+    /// naming one (by `event_id`), or the commit-empty code, drops it, so later transcripts keep their own `refT`.
+    private var pendingCommits: [(id: String, refT: TimeInterval)] = []
+    private var commitCount = 0
     private var itemRef: [String: TimeInterval] = [:]
     /// `event_id`s of clears not yet acknowledged, oldest first: an `error` naming one is that clear's
     /// rejection, not a session failure.
@@ -87,8 +92,18 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
 
     public func commit(refT: TimeInterval) async throws {
         guard let ws = lock.withLock({ socket }) else { throw GptError.notConnected }
-        lock.withLock { commitRefs.append(refT) }
-        try await ws.send(Self.json(["type": "input_audio_buffer.commit"]))
+        let id: String = lock.withLock {
+            commitCount += 1
+            let id = "lm_commit_\(commitCount)"
+            pendingCommits.append((id, refT))
+            return id
+        }
+        do {
+            try await ws.send(Self.json(["type": "input_audio_buffer.commit", "event_id": id]))
+        } catch {
+            lock.withLock { pendingCommits.removeAll { $0.id == id } }
+            throw error
+        }
     }
 
     public func clear() async throws {
@@ -130,7 +145,7 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
         case "input_audio_buffer.committed":
             let item = ev["item_id"] as? String ?? ""
             lock.withLock {
-                let ref = commitRefs.isEmpty ? -1 : commitRefs.removeFirst()
+                let ref = pendingCommits.isEmpty ? -1 : pendingCommits.removeFirst().refT
                 itemRef[item] = ref
             }
         case "conversation.item.input_audio_transcription.delta":
@@ -150,6 +165,24 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
             if let id = err["event_id"] as? String,
                lock.withLock({ pendingClears.firstIndex(of: id).map { pendingClears.remove(at: $0) } }) != nil {
                 onEvent(.clearRejected(speaker))
+                return
+            }
+            let id = err["event_id"] as? String
+            let emptyCommit = err["code"] as? String == "input_audio_buffer_commit_empty"
+            // An error naming a pending commit drops that one. Without an event_id, commit-empty is
+            // matched to the oldest. An event_id that names no pending commit drops nothing.
+            let rejected = lock.withLock { () -> Bool in
+                if let id {
+                    guard let i = pendingCommits.firstIndex(where: { $0.id == id }) else { return emptyCommit }
+                    pendingCommits.remove(at: i)
+                    return true
+                }
+                guard emptyCommit else { return false }
+                if !pendingCommits.isEmpty { pendingCommits.removeFirst() }
+                return true
+            }
+            if rejected {
+                onEvent(.commitRejected(speaker))
                 return
             }
             onEvent(.error("realtime error \(err["type"] as? String ?? "")/\(err["code"] as? String ?? "")"))

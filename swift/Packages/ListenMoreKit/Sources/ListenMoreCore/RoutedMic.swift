@@ -36,7 +36,8 @@ public protocol MicScheduler: AnyObject {
 
 /// The coach's mic: opens the input `MicPlan` picks for the current routes, reopens it when the
 /// routes change (debounced by `MicRestartPolicy`), and closes it completely (input stopped and
-/// released) on `stop()` or `setMuted(true)`. A built-in mic that delivers nothing, or only digital
+/// released) on `stop()` or `setMuted(true)`. An open that fails, at the start or later, is reported
+/// and retried on the same capped schedule for as long as the mic is started and unmuted. A built-in mic that delivers nothing, or only digital
 /// silence, for `silenceTimeout` (a closed lid) is set aside and the plan falls back without it,
 /// to call audio only rather than capturing silence; it's tried again when the routes really
 /// change or the session ends. Use from the main thread.
@@ -47,8 +48,9 @@ public final class RoutedMic: MicSource {
         case closed
         case restarted(count: Int)
         case openFailed(MicPlan)
-        /// The built-in mic delivered no sound and was set aside.
-        case inputSilent(device: UInt32)
+        /// The built-in mic delivered no sound and was set aside. The counts are the buffers it delivered
+        /// since it opened, and how many had any non-zero sample: none at all is not the same as zeros.
+        case inputSilent(device: UInt32, bufferCount: Int, soundBufferCount: Int)
     }
 
     public private(set) var isStarted = false
@@ -103,23 +105,22 @@ public final class RoutedMic: MicSource {
         do {
             try open()
         } catch {
-            isStarted = false
-            routes.stopObserving()
-            self.handler = nil
+            reportOpenFailure()
             throw error
         }
     }
 
     public func stop() {
+        isMuted = false
         guard isStarted else { return }
         isStarted = false
-        isMuted = false
         timerGeneration += 1
         routes.stopObserving()
         close()
         handler = nil
         unavailableInputs = []
         unavailableSince = nil
+        policy = MicRestartPolicy()
     }
 
     /// Muted closes the input completely and keeps the session's handler; unmuting reopens it on the
@@ -186,9 +187,18 @@ public final class RoutedMic: MicSource {
             try open()
             return true
         } catch {
-            events?(.openFailed(currentPlan()))
+            reportOpenFailure()
             return false
         }
+    }
+
+    /// The session keeps the mic, its handler and the route observer: the open is tried again on the
+    /// restart policy's schedule, at most `maxBurst` per `window`. A route change schedules through the
+    /// same policy, so it is not sooner once that budget is spent.
+    private func reportOpenFailure() {
+        events?(.openFailed(currentPlan()))
+        guard isStarted, !isMuted, plan == nil else { return }
+        schedule(at: policy.changed(at: scheduler.now))
     }
 
     private func open() throws {
@@ -225,15 +235,15 @@ public final class RoutedMic: MicSource {
             if now > heard {
                 self.watch(probe, device: device, heard: now)
             } else {
-                self.setAside(device)
+                self.setAside(device, probe: probe)
             }
         }
     }
 
-    private func setAside(_ device: UInt32) {
+    private func setAside(_ device: UInt32, probe: SoundProbe) {
         unavailableInputs.insert(device)
         unavailableSince = routes.snapshot()
-        events?(.inputSilent(device: device))
+        events?(.inputSilent(device: device, bufferCount: probe.buffers, soundBufferCount: probe.soundBuffers))
         close()
         openReporting()
     }
@@ -248,16 +258,24 @@ public final class RoutedMic: MicSource {
     }
 }
 
-/// Counts buffers with any non-zero sample, written from the audio thread.
+/// Counts the buffers delivered, and those with any non-zero sample, written from the audio thread.
 final class SoundProbe: @unchecked Sendable {
     private let lock = NSLock()
+    private var total = 0
     private var count = 0
 
     func note(_ samples: [Float]) {
-        guard samples.contains(where: { $0 != 0 }) else { return }
+        let hasSound = samples.contains(where: { $0 != 0 })
         lock.lock()
-        count += 1
+        total += 1
+        if hasSound { count += 1 }
         lock.unlock()
+    }
+
+    var buffers: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return total
     }
 
     var soundBuffers: Int {

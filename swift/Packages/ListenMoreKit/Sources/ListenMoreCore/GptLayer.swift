@@ -71,6 +71,8 @@ public final class GptCore {
         public var judgeModel: String?
         /// Engine audio time of the latest frame: how long this call has been coached.
         public var callSeconds: Double
+        /// Commits the server refused (non-fatal), this session.
+        public var rejectedCommits: Int
 
         /// Provider tokens per hour of coached call (the provider reports cost as tokens, with no
         /// dollar rate). nil before any audio.
@@ -119,6 +121,7 @@ public final class GptCore {
     public private(set) var judgeOutputTokens = 0
     public private(set) var judgeModel: String?
     public private(set) var callSeconds = 0.0
+    public private(set) var rejectedCommits = 0
     private var failuresInARow = 0
     private let judges: Bool
     /// The user's mic is off (`setMeMuted`): nothing of theirs is sent, committed, kept or judged.
@@ -150,7 +153,7 @@ public final class GptCore {
                         lastJudgeFailure: lastJudgeFailure?.description, belowFloorVerdicts: belowFloorVerdicts,
                         judgeLatenciesMs: judgeLatenciesMs, judgeCallUsd: priced ? cost.judgeCallUsd : nil,
                         judgeStopReason: judgeStopReason, judgeInputTokens: judgeInputTokens,
-                        judgeOutputTokens: judgeOutputTokens, judgeModel: judgeModel, callSeconds: callSeconds)
+                        judgeOutputTokens: judgeOutputTokens, judgeModel: judgeModel, callSeconds: callSeconds, rejectedCommits: rejectedCommits)
     }
 
     /// No judge calls for the rest of the session (no provider wired, or repeated provider failures).
@@ -203,12 +206,21 @@ public final class GptCore {
         return open && enabled ? [.clear(.me)] : []
     }
 
+    /// The server refused a commit (for example as empty). Nothing stops: the audio it covered is
+    /// not transcribed, and the count says how often it happened.
+    public func commitRejected() {
+        rejectedCommits += 1
+    }
+
     /// The transcriber refused (or couldn't send) a clear. Nothing stops: the other side keeps
     /// streaming, and the clear goes out again when the user unmutes, before any of their new audio,
     /// so the dropped segment can't be transcribed with their next line.
     public func clearRejected(_ speaker: Speaker) {
         clearRetry.insert(speaker)
     }
+
+    /// The least audio, in seconds, the API accepts in one commit.
+    static let minCommitS = 0.1
 
     /// One frame of one stream. The driver performs the returned actions in order.
     public func feed(_ speaker: Speaker, frame: [Float], vad: VadState, now: TimeInterval) -> [TxAction] {
@@ -246,8 +258,12 @@ public final class GptCore {
         }
         if let due = commitDue[speaker], now >= due - 1e-9 {
             commitDue[speaker] = nil
-            cost.commit(speaker: speaker)
-            out.append(.commit(speaker, refT: commitRef[speaker] ?? 0))
+            // The API refuses a commit with under 100 ms buffered. Audio sent so far stays in the server's
+            // buffer and goes out with the next commit, because `openS` keeps accumulating.
+            if (cost.openS[speaker] ?? 0) >= Self.minCommitS - 1e-9 {
+                cost.commit(speaker: speaker)
+                out.append(.commit(speaker, refT: commitRef[speaker] ?? 0))
+            }
         }
         return out
     }
@@ -475,6 +491,7 @@ public final class GptLayer: @unchecked Sendable {
     private let onCaption: CaptionSink?
     private let onMeter: MeterSink?
     private let onClearRejected: (@Sendable (Speaker) -> Void)?
+    private let onCommitRejected: (@Sendable (Speaker) -> Void)?
     private let scheduler: GptScheduler
     private let judge: JudgeProvider?
     private var transcribers: [Speaker: TranscriptionSession] = [:]
@@ -494,6 +511,7 @@ public final class GptLayer: @unchecked Sendable {
                 onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil,
                 onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil,
                 onClearRejected: (@Sendable (Speaker) -> Void)? = nil,
+                onCommitRejected: (@Sendable (Speaker) -> Void)? = nil,
                 provider: JudgeProvider?, scheduler: GptScheduler,
                 transcriberFactory: (Speaker, @escaping @Sendable (TranscriptEvent) -> Void) -> TranscriptionSession) {
         core = GptCore(config: config)
@@ -506,6 +524,7 @@ public final class GptLayer: @unchecked Sendable {
         self.onCaption = onCaption
         self.onMeter = onMeter
         self.onClearRejected = onClearRejected
+        self.onCommitRejected = onCommitRejected
         self.judge = provider
         self.scheduler = scheduler
         var continuation: AsyncStream<Command>.Continuation!
@@ -540,9 +559,10 @@ public final class GptLayer: @unchecked Sendable {
                             onSegment: SegmentSink? = nil, onStopped: (@Sendable (GptStopReason) -> Void)? = nil,
                             onJudgeStopped: (@Sendable (JudgeFailure) -> Void)? = nil,
                             onCaption: CaptionSink? = nil, onMeter: MeterSink? = nil,
-                            onClearRejected: (@Sendable (Speaker) -> Void)? = nil) {
+                            onClearRejected: (@Sendable (Speaker) -> Void)? = nil,
+                            onCommitRejected: (@Sendable (Speaker) -> Void)? = nil) {
         self.init(config: config, now: now, offer: offer, onSegment: onSegment, onStopped: onStopped, onJudgeStopped: onJudgeStopped,
-                  onCaption: onCaption, onMeter: onMeter, onClearRejected: onClearRejected,
+                  onCaption: onCaption, onMeter: onMeter, onClearRejected: onClearRejected, onCommitRejected: onCommitRejected,
                   provider: JudgeProviders.make(config: config, openAIKey: key, judgeKey: judgeKey, http: transports.http,
                                                 scheduler: transports.scheduler),
                   scheduler: transports.scheduler) { speaker, onEvent in
@@ -609,6 +629,9 @@ public final class GptLayer: @unchecked Sendable {
             onMeter?(core.cost.reading)
         case .transcript(.clearRejected(let speaker)):
             clearRejected(speaker)
+        case .transcript(.commitRejected(let speaker)):
+            core.commitRejected()
+            onCommitRejected?(speaker)
         case .transcript(.error(let msg)):
             core.fail(msg)
         case .runJudge(let req):

@@ -171,6 +171,7 @@ public final class CoachService: CoachSessionDelegate {
         case .fallbackEngaged(let stage): Log.coach.info("capture fallback, stage \(stage.rawValue, privacy: .public)")
         // The event type only: no audio, no text, nothing from the server's reply.
         case .transcriberClearRejected: Log.coach.info("realtime input_audio_buffer.clear rejected")
+        case .transcriberCommitRejected: Log.coach.info("realtime input_audio_buffer.commit rejected")
         }
     }
 }

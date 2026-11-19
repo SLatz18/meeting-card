@@ -53,13 +53,18 @@ final class FakeInput: MicInput {
 
 final class FakeOpener: MicInputOpening {
     var opened: [FakeInput] = []
+    /// Opens attempted, failed or not.
+    var attempts = 0
     var failNext = false
+    /// Every open fails until cleared.
+    var failAll = false
 
     var open: FakeInput? { opened.last.flatMap { $0.stopped ? nil : $0 } }
 
     func open(_ plan: MicPlan, sampleRate: Int, handler: @escaping @Sendable ([Float]) -> Void,
               onStopped: @escaping @Sendable () -> Void) throws -> MicInput {
-        if failNext {
+        attempts += 1
+        if failNext || failAll {
             failNext = false
             throw NSError(domain: "FakeOpener", code: 1)
         }
@@ -238,27 +243,118 @@ final class RoutedMicTests: XCTestCase {
         XCTAssertEqual(mic.plan, mic.currentPlan(), "settles on the final routes")
     }
 
-    func testAFailedReopenIsRetriedOnTheNextChange() throws {
+    func testAFailedReopenIsRetriedWithoutAnotherChange() throws {
         let mic = make(speakers)
         try mic.start(sampleRate: 24000) { _ in }
         opener.failNext = true
         routes.set(bluetooth)
-        clock.advance(1)
+        clock.advance(0.5)
         XCTAssertNil(mic.plan)
         XCTAssertEqual(events.last.map { if case .openFailed = $0 { true } else { false } }, true)
-        routes.set(bluetooth)
+        XCTAssertTrue(mic.isStarted)
         clock.advance(1)
         XCTAssertEqual(mic.plan?.route, .bluetooth)
         XCTAssertTrue(mic.isRunning)
     }
 
-    func testStartFailureLeavesItStopped() {
+    func testInitialOpenFailureIsReportedAndRetried() throws {
         let mic = make(speakers)
-        routes = mic.routes as? FakeRoutes
         opener.failNext = true
         XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
-        XCTAssertFalse(mic.isStarted)
-        XCTAssertFalse(routes.observing)
+        XCTAssertTrue(events.contains { if case .openFailed = $0 { true } else { false } }, "a failed first open is reported")
+        XCTAssertNil(mic.plan)
+        clock.advance(1)
+        XCTAssertEqual(mic.plan?.processing.voiceProcessing, true)
+        XCTAssertTrue(mic.isRunning)
+        XCTAssertTrue(events.contains { if case .opened = $0 { true } else { false } })
+    }
+
+    func testAFailedFirstOpenKeepsTheSessionsHandler() throws {
+        let mic = make(speakers)
+        let got = Box()
+        opener.failNext = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { got.count += $0.count })
+        clock.advance(1)
+        opener.open?.deliver(speech)
+        XCTAssertEqual(got.count, speech.count, "the retried input feeds the handler given to start")
+    }
+
+    func testStartFailureStaysStartedAndObservingRoutes() {
+        let mic = make(speakers)
+        opener.failNext = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        XCTAssertTrue(mic.isStarted, "the session still owns the mic")
+        XCTAssertTrue(routes.observing)
+        XCTAssertNil(mic.plan)
+        XCTAssertFalse(mic.isRunning)
+    }
+
+    func testAStartFailureThenARouteChangeOpensTheNewPlan() throws {
+        let mic = make(speakers)
+        opener.failNext = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        routes.set(bluetooth)
+        clock.advance(1)
+        XCTAssertEqual(mic.plan?.route, .bluetooth)
+        XCTAssertEqual(opener.opened.filter { !$0.stopped }.count, 1)
+    }
+
+    func testRetriesAfterAFailedOpenAreCapped() throws {
+        let mic = make(speakers)
+        opener.failAll = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        clock.advance(29)
+        XCTAssertLessThanOrEqual(opener.attempts, 1 + 3, "first open plus at most three retries in 30 s")
+        XCTAssertGreaterThanOrEqual(opener.attempts, 2)
+        XCTAssertTrue(mic.isStarted)
+        clock.advance(300)
+        XCTAssertLessThanOrEqual(opener.attempts, 1 + 3 * 12, "three per 30 s at most, not a loop")
+        opener.failAll = false
+        clock.advance(31)
+        XCTAssertTrue(mic.isRunning, "it keeps trying while the session runs")
+    }
+
+    func testNoRetryAfterStopOrWhileMuted() throws {
+        let mic = make(speakers)
+        opener.failNext = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        mic.stop()
+        clock.advance(10)
+        XCTAssertTrue(opener.opened.isEmpty, "stop cancels the pending retry")
+        XCTAssertNil(mic.plan)
+
+        opener.failNext = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        mic.setMuted(true)
+        clock.advance(10)
+        XCTAssertTrue(opener.opened.isEmpty, "nothing opens while muted")
+        mic.setMuted(false)
+        XCTAssertTrue(mic.isRunning, "unmute opens at once")
+    }
+
+    func testANewSessionWithinThirtySecondsOfAFailedOneStillGetsItsFirstRetry() throws {
+        let mic = make(speakers)
+        opener.failAll = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        clock.advance(5)
+        XCTAssertGreaterThanOrEqual(opener.attempts, 4, "the first session used up its retry budget")
+        mic.stop()
+        opener.failAll = false
+
+        opener.failNext = true
+        XCTAssertThrowsError(try mic.start(sampleRate: 24000) { _ in })
+        clock.advance(1)
+        XCTAssertTrue(mic.isRunning, "the next session's retry isn't held back by the last one's")
+    }
+
+    func testStopClearsMuteSetWhileStopped() throws {
+        let mic = make(speakers)
+        mic.setMuted(true)
+        mic.stop()
+        XCTAssertFalse(mic.isMuted)
+        try mic.start(sampleRate: 24000) { _ in }
+        XCTAssertEqual(opener.opened.count, 1, "a mute set before the session doesn't outlive stop()")
+        XCTAssertTrue(events.contains { if case .opened = $0 { true } else { false } })
     }
 
     func testRouteEventsAfterStopAreIgnored() throws {
@@ -289,7 +385,24 @@ final class RoutedMicTests: XCTestCase {
         XCTAssertEqual(mic.unavailableInputs, [builtInMic.id])
         XCTAssertTrue(opener.opened[0].stopped)
         XCTAssertEqual(opener.opened.count, 1, "nothing else is opened (never the headset)")
-        XCTAssertTrue(events.contains(.inputSilent(device: builtInMic.id)))
+        XCTAssertTrue(events.contains(.inputSilent(device: builtInMic.id, bufferCount: 3, soundBufferCount: 0)))
+    }
+
+    func testTheSilentEventCountsBuffersSoNoBuffersIsNotZeros() throws {
+        let mic = make(speakers)
+        mic.silenceTimeout = 3
+        try mic.start(sampleRate: 24000) { _ in }
+        clock.advance(4)
+        XCTAssertTrue(events.contains(.inputSilent(device: builtInMic.id, bufferCount: 0, soundBufferCount: 0)), "no buffers at all")
+
+        events = []
+        let second = make(speakers)
+        second.silenceTimeout = 3
+        try second.start(sampleRate: 24000) { _ in }
+        opener.open?.deliver(zeros)
+        opener.open?.deliver(zeros)
+        clock.advance(4)
+        XCTAssertTrue(events.contains(.inputSilent(device: builtInMic.id, bufferCount: 2, soundBufferCount: 0)), "buffers, all zeros")
     }
 
     func testABuiltInMicThatDropsMidCallFallsBack() throws {

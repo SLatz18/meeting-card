@@ -81,8 +81,8 @@ public final class MicCapture: MicSource {
             Log.capture.info("mic route restart, count \(count, privacy: .public)")
         case let .openFailed(plan):
             Log.capture.error("mic open failed: route \(plan.route.rawValue, privacy: .public), micSource \(plan.micSource.rawValue, privacy: .public)")
-        case .inputSilent:
-            Log.capture.info("mic delivered no sound: built-in mic set aside, call audio only")
+        case let .inputSilent(_, bufferCount, soundBufferCount):
+            Log.capture.info("mic delivered no sound: built-in mic set aside, call audio only, buffer count \(bufferCount, privacy: .public), non-zero buffer count \(soundBufferCount, privacy: .public)")
         }
     }
 }
