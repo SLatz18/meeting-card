@@ -130,7 +130,7 @@ The glow and the coach chip's card ask macOS to leave them out of screen capture
 
 ## Feature flags
 
-Parked features land switched off behind a flag in `swift/Core/FeatureFlags.swift`. There is no Settings row; a flag is a Bool in the app's `UserDefaults` (key `flag.<id>`), and a missing key means its static default, which is always off. To add one, in one PR:
+Parked features land switched off behind a flag in `swift/Core/FeatureFlags.swift`. There is no Settings row; a flag is a Bool in the app's `UserDefaults` (key `flag.<id>`). A stored Bool wins; a missing key (or a stored value that is not a Bool) reads the flag's `defaultValue`, which is off for every flag. To add one, in one PR:
 
 1. Add one `case` to `FeatureFlag`, with a one-line comment saying what it gates.
 2. Give it `false` in `defaultValue` (a flag always lands off).
@@ -138,6 +138,10 @@ Parked features land switched off behind a flag in `swift/Core/FeatureFlags.swif
 4. Add a test that calls `assertAllOffMatchesMain` (defined in `swift/Tests/FeatureFlagsTests.swift`). It checks the gated entry point equals main with every flag off or unset, and differs from main with every flag on, so the gate is shown to read its flags. The expected main value must be a literal or captured from main, never computed through the new code, and the existing tests of that entry point must stay unchanged.
 
 `testEveryRegisteredFlagDefaultsOff` then covers the new flag automatically. The existing `coach.*` settings are not flags and are not part of the registry.
+
+Registered flags:
+
+- `callWindowBinding` (key `flag.callWindowBinding`, off): the call coach ties the call to the call's own window (the meeting window, never an app's home window) for the glow's display and for Zoom staying in a meeting while its home window is in front. Off, the glow follows the call app's largest window, as before. Read once, in `CallWindowRule.resolve` (`swift/Core/CallWindowRule.swift`), when `CoachController` is created, so a change applies after a relaunch. To try it: `defaults write com.slatz.meetingcard.swift flag.callWindowBinding -bool true`.
 
 ## Roadmap
 
