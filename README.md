@@ -128,6 +128,17 @@ The glow and the coach chip's card ask macOS to leave them out of screen capture
 - `swift/Tests/`: XCTest bundle for Core (no app host).
 - `swift/project.yml`: xcodegen spec. The `.xcodeproj` is generated and not committed.
 
+## Feature flags
+
+Parked features land switched off behind a flag in `swift/Core/FeatureFlags.swift`. There is no Settings row; a flag is a Bool in the app's `UserDefaults` (key `flag.<id>`), and a missing key means its static default, which is always off. To add one, in one PR:
+
+1. Add one `case` to `FeatureFlag`, with a one-line comment saying what it gates.
+2. Give it `false` in `defaultValue` (a flag always lands off).
+3. Gate the behavior at a single entry point with `FeatureFlags(defaults:).isEnabled(.yourFlag)`. Do not check the flag in several places.
+4. Add a test that calls `assertAllOffMatchesMain` (defined in `swift/Tests/FeatureFlagsTests.swift`). It checks the gated entry point equals main with every flag off or unset, and differs from main with every flag on, so the gate is shown to read its flags. The expected main value must be a literal or captured from main, never computed through the new code, and the existing tests of that entry point must stay unchanged.
+
+`testEveryRegisteredFlagDefaultsOff` then covers the new flag automatically. The existing `coach.*` settings are not flags and are not part of the registry.
+
 ## Roadmap
 
 Open ideas live in the issue tracker. The big ones:
