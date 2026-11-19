@@ -1,6 +1,6 @@
-# xcodegen spec. The generated MeetingCardSwift.xcodeproj is NOT committed (CTO ruling Q1);
-# scripts/build.sh regenerates it. Settings are explicit: the installed xcodegen ships
-# without its SettingPresets directory (CTO ruling Q2).
+# xcodegen spec. MeetingCardSwift.xcodeproj is generated from this file and not committed; regenerate it
+# with `xcodegen generate` (scripts/build.sh does). Settings are explicit: the installed xcodegen ships
+# without its SettingPresets directory.
 name: MeetingCardSwift
 options:
   bundleIdPrefix: com.slatz.meetingcard

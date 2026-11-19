@@ -78,7 +78,7 @@ final class CardRootView: NSView {
         super.viewDidChangeEffectiveAppearance()
         onAppearance?()
     }
-    /// codex P2: a card moved 1x <-> Retina must re-raster its border at the new scale.
+    /// A card moved 1x <-> Retina must re-raster its border at the new scale.
     var onBackingChange: (() -> Void)?
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
@@ -104,7 +104,7 @@ final class BorderLayer: CALayer {
 
     override func draw(in ctx: CGContext) {
         guard let colors, !colors.isEmpty else { return }
-        // codex P2: match the parent's cornerCurve = .continuous clip. Stroke the FULL-bounds
+        // Match the parent's cornerCurve = .continuous clip. Stroke the FULL-bounds
         // continuous path at 2x width; the card's continuous clip trims the outer half, so the
         // visible outer edge IS the card edge (public SwiftUI Shape path, no private API).
         ctx.addPath(RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: bounds).cgPath)
@@ -348,7 +348,7 @@ final class Card: CardHandle {
     }
 
     /// Hand keyboard focus back (hover-exit, re-place, Join). The panel is nonactivating, so the app
-    /// Scott was typing in never stopped being active; re-activate it, and if the panel still holds
+    /// the user was typing in never stopped being active; re-activate it, and if the panel still holds
     /// key, resignKey() in place. v2.4: NEVER order the panel out/in here: that out/in was the
     /// "Joining..." flash (headless probe: resignKey() drops key with zero order-out calls).
     func releaseKey() {
@@ -601,7 +601,7 @@ final class Card: CardHandle {
         panel.close()
     }
 
-    /// Render the layer tree to PNG via CALayer.render(in:) (CTO ruling 7). The PNG is card-sized
+    /// Render the layer tree to PNG via CALayer.render(in:). The PNG is card-sized
     /// (panel frame == card rect).
     func snapshot(to path: String) -> Bool {
         guard let img = snapshotImage() else { return false }

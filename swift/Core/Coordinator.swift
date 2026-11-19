@@ -17,7 +17,7 @@ public struct CardModel: Equatable {
         // One rule (#13): the card view uses the same kind as the list filter and re-checks.
         switch Timing.cardKind(ev) {
         case .multi(let ls):
-            // Don't guess between video links; send Scott to the event (Scott, 2026-10-06).
+            // Don't guess between video links; send the user to the event.
             multi = true; link = calendar; flag = "\(ls.count) video links in this invite"
         case .join(let l):
             multi = false; link = l; flag = nil
@@ -216,8 +216,8 @@ public final class Coordinator<Card: CardHandle> {
             if isOpening(c) {
                 // #4 review P2: the watch belongs to the link that was clicked. A new actionable
                 // target (provider/URL, or card kind: Join vs Open in Calendar) drops it and
-                // restores the normal button; a title/end-only update keeps it. Codex P2 (9f2f2d2):
-                // in hold mode (detection off) nothing is watched, so a link change keeps the
+                // restores the normal button; a title/end-only update keeps it. In hold mode
+                // (detection off) nothing is watched, so a link change keeps the
                 // fixed "Joining..." hold and its original deadline.
                 let hold = watches[ObjectIdentifier(c)]?.expect == .hold
                 if !hold && CardModel(ev).link != target {

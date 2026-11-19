@@ -3,7 +3,7 @@ import Foundation
 /// v2.5 #1: launch at login (SMAppService.mainApp, registered by the App). The decision of WHETHER
 /// this process may register lives here, pure and tested: only the installed copy at
 /// ~/Applications/MeetingCardSwift.app, never a build/dd product, a scratch copy, a fixture run, or
-/// a test-identity build (registering any of those would make that copy Scott's login item).
+/// a test-identity build (registering any of those would make that copy the user's login item).
 public enum LoginItem {
 
     public enum Outcome: Equatable {
