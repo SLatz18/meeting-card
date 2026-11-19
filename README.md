@@ -142,6 +142,7 @@ Parked features land switched off behind a flag in `swift/Core/FeatureFlags.swif
 Registered flags:
 
 - `callWindowBinding` (key `flag.callWindowBinding`, off): the call coach ties the call to the call's own window (the meeting window, never an app's home window) for the glow's display and for Zoom staying in a meeting while its home window is in front. Off, the glow follows the call app's largest window, as before. Read once, in `CallWindowRule.resolve` (`swift/Core/CallWindowRule.swift`), when `CoachController` is created, so a change applies after a relaunch. To try it: `defaults write com.slatz.meetingcard.swift flag.callWindowBinding -bool true` (the test-id build, from `build.sh build --test-id`, uses the domain `com.slatz.meetingcard.swift.test`), then relaunch.
+- `speakerId` (off): gives the "Them" stream call-local speaker labels. `speakerProfiles` (off, requires `speakerId`) exposes the separate opt-in to save and recognize voices. Both are read at launch. For manual validation only, use `build.sh build --test-id`, then set `flag.speakerId` and optionally `flag.speakerProfiles` with `defaults write com.slatz.meetingcard.swift.test <key> -bool true` before relaunching the test app. See [Speakers and Privacy](docs/how-it-works.md#speakers).
 
 ## Roadmap
 

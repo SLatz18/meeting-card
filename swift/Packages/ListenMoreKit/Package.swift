@@ -31,7 +31,7 @@ products += [
     .library(name: "ListenMoreMac", targets: ["ListenMoreMac"]),
 ]
 targets += [
-    .target(name: "ListenMoreMac", dependencies: ["ListenMoreCore"]),
+    .target(name: "ListenMoreMac", dependencies: ["ListenMoreCore"], resources: [.copy("Models")]),
     .testTarget(name: "ListenMoreMacTests", dependencies: ["ListenMoreCore", "ListenMoreMac"]),
     // Paid, opt-in: every test skips unless LISTEN_MORE_LIVE=1 and OPENAI_API_KEY are set.
     .testTarget(name: "ListenMoreLiveTests", dependencies: ["ListenMoreCore", "ListenMoreMac"]),

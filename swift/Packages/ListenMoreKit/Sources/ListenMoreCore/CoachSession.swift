@@ -309,6 +309,7 @@ public final class CoachSession {
             case .start:
                 // A new session never inherits the previous one's engine (or OpenAI sessions).
                 stopCapture()
+                engine.endCall()
                 cuePolicy.reset()
                 shownAt.removeAll()
                 gptStopped = nil
@@ -319,6 +320,7 @@ public final class CoachSession {
             case .stop:
                 renderer.clear()
                 micMuted = false
+                engine.endCall()
             case .pause(let paused):
                 cuePolicy.paused = paused
                 if paused { renderer.clear() }
@@ -644,6 +646,10 @@ public final class EngineQueue: @unchecked Sendable {
 
     public func stop() {
         queue.async { self.engine.stop() }
+    }
+
+    func endCall() {
+        queue.async { self.engine.endCall() }
     }
 
     /// Waits until everything queued so far has run (tests).

@@ -51,6 +51,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
     private let savingToggle = NSSwitch()
     private let transcriptNote = CoachSettingsWindow.text(CoachCopy.transcriptNeedsKey, font: Theme.Settings.helperFont,
                                                           color: CoachSettingsWindow.color(.secondary))
+    private let voiceToggle = NSSwitch()
+    private let voiceRows = NSStackView()
+    private var shownVoices: VoiceState?
     private let folderPath = NSTextField(labelWithString: "")
     private let chooseFolderButton = NSButton(title: CoachCopy.chooseFolder, target: nil, action: nil)
     /// The same saving indicator as on screen during the call (the Kit's caption view).
@@ -465,7 +468,9 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
 
         let privacy = Self.text(CoachCopy.privacy + " " + CoachCopy.pausedPrivacy, font: Theme.Settings.helperFont,
                                 color: Self.color(.secondary), maxWidth: Self.outerWidth)
-        return [section, g1, gControls, g2, gJudge, g3, transcriptGroup(), screenshotsGroup(), privacy, feedbackGroup()]
+        var groups = [section, g1, gControls, g2, gJudge, g3, transcriptGroup()] as [NSView]
+        if coach.speakerEmbedder != nil { groups.append(voiceGroup()) }
+        return groups + [screenshotsGroup(), privacy, feedbackGroup()]
     }
 
     /// "Show Coach in Screenshots": whether captures include the coach card and its captions.
@@ -600,6 +605,168 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         return g
     }
 
+    private func voiceGroup() -> Group {
+        let heading = Self.text("Speakers", font: Theme.Settings.rowFont)
+        voiceRows.orientation = .vertical
+        voiceRows.alignment = .leading
+        voiceRows.spacing = CGFloat(Theme.Settings.groupSpacing)
+        var rows: [NSView] = [heading]
+        if coach.transcript.live.speakerProfiles != nil {
+            voiceToggle.target = self
+            voiceToggle.action = #selector(voiceToggled(_:))
+            voiceToggle.setAccessibilityLabel("Use saved voice profiles")
+            rows += [Self.row(Self.text("Use saved voice profiles", font: Theme.Settings.itemFont), voiceToggle),
+                     Self.text("Save a voice only with the speaker’s permission. Profiles stay on this Mac and contain a voice signature and a name, not audio or transcript text.",
+                               font: Theme.Settings.helperFont, color: Self.color(.secondary))]
+        }
+        rows.append(voiceRows)
+        let group = Self.group(rows)
+        for row in rows.dropFirst() { pin(row, in: group) }
+        shownVoices = nil
+        return group
+    }
+
+    private struct VoiceState: Equatable {
+        struct CallSpeaker: Equatable {
+            let speaker: Speaker
+            let label: String
+            let canSave: Bool
+        }
+        let call: [CallSpeaker]
+        let profiles: [SpeakerProfiles.Profile]
+        let enabled: Bool
+        let loadFailed: Bool
+    }
+
+    private func voiceState() -> VoiceState? {
+        guard coach.speakerEmbedder != nil else { return nil }
+        let live = coach.transcript.live
+        return VoiceState(call: live.callSpeakers.map {
+            .init(speaker: $0, label: live.labels.label($0), canSave: live.canSaveVoice($0))
+        }, profiles: live.speakerProfiles?.profiles ?? [], enabled: live.speakerProfiles?.isEnabled == true,
+           loadFailed: coach.transcript.profileLoadFailed)
+    }
+
+    private func updateVoices() {
+        guard let state = voiceState(), state != shownVoices else { return }
+        shownVoices = state
+        voiceToggle.state = state.enabled || state.loadFailed ? .on : .off
+        for view in voiceRows.arrangedSubviews { voiceRows.removeArrangedSubview(view); view.removeFromSuperview() }
+        let live = coach.transcript.live
+        func add(_ row: NSView) {
+            voiceRows.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: voiceRows.widthAnchor).isActive = true
+        }
+        if state.call.isEmpty {
+            add(Self.text("Speakers appear here during a transcribed call.", font: Theme.Settings.helperFont, color: Self.color(.secondary)))
+        }
+        for entry in state.call {
+            let label = Self.text(entry.label, font: Theme.Settings.itemFont)
+            let rename = VoiceActionButton("Name for this call") { [weak self] in self?.nameVoice(entry.speaker, save: false) }
+            let controls = entry.canSave ? [rename, VoiceActionButton("Save voice…") { [weak self] in self?.nameVoice(entry.speaker, save: true) }] : [rename]
+            add(Self.row(label, NSStackView(views: controls)))
+        }
+        guard let profiles = live.speakerProfiles else { return }
+        if state.loadFailed {
+            add(Self.text("Couldn’t read saved voice profiles.", font: Theme.Settings.helperFont, color: Self.color(.critical)))
+        }
+        if state.enabled {
+            add(Self.text(state.profiles.isEmpty ? "No saved voices yet." : "Saved voices", font: Theme.Settings.rowFont))
+            for profile in state.profiles {
+                let label = Self.text(profile.name, font: Theme.Settings.itemFont)
+                let rename = VoiceActionButton("Rename…") { [weak self] in
+                    self?.voiceNameSheet(title: "Rename saved voice", initial: profile.name) { name in try profiles.rename(profile.id, to: name) }
+                }
+                let delete = VoiceActionButton("Delete…") { [weak self] in
+                    self?.confirmVoiceDelete(title: "Delete this voice profile?") { try profiles.delete(profile.id) }
+                }
+                add(Self.row(label, NSStackView(views: [rename, delete])))
+            }
+        } else {
+            add(VoiceActionButton("Delete all saved voices…") { [weak self] in
+                self?.confirmVoiceDelete(title: "Delete all saved voice profiles?") { try profiles.deleteAll() }
+            })
+        }
+    }
+
+    @objc private func voiceToggled(_ sender: NSSwitch) {
+        applyVoiceChange { try coach.transcript.setVoiceProfiles(sender.state == .on) }
+    }
+
+    private func nameVoice(_ speaker: Speaker, save: Bool) {
+        let transcript = coach.transcript
+        let live = transcript.live
+        guard let call = live.callStart else { return }
+        let initial = live.labels.label(speaker)
+        voiceNameSheet(title: save ? "Save a voice profile" : "Name speaker for this call",
+                       initial: initial == live.labels.defaultLabel(speaker) ? "" : initial,
+                       help: save ? "Only continue if the speaker has agreed to be recognized on future calls." : "Leave blank to restore the default label.") { name in
+            guard live.callStart == call else { return }
+            if save { try live.saveVoice(speaker, name: name) }
+            else { transcript.rename(speaker, to: name) }
+        }
+    }
+
+    private func voiceNameSheet(title: String, initial: String, help: String = "", apply: @escaping (String) throws -> Void) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = help
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.stringValue = initial
+        field.setAccessibilityLabel("Speaker name")
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: CoachCopy.cancel)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.applyVoiceChange { try apply(field.stringValue) }
+        }
+    }
+
+    private func confirmVoiceDelete(title: String, apply: @escaping () throws -> Void) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.addButton(withTitle: CoachCopy.delete).hasDestructiveAction = true
+        alert.addButton(withTitle: CoachCopy.cancel)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.applyVoiceChange(apply)
+        }
+    }
+
+    private func applyVoiceChange(_ apply: () throws -> Void) {
+        do { try apply() }
+        catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn’t update voice profiles"
+            alert.informativeText = "Use a nonempty name when saving or renaming a profile."
+            alert.beginSheetModal(for: window)
+        }
+        coach.transcript.refreshVoiceProfiles()
+        shownVoices = nil
+        update()
+    }
+
+    private final class VoiceActionButton: NSButton {
+        private let invoke: () -> Void
+
+        init(_ title: String, invoke: @escaping () -> Void) {
+            self.invoke = invoke
+            super.init(frame: .zero)
+            self.title = title
+            bezelStyle = .rounded
+            controlSize = .small
+            target = self
+            action = #selector(pressed)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        @objc private func pressed() { invoke() }
+    }
+
     private func appName(_ bundleId: String) -> String {
         if let t = coach.config.captureTargets.first(where: { $0.bundleId == bundleId }) { return t.name }
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
@@ -669,6 +836,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         updateCallControls()
         updateJudge()
         updateTranscript()
+        updateVoices()
     }
 
     /// Sets the key field's placeholder from the Keychain when it differs from what is shown: after a save,
@@ -765,6 +933,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
         var inCall: Bool
         var labelMe: String
         var labelThem: String
+        var voices: VoiceState?
         var cost: String
     }
 
@@ -801,6 +970,7 @@ final class CoachSettingsWindow: NSObject, NSWindowDelegate {
             inCall: t.live.inCall,
             labelMe: t.live.labels.label(.me),
             labelThem: t.live.labels.label(.others),
+            voices: voiceState(),
             cost: t.costLine())
     }
 

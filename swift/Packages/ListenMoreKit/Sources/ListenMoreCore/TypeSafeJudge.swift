@@ -101,7 +101,7 @@ public final class TypeSafeJudge: JudgeProvider, Sendable, CustomReflectable {
 /// Redaction for transcript text a state-based judge receives, on top of the coach's rules (RAM only,
 /// never logged or stored): links (a meeting link can carry its passcode), email addresses, runs of
 /// five or more digits (phone numbers, meeting IDs, passcodes, account numbers) and the host's
-/// configured `text.user_names`. Speakers are only ever ME and OTHERS.
+/// configured `text.user_names`. Speaker identities use anonymous stream labels or call-local numbers.
 public enum JudgeRedactor {
     private static let rules: [(NSRegularExpression, String)] = [
         (#"(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}"#, "[email]"),
@@ -115,6 +115,11 @@ public enum JudgeRedactor {
         for (re, token) in rules {
             s = re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: token)
         }
+        return redactNames(s, names: names)
+    }
+
+    static func redactNames(_ text: String, names: [String]) -> String {
+        var s = text
         for name in names {
             let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !n.isEmpty,

@@ -21,6 +21,10 @@ public struct AppPaths: Sendable, Equatable {
             .appendingPathComponent("Library/Application Support/\(id.transcriptsDirName)/Transcripts", isDirectory: true)
     }
 
+    public static func speakerProfiles(for id: AppIdentity) -> URL {
+        transcripts(for: id).deletingLastPathComponent().appendingPathComponent("VoiceProfiles", isDirectory: true)
+    }
+
     public static func forRun(fixture: Bool, identity: AppIdentity) -> AppPaths {
         fixture ? AppPaths.fixture(for: identity) : AppPaths.production(for: identity)
     }

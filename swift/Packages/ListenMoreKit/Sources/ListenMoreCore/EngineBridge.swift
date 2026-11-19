@@ -93,6 +93,12 @@ public protocol CoachEngine: AnyObject {
     /// after it. `start` begins with the mic on.
     func setMicMuted(_ muted: Bool)
     func stop()
+    /// Retire state belonging to this call, rather than a temporary hold of capture.
+    func endCall()
+}
+
+public extension CoachEngine {
+    func endCall() {}
 }
 
 /// Placeholder engine: accepts audio, counts frames, never suggests a cue.

@@ -308,8 +308,8 @@ final class EventBox: @unchecked Sendable {
     func append(_ e: TranscriptEvent) {
         lock.withLock {
             switch e {
-            case let .text(s, t, ref): _texts.append((s, t, ref))
-            case let .delta(s, t, item): _deltas.append((s, t, item))
+            case let .text(s, t, ref), let .turnText(s, t, _, ref): _texts.append((s, t, ref))
+            case let .delta(s, t, item), let .turnDelta(s, t, item, _): _deltas.append((s, t, item))
             case let .usage(s, sec): _usage.append((s, sec))
             case let .clearRejected(s): _clearRejections.append(s)
             case let .commitRejected(s): _commitRejections.append(s)

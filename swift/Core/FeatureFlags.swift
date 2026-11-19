@@ -18,10 +18,16 @@ public enum FeatureFlag: String, CaseIterable, Sendable {
     /// display, and Zoom staying in a meeting while its home window is in front). Off: the largest-window rule.
     case callWindowBinding
 
+    /// Labels speakers in the Them stream using on-device diarization.
+    case speakerId
+
+    /// Gates saved voice profiles and their Settings controls; requires `speakerId`.
+    case speakerProfiles
+
     /// What the flag is when the key is absent. A flag lands OFF.
     public var defaultValue: Bool {
         switch self {
-        case .callWindowBinding: return false
+        case .callWindowBinding, .speakerId, .speakerProfiles: return false
         }
     }
 
@@ -62,5 +68,16 @@ public struct FeatureFlags {
     /// without a default-true flag in the registry.
     static func read(_ defaults: UserDefaults, key: String, defaultValue: Bool) -> Bool {
         defaults.object(forKey: key) as? Bool ?? defaultValue
+    }
+}
+
+public enum CoachSpeakerRule {
+    public static func diarization<T>(_ flags: FeatureFlags, make: () -> T) -> T? {
+        flags.isEnabled(.speakerId) ? make() : nil
+    }
+
+    public static func profiles<T>(_ flags: FeatureFlags, diarizationAvailable: Bool, make: () -> T) -> T? {
+        guard diarizationAvailable, flags.isEnabled(.speakerProfiles) else { return nil }
+        return make()
     }
 }

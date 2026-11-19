@@ -72,6 +72,7 @@ final class CoachController: NSObject {
     }
     /// Live captions and saved transcripts (off by default).
     let transcript: CoachTranscript
+    let speakerEmbedder: (@Sendable () -> any SpeakerEmbedder)?
     /// Cards on screen, newest last (the chip goes on each).
     var visibleCards: () -> [Card] = { [] }
     /// The coach status menu: always there, so the coach can be enabled from it while off.
@@ -101,9 +102,16 @@ final class CoachController: NSObject {
         typeSafeKeychain = keychain.sibling(account: KeychainStore.typeSafeAccount)
         keyGate = CoachKeyGate(keychain)
         self.showsStatusItem = showsStatusItem
-        transcript = CoachTranscript(defaults: defaults, store: transcriptStore)
+        let flags = FeatureFlags(defaults: defaults)
+        let makeEmbedder: @Sendable () -> any SpeakerEmbedder = { CoreMLSpeakerEmbedder() }
+        let embedder = CoachSpeakerRule.diarization(flags) { makeEmbedder }
+        speakerEmbedder = embedder
+        let profiles = CoachSpeakerRule.profiles(flags, diarizationAvailable: embedder != nil) {
+            SpeakerProfiles(folder: AppPaths.speakerProfiles(for: .current))
+        }
+        transcript = CoachTranscript(defaults: defaults, store: transcriptStore, speakerProfiles: profiles)
         config = try ListenMoreConfig.load(overrides: Self.configOverrides)
-        switch CallWindowRule.resolve(FeatureFlags(defaults: defaults)) {
+        switch CallWindowRule.resolve(flags) {
         case .largestWindow: callWindows = nil
         case .boundWindow: callWindows = CallWindowTracker(config: config)
         }
@@ -266,7 +274,8 @@ final class CoachController: NSObject {
     private func makeService() {
         let defaults = defaults
         let engine = LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,
-                                      judgeProvider: { Self.storedJudgeProvider(defaults) })
+                                      judgeProvider: { Self.storedJudgeProvider(defaults) },
+                                      speakerEmbedder: speakerEmbedder, speakerProfiles: transcript.live.speakerProfiles)
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
                              allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine,
                              callWindows: callWindows)

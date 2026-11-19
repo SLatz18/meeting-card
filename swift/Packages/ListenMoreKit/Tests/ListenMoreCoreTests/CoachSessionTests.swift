@@ -137,6 +137,21 @@ final class CoachSessionTests: XCTestCase {
         XCTAssertNil(engine.ingested[.mic], "a buffer from before the pause never reaches the next session")
     }
 
+    func testOnlyEndingTheCallRetiresCallStateAfterPauseAndResume() {
+        let s = makeSession()
+        s.startManual()
+        s.drainEngineForTesting()
+        let baseline = engine.endedCalls
+        s.setPaused(true)
+        s.setPaused(false)
+        s.drainEngineForTesting()
+        XCTAssertEqual(engine.stops, 1)
+        XCTAssertEqual(engine.endedCalls, baseline)
+        s.stopManual()
+        s.drainEngineForTesting()
+        XCTAssertEqual(engine.endedCalls, baseline + 1)
+    }
+
     func testManualStartCapturesEveryTarget() async {
         let s = makeSession()
         s.startManual()

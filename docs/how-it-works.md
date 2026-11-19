@@ -84,11 +84,15 @@ Both are off by default, in Settings under **Captions and transcript**, and both
 
 ### Speakers
 
-Only "You" and "Them" are labelled. OpenAI's live transcription model (`gpt-live-transcribe`) returns no speaker labels. Its one diarizing model, `gpt-4o-transcribe-diarize`, works only on uploaded files (`POST /v1/audio/transcriptions`, 25 MB per request, about $0.006 per minute), not on live streams, and it is deprecated with a shutdown date of February 26, 2027. Telling "Them" apart would mean holding call audio in memory, uploading it in chunks for a second paid transcription, and matching speakers across chunks, with labels arriving minutes late, on a model that is about to be retired. MeetingCard doesn't do that.
+By default, captions and transcripts label only "You" and "Them". The experimental `speakerId` flag (off) groups voices on the "Them" stream at existing voice-activity boundaries. MeetingCard uses the bundled [WeSpeaker Core ML conversion](../swift/Packages/ListenMoreKit/Sources/ListenMoreMac/Models/NOTICE.md), or local MFCC features if the model cannot run. It compares voice embeddings locally and labels turns "Speaker 1", "Speaker 2", and so on. Very short or unclassified turns stay "Them". It cannot separate overlapping speakers or reliably split speakers who switch without a pause.
+
+Speaker labels add no network dependency: they accompany the existing live transcription when a key is configured. MeetingCard never uses the upload-only `gpt-4o-transcribe-diarize` model. Settings can name a speaker for the current call without keeping a voice profile. The separate `speakerProfiles` flag (off, requires `speakerId`) exposes **Use saved voice profiles**, itself off by default. With the speaker's permission, you can explicitly save their voice and name, then rename or delete it in Settings. A confident match on a later call reuses the saved name. These flags are for manual validation on a `--test-id` build, not enabled in shipping defaults.
 
 ## Privacy
 
-Audio stays in memory in every mode and is never written to disk. With saving off (the default) nothing is written to disk at all: captions and transcript text stay in memory and are gone when the call ends. With saving on, the only write is that call's one transcript file in the folder you chose. No stats are kept, and logs contain no call content, transcript text or keys.
+Audio stays in memory in every mode and is never written to disk. Captions and transcript text are gone when the call ends unless you turn on **Save transcripts**; that writes one transcript file in the folder you chose. With transcript saving and voice profiles off, no call content is written to disk. No stats are kept, and logs contain no call content, transcript text or keys.
+
+Saved voice profiles contain names, embeddings, and record/model identifiers, never audio or transcript text. They live in `~/Library/Application Support/MeetingCard/VoiceProfiles/` (`MeetingCard-Test/VoiceProfiles/` for `--test-id`). Turning profiles off stops recognition; delete profiles in Settings to remove them from disk. Judges see anonymous speaker numbers rather than profile names or embeddings; known active profile names are redacted from judge text. Live transcription still uses the existing audio stream and is unchanged by profile storage.
 
 ```mermaid
 flowchart LR

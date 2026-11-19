@@ -19,6 +19,8 @@ public enum TranscriptEvent: Sendable {
     case text(Speaker, String, refT: TimeInterval)
     /// Newly available text of the turn `item` (live captions only; the cue rules wait for `text`).
     case delta(Speaker, String, item: String)
+    case turnDelta(Speaker, String, item: String, refT: TimeInterval)
+    case turnText(Speaker, String, item: String, refT: TimeInterval)
     /// Billed audio seconds the API reported for one committed segment.
     case usage(Speaker, Double)
     /// The server refused this transcriber's `clear` (non-fatal: the layer keeps running).
@@ -35,6 +37,7 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
     private let sampleRate: Int
     private let key: APIKey
     private let speaker: Speaker
+    private let includeTurnIdentity: Bool
     private let connector: WebSocketConnector
     private let onEvent: @Sendable (TranscriptEvent) -> Void
     private let lock = NSLock()
@@ -51,11 +54,13 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
     private var clearCount = 0
 
     public init(config: ListenMoreConfig, key: APIKey, speaker: Speaker, connector: WebSocketConnector,
+                includeTurnIdentity: Bool = false,
                 onEvent: @escaping @Sendable (TranscriptEvent) -> Void) {
         gpt = config.gpt
         sampleRate = config.audio.sampleRate
         self.key = key
         self.speaker = speaker
+        self.includeTurnIdentity = includeTurnIdentity
         self.connector = connector
         self.onEvent = onEvent
     }
@@ -150,14 +155,23 @@ public final class LiveTranscriber: TranscriptionSession, @unchecked Sendable {
             }
         case "conversation.item.input_audio_transcription.delta":
             let delta = ev["delta"] as? String ?? ""
-            if !delta.isEmpty { onEvent(.delta(speaker, delta, item: ev["item_id"] as? String ?? "")) }
+            let item = ev["item_id"] as? String ?? ""
+            if !delta.isEmpty {
+                if includeTurnIdentity {
+                    let ref = lock.withLock { itemRef[item] ?? -1 }
+                    onEvent(.turnDelta(speaker, delta, item: item, refT: ref))
+                } else {
+                    onEvent(.delta(speaker, delta, item: item))
+                }
+            }
         case "conversation.item.input_audio_transcription.completed":
             let item = ev["item_id"] as? String ?? ""
             if let usage = ev["usage"] as? [String: Any], usage["type"] as? String == "duration" {
                 onEvent(.usage(speaker, (usage["seconds"] as? NSNumber)?.doubleValue ?? 0))
             }
             let ref: TimeInterval = lock.withLock { itemRef.removeValue(forKey: item) ?? -1 }
-            onEvent(.text(speaker, ev["transcript"] as? String ?? "", refT: ref))
+            let text = ev["transcript"] as? String ?? ""
+            onEvent(includeTurnIdentity ? .turnText(speaker, text, item: item, refT: ref) : .text(speaker, text, refT: ref))
         case "input_audio_buffer.cleared":
             lock.withLock { if !pendingClears.isEmpty { pendingClears.removeFirst() } }
         case "error":

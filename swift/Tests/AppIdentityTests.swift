@@ -46,7 +46,7 @@ final class AppIdentityTests: XCTestCase {
         let home = NSHomeDirectory()
         func files(_ id: AppIdentity) -> [String] {
             let paths = [AppPaths.production(for: id), AppPaths.fixture(for: id)].flatMap { [$0.logFile.path, $0.stateDir.path] }
-                + [AppPaths.transcripts(for: id).path]
+                + [AppPaths.transcripts(for: id).path, AppPaths.speakerProfiles(for: id).path]
             let loginItem = id.loginItemAppName.map { [home + "/Applications/" + $0] } ?? []
             return (paths + loginItem).map { $0.lowercased() }
         }
@@ -84,6 +84,12 @@ final class AppIdentityTests: XCTestCase {
         XCTAssertTrue(transcript.contains("init(defaults: UserDefaults, store:"), "settings in the controller's defaults")
         XCTAssertTrue(try read("App/CoachController.swift").contains("transcript = CoachTranscript(defaults: defaults"))
         XCTAssertTrue(try read("App/UISnapshots.swift").contains("AppIdentity.current.scoped(\"transcript-snapshots\")"))
+    }
+
+    func testVoiceProfilesFolderFollowsIdentity() {
+        let parent = NSHomeDirectory() + "/Library/Application Support/"
+        XCTAssertEqual(AppPaths.speakerProfiles(for: .release).path, parent + "MeetingCard/VoiceProfiles")
+        XCTAssertEqual(AppPaths.speakerProfiles(for: .test).path, parent + "MeetingCard-Test/VoiceProfiles")
     }
 
     func testAppUsesTheCurrentIdentity() throws {

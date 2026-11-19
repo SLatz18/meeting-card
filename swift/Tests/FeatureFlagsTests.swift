@@ -47,6 +47,40 @@ final class FeatureFlagsTests: XCTestCase {
 
     override func tearDown() { defaults.removePersistentDomain(forName: suite) }
 
+    func testSpeakerIdGateKeepsTheMainStreamAndNeverMakesTheEmbedderWhenOff() {
+        assertAllOffMatchesMain({ flags in
+            CoachSpeakerRule.diarization(flags) { "Speaker 1" } ?? "Them"
+        }, equals: "Them")
+        var made = false
+        let value = CoachSpeakerRule.diarization(.allOff) { made = true; return "embedder" }
+        XCTAssertNil(value)
+        XCTAssertFalse(made)
+    }
+
+    func testSpeakerProfilesGateKeepsMainWithoutAStoreAndRequiresDiarization() {
+        assertAllOffMatchesMain({ flags in
+            let enabled = CoachSpeakerRule.diarization(flags) { true } != nil
+            return CoachSpeakerRule.profiles(flags, diarizationAvailable: enabled) { true } ?? false
+        }, equals: false)
+        defaults.set(true, forKey: FeatureFlag.speakerProfiles.defaultsKey)
+        let flags = FeatureFlags(defaults: defaults)
+        let diarization = CoachSpeakerRule.diarization(flags) { true }
+        XCTAssertNil(CoachSpeakerRule.profiles(flags, diarizationAvailable: diarization != nil) { true })
+    }
+
+    func testSpeakerFlagsHaveOneReaderAndOneHostEntryPointEach() throws {
+        let swiftDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        func read(_ path: String) throws -> String {
+            try String(contentsOf: swiftDir.appendingPathComponent(path), encoding: .utf8)
+        }
+        let registry = try read("Core/FeatureFlags.swift")
+        let controller = try read("App/CoachController.swift")
+        for (flag, entry) in [(FeatureFlag.speakerId, "diarization"), (.speakerProfiles, "profiles")] {
+            XCTAssertEqual(registry.components(separatedBy: "isEnabled(.\(flag.rawValue))").count - 1, 1)
+            XCTAssertEqual(controller.components(separatedBy: "CoachSpeakerRule.\(entry)(").count - 1, 1)
+        }
+    }
+
     /// Every registered flag is off with nothing stored, and its static default is off.
     func testEveryRegisteredFlagDefaultsOff() {
         let flags = FeatureFlags(defaults: defaults)
