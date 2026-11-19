@@ -21,6 +21,25 @@ final class ConfigTests: XCTestCase {
         XCTAssertNil(DefaultConfig.json.range(of: #"sk-[A-Za-z0-9_-]{10,}"#, options: .regularExpression))
     }
 
+    /// main's built-in config (captured at bdeb04be, no `call_window_lookback_s`) goes through the raw
+    /// public `decode(_:)` and gets the built-in lookback; a key that is present still wins, and the
+    /// `> 0` validation still applies to either.
+    func testMainsConfigWithoutTheLookbackKeyDecodesWithTheDefault() throws {
+        XCTAssertFalse(MainConfigFixture.json.contains("call_window_lookback_s"))
+        let c = try ListenMoreConfig.decode(Data(MainConfigFixture.json.utf8))
+        XCTAssertEqual(c.trigger.callWindowLookbackS, 60)
+        XCTAssertEqual(c.trigger.callWindowLookbackS, ListenMoreConfig.Trigger.defaultCallWindowLookbackS)
+        XCTAssertEqual(c.trigger.callWindowLookbackS, try ListenMoreConfig.builtIn().trigger.callWindowLookbackS, "the built-in value")
+        XCTAssertEqual(c.trigger.endedStopAfterS, 3)
+        XCTAssertNoThrow(try c.validate())
+        let withKey = MainConfigFixture.json.replacingOccurrences(of: "\"ended_stop_after_s\": 3,",
+                                                                  with: "\"ended_stop_after_s\": 3, \"call_window_lookback_s\": 20,")
+        XCTAssertNotEqual(withKey, MainConfigFixture.json)
+        XCTAssertEqual(try ListenMoreConfig.decode(Data(withKey.utf8)).trigger.callWindowLookbackS, 20)
+        let zero = withKey.replacingOccurrences(of: "\"call_window_lookback_s\": 20", with: "\"call_window_lookback_s\": 0")
+        XCTAssertThrowsError(try ListenMoreConfig.decode(Data(zero.utf8)).validate(), "a lookback of 0 is still rejected")
+    }
+
     func testOverridesDictionaryDeepMerges() throws {
         let c = try ListenMoreConfig.load(overrides: ["trigger": ["start_after_s": 0], "local": ["monologue_soft_s": 40]])
         XCTAssertEqual(c.trigger.startAfterS, 0)
