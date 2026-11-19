@@ -267,7 +267,7 @@ final class CoachServiceTests: XCTestCase {
     func testEachPollFeedsTheTrackerTheWatchedAppsBrowserKeysAndHints() throws {
         let fake = FakeWindows()
         let runner = FakeMeetRunner()
-        let controls = CallControlsProvider(readers: [MeetTabReader.chrome(runner: runner)], endedHoldS: 30)
+        let controls = CallControlsProvider(readers: [MeetTabReader.chrome(runner: runner, windowHints: true)], endedHoldS: 30)
         controls.isEnabled = true
         let s = service(enabled: true, callWindows: CallWindowTracker(lookbackS: 60, windowSource: fake.read), callState: controls)
 
