@@ -130,7 +130,7 @@ The glow and the coach chip's card ask macOS to leave them out of screen capture
 
 ## Feature flags
 
-Parked features land switched off behind a flag in `swift/Core/FeatureFlags.swift`. There is no Settings row; a flag is a Bool in the app's `UserDefaults` (key `flag.<id>`). A stored Bool wins; a missing key (or a stored value that is not a Bool) reads the flag's `defaultValue`, which is off for every flag. To add one, in one PR:
+Parked features land switched off behind a flag in `swift/Core/FeatureFlags.swift`. There is no Settings row; a flag is a Bool in the app's `UserDefaults` (key `flag.<id>`). A stored boolean (or a 0/1 number) wins; anything else, a missing key or any other stored value (including the string YES), reads the flag's `defaultValue`, which is off for every flag. Set one with `defaults write ... -bool`. To add one, in one PR:
 
 1. Add one `case` to `FeatureFlag`, with a one-line comment saying what it gates.
 2. Give it `false` in `defaultValue` (a flag always lands off).
@@ -141,7 +141,7 @@ Parked features land switched off behind a flag in `swift/Core/FeatureFlags.swif
 
 Registered flags:
 
-- `callWindowBinding` (key `flag.callWindowBinding`, off): the call coach ties the call to the call's own window (the meeting window, never an app's home window) for the glow's display and for Zoom staying in a meeting while its home window is in front. Off, the glow follows the call app's largest window, as before. Read once, in `CallWindowRule.resolve` (`swift/Core/CallWindowRule.swift`), when `CoachController` is created, so a change applies after a relaunch. To try it: `defaults write com.slatz.meetingcard.swift flag.callWindowBinding -bool true`.
+- `callWindowBinding` (key `flag.callWindowBinding`, off): the call coach ties the call to the call's own window (the meeting window, never an app's home window) for the glow's display and for Zoom staying in a meeting while its home window is in front. Off, the glow follows the call app's largest window, as before. Read once, in `CallWindowRule.resolve` (`swift/Core/CallWindowRule.swift`), when `CoachController` is created, so a change applies after a relaunch. To try it: `defaults write com.slatz.meetingcard.swift flag.callWindowBinding -bool true` (the test-id build, from `build.sh build --test-id`, uses the domain `com.slatz.meetingcard.swift.test`), then relaunch.
 
 ## Roadmap
 

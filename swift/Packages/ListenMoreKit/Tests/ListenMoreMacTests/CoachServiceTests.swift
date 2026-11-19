@@ -325,8 +325,10 @@ final class CoachServiceTests: XCTestCase {
         XCTAssertNotNil(on.session.onTick)
     }
 
-    /// Flag off: with no session app and nothing on screen, the glow's display is the card's, as on main.
-    func testWithoutATrackerTheGlowUsesTheLargestWindowRule() {
+    /// Flag off: with no session app and no window of the app on screen, the glow's display is the card's, as
+    /// on main. That the rule itself is main's largest-window one (`locateScreen`'s default) is pinned by
+    /// `PrivacyGuardTests.testCallWindowSelectionRule`.
+    func testWithoutATrackerTheGlowFallsBackToTheCardsDisplay() {
         let s = service(enabled: false)
         let fallback = Self.cardScreen
         XCTAssertEqual(s.locateScreen(nil, fallback), fallback)
