@@ -3,9 +3,12 @@ import Foundation
 import CoreGraphics
 #endif
 
-/// Which display gets the glow: the one holding the call app's largest normal window, else the
-/// card's display. Window owner PIDs and bounds come from CGWindowListCopyWindowInfo (no window
-/// titles, so no Screen Recording permission is needed for this).
+/// Which display gets the glow, else the card's display. Window owner PIDs, numbers and bounds come
+/// from CGWindowListCopyWindowInfo (no window titles, so no Screen Recording permission is needed).
+///
+/// Two rules, chosen by the `callWindowBinding` flag in the app. Off (main): `screen(appKey:...)`, the
+/// display holding the call app's largest normal window. On: `screen(callWindow:...)`, the display
+/// holding the call's own window (`CallWindowSelector`), never an app's home window.
 public enum CallDisplay {
     public struct WindowInfo: Equatable, Sendable {
         public var bundleId: String?
@@ -25,8 +28,9 @@ public enum CallDisplay {
         CGRect(x: cg.minX, y: primaryHeight - cg.maxY, width: cg.width, height: cg.height)
     }
 
-    /// Screen (Cocoa frame) for the glow. `appKey` is the session's app (lowercased bundle ID);
-    /// helpers count via `BundleIds.belongs`. Falls back to `fallback` (the card's screen).
+    /// The largest-window rule (flag off). Screen (Cocoa frame) for the glow. `appKey` is the session's
+    /// app (lowercased bundle ID); helpers count via `BundleIds.belongs`. Falls back to `fallback`
+    /// (the card's screen).
     public static func screen(appKey: String?, windows: [WindowInfo], screens: [CGRect],
                               primaryHeight: CGFloat, fallback: CGRect?) -> CGRect? {
         if let appKey {
@@ -39,6 +43,18 @@ public enum CallDisplay {
                 if let s = screens.max(by: { area($0.intersection(r)) < area($1.intersection(r)) }), area(s.intersection(r)) > 0 {
                     return s
                 }
+            }
+        }
+        return fallback ?? screens.first
+    }
+
+    /// Screen (Cocoa frame) for the glow: the display that holds most of `callWindow` (CG
+    /// coordinates, from `CallWindowSelector.target`), else `fallback` (the card's screen).
+    public static func screen(callWindow: CGRect?, screens: [CGRect], primaryHeight: CGFloat, fallback: CGRect?) -> CGRect? {
+        if let callWindow {
+            let r = cocoaRect(callWindow, primaryHeight: primaryHeight)
+            if let s = screens.max(by: { area($0.intersection(r)) < area($1.intersection(r)) }), area(s.intersection(r)) > 0 {
+                return s
             }
         }
         return fallback ?? screens.first

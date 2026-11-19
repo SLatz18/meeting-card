@@ -45,6 +45,10 @@ final class CoachController: NSObject {
     let keyGate: CoachKeyGate
     /// App-level call state for the service; reads nothing while the setting is off.
     let callControls: CallControlsProvider
+    /// The call's window (the meeting window, never a call app's home window), shared by the glow's
+    /// display and Zoom's in-meeting state. Nil unless the `callWindowBinding` flag is on: the call
+    /// app's largest window, as before.
+    let callWindows: CallWindowTracker?
     /// The coach card's Mute in Zoom control (Zoom only: one press on Zoom's own Mute/Unmute item;
     /// Meet: unavailable, mute in Meet), hosted by the card and pill. Not the coach's own Mute.
     private(set) lazy var callControlsModel = CallControlsModel(provider: callControls, sessionAppKey: { [weak self] in
@@ -99,7 +103,11 @@ final class CoachController: NSObject {
         self.showsStatusItem = showsStatusItem
         transcript = CoachTranscript(defaults: defaults, store: transcriptStore)
         config = try ListenMoreConfig.load(overrides: Self.configOverrides)
-        callControls = .live(config: config)
+        switch CallWindowRule.resolve(FeatureFlags(defaults: defaults)) {
+        case .largestWindow: callWindows = nil
+        case .boundWindow: callWindows = CallWindowTracker(config: config)
+        }
+        callControls = .live(config: config, callWindows: callWindows)
         super.init()
         callControls.isEnabled = callControlsOn
         callControlsModel.onChange = { [weak self] in self?.refresh() }
@@ -260,7 +268,8 @@ final class CoachController: NSObject {
         let engine = LocalCoachEngine(transports: .urlSession(), judgeKeys: typeSafeKeychain,
                                       judgeProvider: { Self.storedJudgeProvider(defaults) })
         let s = CoachService(config: config, glowStyle: Self.glowStyle(), enabled: true, anyApp: anyApp,
-                             allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine)
+                             allowlist: allowlist, keys: keyGate, callState: callControls, engine: engine,
+                             callWindows: callWindows)
         #if MEETINGCARD_TEST_ID
         CoachDebugReadout.shared.attach(mic: s.mic as? MicCapture, coach: self)
         #endif

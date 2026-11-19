@@ -33,6 +33,12 @@ public protocol CallControlsReader: AnyObject {
     /// Lowercased bundle ID, as `TriggerSettings.appKey` makes them.
     var appKey: String { get }
     func read() -> CallObservation
+    /// Forget anything kept between readings (the provider was switched off and on).
+    func reset()
+}
+
+extension CallControlsReader {
+    public func reset() {}
 }
 
 /// Turns readings over time into call states: `started` / `muted` while in a call, `ended` for
@@ -88,6 +94,7 @@ public final class CallControlsProvider: CallStateProvider, @unchecked Sendable 
     private var generation = 0
     private var inFlight = false
     private var lastIssues: [String: CallControlsIssue] = [:]
+    private var lastHints: [String: CallWindowHint] = [:]
 
     /// - Parameter endedHoldS: how long an ended call is reported (the trigger stops after
     ///   `endedStopAfterS`; hosts pass `trigger.stop_after_s`, after which Core Audio decides anyway).
@@ -108,6 +115,8 @@ public final class CallControlsProvider: CallStateProvider, @unchecked Sendable 
                 generation += 1
                 tracker.reset()
                 lastIssues = [:]
+                lastHints = [:]
+                readers.forEach { $0.reset() }
             }
         }
     }
@@ -134,6 +143,9 @@ public final class CallControlsProvider: CallStateProvider, @unchecked Sendable 
         return states
     }
 
+    /// Which window holds the call, per browser, from the last reading (`CallWindowSelector`).
+    public var windowHints: [String: CallWindowHint] { lock.withLock { enabled ? lastHints : [:] } }
+
     /// The last reading, without starting a refresh.
     public var currentStates: [String: CallState] { lock.withLock { enabled ? tracker.states : [:] } }
 
@@ -147,16 +159,27 @@ public final class CallControlsProvider: CallStateProvider, @unchecked Sendable 
     public func refresh() {
         let gen = lock.withLock { enabled ? generation : nil }
         guard let gen else { return }
-        let readings = readers.map { ($0.appKey, $0.read()) }
+        let readings = readers.map { ($0.appKey, $0.read(), ($0 as? CallWindowHinting)?.windowHint) }
         let now = clock()
         lock.withLock {
             guard enabled, gen == generation else { return }
-            for (key, o) in readings {
+            for (key, o, hint) in readings {
+                lastHints[key] = hint
                 tracker.observe(key, o, now: now)
                 if case .unavailable(let issue) = o { lastIssues[key] = issue } else { lastIssues[key] = nil }
             }
         }
     }
+}
+
+/// A value behind a lock, for the little state a reader keeps between readings.
+final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) { self.value = value }
+
+    func withValue<R>(_ body: (inout Value) -> R) -> R { lock.withLock { body(&value) } }
 }
 
 // MARK: Zoom
@@ -212,6 +235,21 @@ public final class ZoomControlsReader: CallControlsReader {
 
     public let appKey = ZoomControlsReader.bundleId
     private let ax: ZoomAccessibility
+    /// Whether the call's window (`CallWindowSelector`) still exists; nil when none is bound.
+    /// Zoom's menu bar can follow its key window, so with the home window in front the in-meeting
+    /// shortcuts may be missing while the meeting goes on: that alone never reads as ended.
+    public var callWindowPresent: (() -> Bool?)?
+
+    /// What survives between readings. `epoch` changes on `reset()`, so a read that was already in
+    /// flight when the provider switched off and on can't write its result back.
+    private struct Memory {
+        var epoch = 0
+        /// The last mute reading, kept while the shortcuts are hidden by the home window in front.
+        var lastMuted: Bool?
+        /// The last reading was held (no shortcuts, the meeting window still there), not read.
+        var held = false
+    }
+    private let memory = LockedBox(Memory())
 
     public init(ax: ZoomAccessibility) {
         self.ax = ax
@@ -219,13 +257,51 @@ public final class ZoomControlsReader: CallControlsReader {
 
     public var isTrusted: Bool { ax.isTrusted }
 
+    /// The last reading was a held one: the call goes on, but Zoom's menu has no ⇧⌘A item to press,
+    /// so Mute in Zoom can't act (`CallControlsModel.muteUnavailableReason`).
+    public var isHeld: Bool { memory.withValue { $0.held } }
+
+    public func reset() {
+        memory.withValue {
+            $0.epoch += 1
+            $0.lastMuted = nil
+            $0.held = false
+        }
+    }
+
     public func read() -> CallObservation {
-        guard ax.isTrusted else { return .unavailable(.accessibilityDenied) }
-        guard ax.isRunning else { return .noCall }
-        guard let items = ax.menuShortcuts() else { return .unavailable(.readFailed) }
+        let epoch = memory.withValue { $0.epoch }
+        func remember(muted: Bool?, held: Bool) {
+            memory.withValue {
+                guard $0.epoch == epoch else { return }
+                $0.lastMuted = muted
+                $0.held = held
+            }
+        }
+        guard ax.isTrusted else {
+            remember(muted: memory.withValue { $0.lastMuted }, held: false)
+            return .unavailable(.accessibilityDenied)
+        }
+        guard ax.isRunning else {
+            remember(muted: nil, held: false)
+            return .noCall
+        }
+        guard let items = ax.menuShortcuts() else {
+            remember(muted: memory.withValue { $0.lastMuted }, held: false)
+            return .unavailable(.readFailed)
+        }
         let inMeeting = items.contains { i in Self.meetingShortcuts.contains { i.matches(key: $0.key, modifiers: $0.modifiers) } }
-        guard inMeeting else { return .noCall }
+        guard inMeeting else {
+            if callWindowPresent?() == true {
+                let muted = memory.withValue { $0.lastMuted }
+                remember(muted: muted, held: true)
+                return .inCall(muted: muted)
+            }
+            remember(muted: nil, held: false)
+            return .noCall
+        }
         let audio = items.first { $0.matches(key: Self.audioToggle.key, modifiers: Self.audioToggle.modifiers) }
+        remember(muted: audio?.offersUnmute, held: false)
         return .inCall(muted: audio?.offersUnmute)
     }
 
@@ -274,38 +350,56 @@ public protocol AppleScriptRunner: AnyObject {
     func run(_ source: String, bundleId: String) -> ScriptOutcome
 }
 
+/// A reader that can also say which of its app's windows holds the call.
+public protocol CallWindowHinting: AnyObject {
+    /// From the last `read()`; nil when no single visible window holds the call.
+    var windowHint: CallWindowHint? { get }
+}
+
 /// A Google Meet meeting tab in a browser (Chrome, Dia): in a call while at least one tab's URL is a
 /// meet.google.com meeting. The browser filters its tabs to the Meet host itself and the script
 /// returns only a count (`MeetScript`). Meet's mute state isn't readable without page content, so
 /// it is never reported. A browser whose scripting can't answer falls back to Core Audio.
-public final class MeetTabReader: CallControlsReader {
+///
+/// With `windowHints` (the `callWindowBinding` flag) the script also says which browser window holds
+/// the meeting (`windowHint`); without it the script is the count-only one and there is no hint.
+public final class MeetTabReader: CallControlsReader, CallWindowHinting {
     public let bundleId: String
     public let appKey: String
     public let scripts: [String]
     private let runner: AppleScriptRunner
     private var working: Int?
+    private let windowHints: Bool
+    public private(set) var windowHint: CallWindowHint?
 
-    /// - Parameter scripts: tried in order until one compiles and runs (e.g. Dia with and without spaces).
-    public init(bundleId: String, scripts: [String], runner: AppleScriptRunner) {
+    /// - Parameters:
+    ///   - scripts: tried in order until one compiles and runs (e.g. Dia with and without spaces).
+    ///   - windowHints: the scripts are the window-rank ones (`MeetScript.source(windowRank:)`) and
+    ///     their result is decoded for `windowHint`.
+    public init(bundleId: String, scripts: [String], runner: AppleScriptRunner, windowHints: Bool = false) {
         self.bundleId = bundleId
         appKey = bundleId.lowercased()
         self.scripts = scripts
         self.runner = runner
+        self.windowHints = windowHints
     }
 
-    public static func chrome(runner: AppleScriptRunner) -> MeetTabReader {
+    public static func chrome(runner: AppleScriptRunner, windowHints: Bool = false) -> MeetTabReader {
         let id = "com.google.Chrome"
-        return MeetTabReader(bundleId: id, scripts: [MeetScript.source(bundleId: id, spaces: false)], runner: runner)
+        return MeetTabReader(bundleId: id, scripts: [MeetScript.source(bundleId: id, spaces: false, windowRank: windowHints)],
+                             runner: runner, windowHints: windowHints)
     }
 
     /// Dia lists a window's tabs for its active space only, so the first script walks every space.
-    public static func dia(runner: AppleScriptRunner) -> MeetTabReader {
+    public static func dia(runner: AppleScriptRunner, windowHints: Bool = false) -> MeetTabReader {
         let id = "company.thebrowser.dia"
-        return MeetTabReader(bundleId: id, scripts: [MeetScript.source(bundleId: id, spaces: true),
-                                                     MeetScript.source(bundleId: id, spaces: false)], runner: runner)
+        return MeetTabReader(bundleId: id, scripts: [MeetScript.source(bundleId: id, spaces: true, windowRank: windowHints),
+                                                     MeetScript.source(bundleId: id, spaces: false, windowRank: windowHints)],
+                             runner: runner, windowHints: windowHints)
     }
 
     public func read() -> CallObservation {
+        windowHint = nil
         switch runner.permission(bundleId: bundleId) {
         case .notRunning: return .noCall
         case .denied: return .unavailable(.automationDenied)
@@ -315,9 +409,14 @@ public final class MeetTabReader: CallControlsReader {
         var lastCode = 0
         for i in (working.map { [$0] } ?? Array(scripts.indices)) {
             switch runner.run(scripts[i], bundleId: bundleId) {
-            case .count(let n):
+            case .count(let v):
                 working = i
-                return n > 0 ? .inCall(muted: nil) : .noCall
+                guard windowHints else { return v > 0 ? .inCall(muted: nil) : .noCall }
+                let r = MeetScript.decode(v)
+                if r.meetingTabs > 0, r.holdingRank > 0 {
+                    windowHint = CallWindowHint(rank: r.holdingRank, visibleWindows: r.visibleWindows)
+                }
+                return r.meetingTabs > 0 ? .inCall(muted: nil) : .noCall
             case .failed(let code):
                 lastCode = code
                 if code == MeetScript.notRunning { return .noCall }
@@ -392,16 +491,49 @@ public enum MeetScript {
     end countMeetings
     """
 
-    /// - Parameter spaces: Dia: walk each window's spaces (`profiles`), whose tabs a window doesn't list.
-    public static func source(bundleId: String, spaces: Bool) -> String {
+    /// The script's one integer: meeting tabs (capped at 999) + 1000 x the 1-based rank, among the
+    /// browser's visible (not minimized) windows in z-order, of the one window holding them (0 when
+    /// none, several, or it is minimized) + 1,000,000 x the number of visible windows.
+    public static func decode(_ v: Int) -> (meetingTabs: Int, holdingRank: Int, visibleWindows: Int) {
+        (v % 1000, (v / 1000) % 1000, v / 1_000_000)
+    }
+
+    /// - Parameters:
+    ///   - spaces: Dia: walk each window's spaces (`profiles`), whose tabs a window doesn't list.
+    ///   - windowRank: also report which visible window holds the meeting (see `decode`); false is the
+    ///     count-only script.
+    public static func source(bundleId: String, spaces: Bool, windowRank: Bool = false) -> String {
         func meetTabs(_ container: String) -> String { meetTabURLs.replacingOccurrences(of: "<container>", with: container) }
+        guard windowRank else {
+            let perWindow = spaces
+                ? """
+                \t\t\trepeat with p in profiles of w
+                \t\t\t\tset n to n + (my countMeetings(\(meetTabs("p"))))
+                \t\t\tend repeat
+                """
+                : "\t\t\tset n to n + (my countMeetings(\(meetTabs("w"))))"
+            return """
+            \(handler)
+
+            if application id "\(bundleId)" is not running then return 0
+            with timeout of 2 seconds
+            \ttell application id "\(bundleId)"
+            \t\tset n to 0
+            \t\trepeat with w in windows
+            \(perWindow)
+            \t\tend repeat
+            \t\treturn n
+            \tend tell
+            end timeout
+            """
+        }
         let perWindow = spaces
             ? """
             \t\t\trepeat with p in profiles of w
-            \t\t\t\tset n to n + (my countMeetings(\(meetTabs("p"))))
+            \t\t\t\tset k to k + (my countMeetings(\(meetTabs("p"))))
             \t\t\tend repeat
             """
-            : "\t\t\tset n to n + (my countMeetings(\(meetTabs("w"))))"
+            : "\t\t\tset k to k + (my countMeetings(\(meetTabs("w"))))"
         return """
         \(handler)
 
@@ -409,10 +541,30 @@ public enum MeetScript {
         with timeout of 2 seconds
         \ttell application id "\(bundleId)"
         \t\tset n to 0
+        \t\tset nVisible to 0
+        \t\tset nHolding to 0
+        \t\tset holdingRank to 0
         \t\trepeat with w in windows
+        \t\t\tset isMin to false
+        \t\t\ttry
+        \t\t\t\tset isMin to (minimized of w) as boolean
+        \t\t\tend try
+        \t\t\tif not isMin then set nVisible to nVisible + 1
+        \t\t\tset k to 0
         \(perWindow)
+        \t\t\tif k > 0 then
+        \t\t\t\tset n to n + k
+        \t\t\t\tset nHolding to nHolding + 1
+        \t\t\t\tif isMin then
+        \t\t\t\t\tset holdingRank to 0
+        \t\t\t\telse
+        \t\t\t\t\tset holdingRank to nVisible
+        \t\t\t\tend if
+        \t\t\tend if
         \t\tend repeat
-        \t\treturn n
+        \t\tif nHolding is not 1 then set holdingRank to 0
+        \t\tif n > 999 then set n to 999
+        \t\treturn n + 1000 * holdingRank + 1000000 * nVisible
         \tend tell
         end timeout
         """

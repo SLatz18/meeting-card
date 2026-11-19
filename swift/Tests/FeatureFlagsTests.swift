@@ -70,6 +70,53 @@ final class FeatureFlagsTests: XCTestCase {
         }
     }
 
+    /// A default-true flag with no stored key reads true; a stored false still wins. `bool(forKey:)` read the
+    /// missing key as false. No registered flag defaults on, so this drives the read with a test-local key.
+    func testADefaultTrueFlagWithAMissingKeyReadsTrue() {
+        let key = "flag.testLocalDefaultTrue"
+        XCTAssertNil(defaults.object(forKey: key))
+        XCTAssertTrue(FeatureFlags.read(defaults, key: key, defaultValue: true), "missing key: the default")
+        XCTAssertFalse(FeatureFlags.read(defaults, key: key, defaultValue: false))
+        defaults.set(false, forKey: key)
+        XCTAssertFalse(FeatureFlags.read(defaults, key: key, defaultValue: true), "a stored false wins over a true default")
+        defaults.set(true, forKey: key)
+        XCTAssertTrue(FeatureFlags.read(defaults, key: key, defaultValue: false), "a stored true wins over a false default")
+        defaults.set("yes", forKey: key)
+        XCTAssertTrue(FeatureFlags.read(defaults, key: key, defaultValue: true), "a stored value that is not a boolean is no answer: the default")
+        XCTAssertFalse(FeatureFlags.read(defaults, key: key, defaultValue: false))
+    }
+
+    /// A stored 1 is a boolean true; the string YES is not one, so with a false default it reads false
+    /// (`bool(forKey:)` reads YES as true).
+    func testANumberOneReadsTrueAndTheStringYESReadsTheDefault() {
+        let key = "flag.testLocalNumberAndString"
+        defaults.set(1, forKey: key)
+        XCTAssertTrue(FeatureFlags.read(defaults, key: key, defaultValue: false), "a stored 1 wins")
+        defaults.set(0, forKey: key)
+        XCTAssertFalse(FeatureFlags.read(defaults, key: key, defaultValue: true), "a stored 0 wins")
+        defaults.set("YES", forKey: key)
+        XCTAssertFalse(FeatureFlags.read(defaults, key: key, defaultValue: false), "the string YES is not a boolean: the default")
+        XCTAssertTrue(defaults.bool(forKey: key), "bool(forKey:) would have said true")
+    }
+
+    /// Through the public path: the string YES stored under the real flag key leaves it off.
+    /// `bool(forKey:)` returns true for it, so this fails if `isEnabled` goes back to that read.
+    func testTheStringYESUnderTheRealKeyLeavesTheFlagOff() {
+        defaults.set("YES", forKey: "flag.callWindowBinding")
+        XCTAssertTrue(defaults.bool(forKey: "flag.callWindowBinding"), "what bool(forKey:) would have read")
+        XCTAssertFalse(FeatureFlags(defaults: defaults).isEnabled(.callWindowBinding))
+        defaults.set(true, forKey: "flag.callWindowBinding")
+        XCTAssertTrue(FeatureFlags(defaults: defaults).isEnabled(.callWindowBinding))
+    }
+
+    /// The registry's own read goes through the same path as the test-local key above.
+    func testRegisteredFlagsReadTheirDefaultWhenTheKeyIsMissing() {
+        for flag in FeatureFlag.allCases {
+            XCTAssertNil(defaults.object(forKey: flag.defaultsKey))
+            XCTAssertEqual(FeatureFlags(defaults: defaults).isEnabled(flag), flag.defaultValue)
+        }
+    }
+
     /// The helper passes for a gate that reads its flags and is inert while every flag is off.
     func testAllOffHelperAcceptsAnInertGate() {
         assertAllOffMatchesMain({ flags in

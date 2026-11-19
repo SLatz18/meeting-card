@@ -226,8 +226,29 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         public var stopAfterS: Double
         /// Stop delay once an app-level call-state provider reports the call ended.
         public var endedStopAfterS: Double
+        /// The call's window is the one that appeared no earlier than this before the session
+        /// started (`CallWindowSelector`), so a call app's home window never counts. A config without
+        /// the key reads `defaultCallWindowLookbackS`, the built-in value.
+        public var callWindowLookbackS: Double
         /// Never trigger on these, in any mode (the host adds its own bundle ID).
         public var excludeBundleIds: [String]
+
+        /// The built-in `call_window_lookback_s` (`DefaultConfig`).
+        public static let defaultCallWindowLookbackS = 60.0
+
+        private enum CodingKeys: String, CodingKey {
+            case pollS, startAfterS, stopAfterS, endedStopAfterS, callWindowLookbackS, excludeBundleIds
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            pollS = try c.decode(Double.self, forKey: .pollS)
+            startAfterS = try c.decode(Double.self, forKey: .startAfterS)
+            stopAfterS = try c.decode(Double.self, forKey: .stopAfterS)
+            endedStopAfterS = try c.decode(Double.self, forKey: .endedStopAfterS)
+            callWindowLookbackS = try c.decodeIfPresent(Double.self, forKey: .callWindowLookbackS) ?? Self.defaultCallWindowLookbackS
+            excludeBundleIds = try c.decode([String].self, forKey: .excludeBundleIds)
+        }
     }
 
     public var audio: Audio
@@ -291,7 +312,8 @@ public struct ListenMoreConfig: Decodable, Equatable, Sendable {
         guard gpt.store == false else { throw ConfigError.invalid("gpt.store must be false") }
         try judge.typesafe.validate()
         guard trigger.startAfterS >= 0, trigger.stopAfterS > 0, trigger.pollS > 0,
-              trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS else { throw ConfigError.invalid("bad trigger timing") }
+              trigger.endedStopAfterS > 0, trigger.endedStopAfterS <= trigger.stopAfterS,
+              trigger.callWindowLookbackS > 0 else { throw ConfigError.invalid("bad trigger timing") }
     }
 
     public static func jsonObject(_ data: Data) throws -> [String: Any] {

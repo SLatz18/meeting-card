@@ -4,23 +4,24 @@ import Foundation
 ///
 /// Adding a flag is three small edits and nothing else (see "Feature flags" in the README):
 ///   1. add a `case` below, with a one-line comment saying what it gates;
-///   2. give it a default in `defaultValue` (always `false`: a flag lands OFF);
+///   2. give it a default in `defaultValue` (a flag lands OFF, so `false`);
 ///   3. gate the behavior at ONE entry point with `FeatureFlags(defaults:).isEnabled(.yourFlag)`.
+///
 /// The raw value is the flag's id; its UserDefaults key is `flag.<id>`.
 ///
-/// A flag is read the way the coach settings are, `defaults.bool(forKey:)` on the injected
-/// `UserDefaults` (the app's own domain, `.standard`). Nothing writes it and there is no Settings
-/// row; a missing key reads false. Because every flag defaults off, `defaultValue` is what the
-/// registry documents and the tests pin, and the read agrees with it.
+/// A flag is read from the injected `UserDefaults` (the app's own domain, `.standard`): a stored boolean
+/// (or a 0/1 number) wins, and anything else, a missing key or any other stored value (including the
+/// string YES), reads the flag's `defaultValue`. Set it with `defaults write ... -bool`. Nothing writes
+/// it and there is no Settings row.
 public enum FeatureFlag: String, CaseIterable, Sendable {
-    /// Test-only placeholder so the registry has a case (the type, the default test and the all-off
-    /// helper need one). Gates nothing. The first real flag must delete it.
-    case testOnlyPlaceholder
+    /// Ties the call coach to the call's own window instead of the call app's largest window (the glow's
+    /// display, and Zoom staying in a meeting while its home window is in front). Off: the largest-window rule.
+    case callWindowBinding
 
-    /// What the flag is when the key is absent. Every flag defaults OFF.
+    /// What the flag is when the key is absent. A flag lands OFF.
     public var defaultValue: Bool {
         switch self {
-        case .testOnlyPlaceholder: return false
+        case .callWindowBinding: return false
         }
     }
 
@@ -38,7 +39,7 @@ public struct FeatureFlags {
 
     private let source: Source
 
-    /// Flags as stored in `defaults` (an absent key reads false, every flag's default).
+    /// Flags as stored in `defaults` (an absent key reads the flag's `defaultValue`).
     public init(defaults: UserDefaults) { source = .defaults(defaults) }
 
     /// Every flag off, whatever is stored: the configuration that must behave exactly like main.
@@ -52,7 +53,14 @@ public struct FeatureFlags {
         case .allOff:
             return false
         case .defaults(let defaults):
-            return defaults.bool(forKey: flag.defaultsKey)
+            return Self.read(defaults, key: flag.defaultsKey, defaultValue: flag.defaultValue)
         }
+    }
+
+    /// A stored boolean (or 0/1 number), else `defaultValue`. `bool(forKey:)` would read a missing key as
+    /// false, and the string YES as true, so it could neither express a default-true flag nor ignore YES. Internal so a test can exercise a default-true key
+    /// without a default-true flag in the registry.
+    static func read(_ defaults: UserDefaults, key: String, defaultValue: Bool) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? defaultValue
     }
 }

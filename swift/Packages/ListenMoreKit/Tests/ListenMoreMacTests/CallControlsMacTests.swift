@@ -34,8 +34,10 @@ final class CallControlsMacTests: XCTestCase {
         let id = "com.google.Chrome"
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) != nil else { throw XCTSkip("Chrome not installed") }
         guard NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty else { throw XCTSkip("Chrome is running") }
-        let source = try XCTUnwrap(MeetTabReader.chrome(runner: OSAScriptRunner()).scripts.first)
-        XCTAssertEqual(OSAScriptRunner().run(source, bundleId: id), .count(0))
+        for hints in [false, true] {
+            let source = try XCTUnwrap(MeetTabReader.chrome(runner: OSAScriptRunner(), windowHints: hints).scripts.first)
+            XCTAssertEqual(OSAScriptRunner().run(source, bundleId: id), .count(0), "window hints \(hints)")
+        }
         XCTAssertTrue(NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty, "Chrome was not launched")
     }
 
@@ -61,5 +63,42 @@ final class CallControlsMacTests: XCTestCase {
         XCTAssertFalse(p.isEnabled)
         XCTAssertTrue(p.callStates().isEmpty)
         XCTAssertEqual(p.readers.map(\.appKey), ["us.zoom.xos", "com.google.chrome", "company.thebrowser.dia"])
+    }
+
+    /// The real window tracker reads nothing while no tracked app runs and never invents a target.
+    func testCallWindowTrackerWithNoCallAppRunning() {
+        let t = CallWindowTracker(lookbackS: 60)
+        XCTAssertTrue(CallWindowTracker.windows(appKeys: ["com.example.notinstalled"]).isEmpty)
+        t.update(session: (appKey: "com.example.notinstalled", startedAt: 0), appKeys: ["com.example.notinstalled"],
+                 browserKeys: [], alwaysOnKeys: [], hints: [:])
+        XCTAssertNil(t.target(appKey: "com.example.notinstalled"))
+        XCTAssertNil(t.callWindowPresent(appKey: "com.example.notinstalled"))
+        XCTAssertEqual(CallDisplayLocator.screen(callWindow: nil, fallback: NSRect(x: 1, y: 2, width: 3, height: 4)),
+                       NSRect(x: 1, y: 2, width: 3, height: 4), "nothing identified: the card's display")
+    }
+
+    func testZoomReaderGetsTheMeetingWindowSignal() throws {
+        let t = CallWindowTracker(lookbackS: 60)
+        let p = CallControlsProvider.live(config: try .builtIn(), callWindows: t)
+        let zoom = try XCTUnwrap(p.readers.first as? ZoomControlsReader)
+        XCTAssertNotNil(zoom.callWindowPresent)
+        XCTAssertNil(zoom.callWindowPresent?() ?? nil, "nothing bound yet")
+    }
+
+    /// Flag off (no tracker): Zoom has no window signal and the Meet scripts are the count-only ones.
+    func testLiveWithoutATrackerIsTheMenuOnlyAndCountOnlyProvider() throws {
+        let p = CallControlsProvider.live(config: try .builtIn())
+        let zoom = try XCTUnwrap(p.readers.first as? ZoomControlsReader)
+        XCTAssertNil(zoom.callWindowPresent)
+        let chrome = try XCTUnwrap(p.readers.compactMap { $0 as? MeetTabReader }.first { $0.bundleId == "com.google.Chrome" })
+        XCTAssertEqual(chrome.scripts, [MeetScript.source(bundleId: "com.google.Chrome", spaces: false)])
+        XCTAssertFalse(chrome.scripts.joined().contains("minimized"))
+    }
+
+    /// Flag on (a tracker): the Meet scripts also report the window holding the meeting.
+    func testLiveWithATrackerAsksMeetForTheWindow() throws {
+        let p = CallControlsProvider.live(config: try .builtIn(), callWindows: CallWindowTracker(lookbackS: 60))
+        let chrome = try XCTUnwrap(p.readers.compactMap { $0 as? MeetTabReader }.first { $0.bundleId == "com.google.Chrome" })
+        XCTAssertEqual(chrome.scripts, [MeetScript.source(bundleId: "com.google.Chrome", spaces: false, windowRank: true)])
     }
 }
